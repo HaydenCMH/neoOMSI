@@ -1,7 +1,5 @@
 mod admin;
 mod ambience;
-#[cfg(target_os = "android")]
-mod android;
 mod camera_arm;
 mod career;
 mod describe;
@@ -35,6 +33,7 @@ mod radio;
 mod rail_drive;
 mod touch;
 mod updater;
+mod voice;
 mod vr_navigator;
 
 mod puddles;
@@ -42,6 +41,8 @@ mod quit;
 mod rain;
 mod real_time;
 mod run_statistics;
+#[cfg(all(feature = "devtools", debug_assertions))]
+mod sampler;
 mod scene;
 mod schedule;
 mod schedule_paper;
@@ -66,6 +67,8 @@ mod controllers;
 mod dinput;
 mod duty_start;
 mod editor_ctl;
+#[cfg(target_os = "linux")]
+mod evdev_axes;
 #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
 mod evdev_ff;
 mod game_link;
@@ -181,6 +184,8 @@ pub fn run() -> Result<()> {
     if protocol {
         return control::run();
     }
+    #[cfg(all(feature = "devtools", debug_assertions))]
+    sampler::start();
     log::info!(
         "neoOMSI {VERSION}, build {BUILD}{}",
         if std::env::var_os("MallocLargeCache").is_some() {
@@ -508,6 +513,7 @@ pub(crate) fn make_app(
         humans_populate_t: 0.0,
         radio: radio::Radio::load(&args_root_for_keys),
         profile: Default::default(),
+        redraw_ended: None,
         profile_prev: Default::default(),
         first_populate: true,
         envir: None,
@@ -561,6 +567,7 @@ pub(crate) fn make_app(
         clock_hold: 0.0,
         pad_look: [false; 4],
         teleport_pick: false,
+        teleport_down: None,
         discord: None,
         discord_next_update: Instant::now(),
         headtrack: None,
@@ -634,6 +641,7 @@ pub(crate) fn make_app(
         cloud_drift: [0.0; 2],
         menu_edit: None,
         menu_edit_icao: false,
+        menu_edit_date: false,
         swap_pending: false,
         menu_drag: None,
         menu_kbd: true,
@@ -645,6 +653,7 @@ pub(crate) fn make_app(
         cursor_kind: 0,
         lan: None,
         remotes: Default::default(),
+        voice: Default::default(),
         spikes: 0,
         worst_ms: 0.0,
         governor: (0.0, 0, 0.0),
@@ -656,6 +665,8 @@ pub(crate) fn make_app(
         #[cfg(all(feature = "devtools", debug_assertions))]
         devtools: None,
         cpu_mark: None,
+        thread_cpu_mark: Vec::new(),
+        profile_mark: None,
         touch: touch::Touch::new(),
     };
     app.lan = lan;

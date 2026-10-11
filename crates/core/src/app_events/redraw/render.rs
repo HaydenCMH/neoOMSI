@@ -10,6 +10,13 @@ impl App {
         let Frame {
             now, raw_dt, dt, ..
         } = *f;
+        // (the last picture is submitted before this frame's pictures write to the card)
+        let __t = Instant::now();
+        if let Some(r) = self.renderer.as_ref() {
+            r.wait_submitted();
+            r.flush_deferred();
+        }
+        *self.profile.entry("wait submit").or_default() += __t.elapsed().as_secs_f64();
         #[cfg(all(feature = "devtools", debug_assertions))]
         self.dev_actions(event_loop);
         #[cfg(all(feature = "devtools", debug_assertions))]
@@ -95,6 +102,19 @@ impl App {
             self.service_msg = self.service_msg.take().filter(|(_, l)| *l > 0.0);
             if let Some(lan) = self.lan.as_ref() {
                 lines.extend(lan::hud_lines(lan, &self.remotes, self.player.as_ref()));
+                match (self.voice.sending(), self.voice.error.as_ref()) {
+                    (Some(radio), _) => lines.push(::i18n::translate(
+                        if radio { "pause.msg.voice_radio" } else { "pause.msg.voice_talking" },
+                        &[],
+                    )),
+                    (None, Some(e))
+                        if ::config::get_bool("voice", "enabled").unwrap_or(true)
+                            && lan.voice_allowed() =>
+                    {
+                        lines.push(::i18n::translate("pause.msg.voice_error", &[("error", e)]))
+                    }
+                    _ => {}
+                }
             }
             if let Some(h) = self.humans.as_ref() {
                 if let Some(hint) = h.hint() {
@@ -274,6 +294,7 @@ impl App {
                 } else {
                     None
                 };
+                let speaking = |id| self.voice.speaking(id);
                 let tags =
                     if !screenshot_mode && ::config::get_bool("ui", "name_tags").unwrap_or(true) {
                         self.camera.as_ref().map_or_else(Vec::new, |camera| {
@@ -284,6 +305,7 @@ impl App {
                                     w,
                                     h,
                                     Some(views.projections[1]),
+                                    &speaking,
                                 ),
                                 Some(views) => {
                                     let panel_width = surface_width / 3.0;
@@ -296,27 +318,29 @@ impl App {
                                                 panel_width,
                                                 h,
                                                 Some(views.projections[panel]),
+                                                &speaking,
                                             )
                                             .into_iter()
-                                            .filter(|((x, y), _, _, _)| {
+                                            .filter(|((x, y), ..)| {
                                                 *x >= 0.0
                                                     && *x < panel_width
                                                     && *y >= 0.0
                                                     && *y <= h
                                             })
-                                            .map(|((x, y), name, sub, alpha)| {
+                                            .map(|((x, y), name, sub, alpha, talking)| {
                                                 (
                                                     (x + panel_width * panel as f32, y),
                                                     name,
                                                     sub,
                                                     alpha,
+                                                    talking,
                                                 )
                                             }),
                                         );
                                     }
                                     tags
                                 }
-                                None => lan::name_tags(&self.remotes, camera, w, h),
+                                None => lan::name_tags(&self.remotes, camera, w, h, &speaking),
                             }
                         })
                     } else {
@@ -670,6 +694,8 @@ impl App {
                     }
                 }
                 let __t = Instant::now();
+                // (the mirrors' commands go out with the picture's, on the submit thread)
+                r.set_defer_views(frame.is_some());
                 if ::config::get_int("graphics", "mirror_size").unwrap_or(256) as u32 == 0 {
                     self.mirror_budget = 0.0;
                     self.mirrors_seen = 0;
@@ -790,6 +816,7 @@ impl App {
                         );
                     }
                 }
+                r.set_defer_views(false);
                 *self.profile.entry("mirrors").or_default() += __t.elapsed().as_secs_f64();
                 let __t = Instant::now();
                 #[cfg(windows)]
@@ -873,6 +900,16 @@ impl App {
                             &lighting,
                             ::config::get_bool("graphics", "triple_screen_hud").unwrap_or(true),
                         );
+                    } else if frame.is_some() {
+                        // (finished, submitted and presented on the submit thread)
+                        r.render_deferred(
+                            scene,
+                            &view,
+                            s.config.width,
+                            s.config.height,
+                            cam,
+                            &lighting,
+                        );
                     } else {
                         r.render(
                             scene,
@@ -925,6 +962,8 @@ impl App {
                         .as_ref()
                         .map_or(1.0, |w| w.scale_factor() as f32);
                     if self.lab_menu.is_none() {
+                        // (drawn over the picture: its commands go first)
+                        r.flush_deferred();
                         self.devtools
                             .get_or_insert_with(devtools::DevTools::new)
                             .render(r, &view, scale, &snap, &dev_extra);
@@ -942,9 +981,10 @@ impl App {
                         if ::config::get_bool("graphics", "vsync").unwrap_or(true) {
                             win.pre_present_notify();
                         }
-                        r.queue.present(frame);
+                        r.present(frame);
                     }
                     None => {
+                        r.flush_deferred();
                         let _ = ::render::wait_gpu(&r.device, None);
                     }
                 }
@@ -991,9 +1031,21 @@ impl App {
             }
             self.frames += 1;
             let profiling = ::legacy_config::env::var_os("OMSI_PROFILE").is_some();
-            if profiling && self.cpu_mark.is_none() && self.started.elapsed().as_secs_f32() > 15.0 {
+            // (from 15 s, or half of an automated run: its loading is not the steady frame)
+            let mark_at = self.args.exit_after.map_or(15.0, |l| (l * 0.5).max(15.0));
+            if profiling
+                && self.cpu_mark.is_none()
+                && self.started.elapsed().as_secs_f32() > mark_at
+            {
                 self.cpu_mark =
                     process_cpu_seconds().map(|c| (c, Instant::now(), self.total_frames));
+                self.thread_cpu_mark = thread_cpu_seconds();
+                self.profile_mark = Some(ProfileMark {
+                    frames: self.total_frames,
+                    stages: self.profile.clone(),
+                    render: r.stats.borrow().clone(),
+                    counts: r.counts.borrow().clone(),
+                });
             }
             if let (Some(limit), false) = (self.args.exit_after, self.exiting) {
                 if self.started.elapsed().as_secs_f32() > limit {
@@ -1031,18 +1083,48 @@ impl App {
                         st.stats.log_ground();
                     }
                     if ::legacy_config::env::var_os("OMSI_PROFILE").is_some() {
-                        let n = self.total_frames.max(1) as f64;
+                        // (over the frames after the mark when there is one: the loading
+                        // frames' work would be spread over the steady ones)
+                        type Totals = std::collections::BTreeMap<&'static str, f64>;
+                        let empty = Totals::new();
+                        let (n, stages0, render0, counts0) = match &self.profile_mark {
+                            Some(m) => {
+                                log::info!(
+                                    "profile: stages over the {} frames since the mark",
+                                    self.total_frames.saturating_sub(m.frames)
+                                );
+                                (
+                                    self.total_frames.saturating_sub(m.frames).max(1) as f64,
+                                    &m.stages,
+                                    &m.render,
+                                    &m.counts,
+                                )
+                            }
+                            None => (self.total_frames.max(1) as f64, &empty, &empty, &empty),
+                        };
+                        let since = |k: &&'static str, v: f64, at: &Totals| {
+                            v - at.get(k).copied().unwrap_or(0.0)
+                        };
                         for (k, v) in &self.profile {
-                            log::info!("profile {k:10}: {:.1} ms/frame", v / n * 1000.0);
+                            log::info!(
+                                "profile {k:10}: {:.2} ms/frame",
+                                since(k, *v, stages0) / n * 1000.0
+                            );
                         }
                         if let Some(h) = self.humans.as_ref() {
                             log::info!("profile people: {} ({})", h.people.len(), h.summary());
                         }
                         for (k, v) in r.stats.borrow().iter() {
-                            log::info!("profile render.{k:10}: {:.2} ms/frame", v / n * 1000.0);
+                            log::info!(
+                                "profile render.{k:10}: {:.2} ms/frame",
+                                since(k, *v, render0) / n * 1000.0
+                            );
                         }
                         for (k, v) in r.counts.borrow().iter() {
-                            log::info!("profile count {k}: {:.0} a frame", v / n);
+                            log::info!(
+                                "profile count {k}: {:.0} a frame",
+                                since(k, *v, counts0) / n
+                            );
                         }
                         for (pass, ms, frames) in r.gpu_pass_times() {
                             log::info!(
@@ -1054,11 +1136,42 @@ impl App {
                         {
                             let frames = self.total_frames.saturating_sub(f0).max(1) as f64;
                             log::info!(
-                                "profile: since 15 s {:.1} ms wall and {:.1} ms CPU (all threads) per frame, {:.1} cores busy",
+                                "profile: since the mark {:.1} ms wall and {:.1} ms CPU (all threads) per frame, {:.1} cores busy",
                                 t0.elapsed().as_secs_f64() / frames * 1000.0,
                                 (c1 - c0) / frames * 1000.0,
                                 (c1 - c0) / t0.elapsed().as_secs_f64().max(1e-3)
                             );
+                            let mut busy: Vec<(String, f64)> = thread_cpu_seconds()
+                                .into_iter()
+                                .map(|(id, name, secs)| {
+                                    let before = self
+                                        .thread_cpu_mark
+                                        .iter()
+                                        .find(|m| m.0 == id)
+                                        .map_or(0.0, |m| m.2);
+                                    let name = if name.is_empty() {
+                                        format!("#{id}")
+                                    } else {
+                                        name
+                                    };
+                                    (name, secs - before)
+                                })
+                                .filter(|(_, secs)| *secs / frames > 0.05e-3)
+                                .collect();
+                            busy.sort_by(|a, b| b.1.total_cmp(&a.1));
+                            for (name, secs) in busy.iter().take(16) {
+                                log::info!(
+                                    "profile thread {name}: {:.2} ms CPU per frame",
+                                    secs / frames * 1000.0
+                                );
+                            }
+                            if busy.len() > 16 {
+                                log::info!(
+                                    "profile thread ({} more): {:.2} ms CPU per frame",
+                                    busy.len() - 16,
+                                    busy[16..].iter().map(|b| b.1).sum::<f64>() / frames * 1000.0
+                                );
+                            }
                         }
                         let (sw, sh) = r.scene_size(s.config.width, s.config.height);
                         log::info!(

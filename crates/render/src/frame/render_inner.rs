@@ -2,6 +2,8 @@ use crate::*;
 
 /// An ordered vehicle's meshes share an origin and must retain their authored order. A
 /// recycled scene-instance id is not that order, so use it only for all other ties.
+const MAIN_PASS_PARTS: usize = 4;
+
 fn sort_blended_keys(keys: &mut [(u8, f32, [u64; 3], bool, u32, usize)]) {
     keys.sort_unstable_by(|a, b| {
         a.0.cmp(&b.0).then(b.1.total_cmp(&a.1)).then_with(|| {
@@ -18,6 +20,17 @@ fn set_output_viewport(pass: &mut wgpu::RenderPass<'_>, viewport: Option<(u32, u
     if let Some((x, y, width, height)) = viewport {
         pass.set_viewport(x as f32, y as f32, width as f32, height as f32, 0.0, 1.0);
         pass.set_scissor_rect(x, y, width, height);
+    }
+}
+
+fn view_render_origin(position: DVec3, current: DVec3, reuse: bool) -> DVec3 {
+    // Mirrors, stereo eyes and side panels share the scene buffers with the primary view.
+    // Crossing a cell boundary between views must not re-upload every static instance.
+    // A distant texture camera still rebases to keep its relative coordinates precise.
+    if reuse && (position - current).abs().max_element() <= 200.0 {
+        current
+    } else {
+        (position / 100.0).floor() * 100.0
     }
 }
 
@@ -77,10 +90,32 @@ impl Renderer {
                 view_formats: &[],
             });
         }
+        // (the last picture's commands go first: everything below writes to its buffers)
+        self.wait_submitted();
+        // Left for `present` (see gpu/submit.rs): the window picture drawn with
+        // `render_deferred`, and the mirrors drawn before it. Everything this call writes to a
+        // buffer is copied by its own first command buffer, so the pictures queued before it
+        // keep what they wrote.
+        let defer = self.submitter.is_some()
+            && if with_overlays {
+                std::mem::take(&mut *self.defer_next.get_mut())
+                    && lead_frame
+                    && output_viewport.is_none()
+            } else {
+                projection.is_none() && self.defer_views.get()
+            };
+        if !defer {
+            // (what is queued is drawn before this: the panels it shows, the mirrors)
+            self.flush_deferred();
+        }
         if self.gpu_error.load(std::sync::atomic::Ordering::Relaxed) {
             self.fall_back_to_single_sample(scene);
         }
-        self.collect_gpu_timers();
+        self.open_uploads();
+        // (a queued picture's timers are read once it is submitted)
+        if !self.has_queued() {
+            self.collect_gpu_timers();
+        }
         let tset: Option<wgpu::QuerySet> = self.gpu_timers[with_overlays as usize]
             .as_ref()
             .filter(|t| !t.waiting && !t.unresolved)
@@ -97,7 +132,12 @@ impl Renderer {
                 stage_t = now;
             }
         };
-        let ro = (camera.position / 100.0).floor() * 100.0;
+        let primary_view = (with_overlays && lead_frame) || (projection.is_some() && !second_eye);
+        let ro = view_render_origin(
+            camera.position,
+            scene.render_origin,
+            scene.model_buf.is_some() && !primary_view,
+        );
         self.set_render_origin(scene, ro);
         let (full_w, full_h) = (width, height);
         let (width, height) = if with_overlays {
@@ -170,9 +210,12 @@ impl Renderer {
         if !lighting.light_shadows {
             *self.spot_state.borrow_mut() = Default::default();
         }
+        stage(self, "setup", "mirror.setup");
         let grid = self.prepare_lights(scene, cam_rel, enhanced_frame, spot_plan);
+        stage(self, "setup.lights", "mirror.setup.lights");
         self.prepare_coronas(scene, lighting.night);
         self.prepare_smoke(scene, camera.position);
+        stage(self, "setup.coronas", "mirror.setup.coronas");
         let ao_on = with_overlays
             && self.options.ssao
             && self.ssao_pipeline.is_some()
@@ -227,7 +270,7 @@ impl Renderer {
                 if let Some((_, buf, _, last)) = scene.overlay_res.get_mut(k).filter(|o| o.0 == tex)
                 {
                     if *last != ndc {
-                        self.queue.write_buffer(buf, 0, bytemuck::cast_slice(&ndc));
+                        self.write_buffer(buf, 0, bytemuck::cast_slice(&ndc));
                         *last = ndc;
                     }
                     continue;
@@ -385,8 +428,7 @@ impl Renderer {
                 side as f32,
                 if side > 0.0 { 1.0 } else { 0.0 },
             ];
-            self.queue
-                .write_buffer(&self.lm_uniform, 0, bytemuck::cast_slice(&v));
+            self.write_buffer(&self.lm_uniform, 0, bytemuck::cast_slice(&v));
         }
         let (spot_vp, spot_info) = {
             let st = self.spot_state.borrow();
@@ -533,8 +575,7 @@ impl Renderer {
             spot_info,
             tune: [lighting.nightmap_gain, lighting.lightmap_gain, 0.0, 0.0],
         };
-        self.queue
-            .write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&cu));
+        self.write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&cu));
         let probe_redraw = enhanced
             && (lead_view || self.sky_state.is_none())
             && self.prepare_enhanced(lighting, cam_rel, ro, dt);
@@ -631,26 +672,7 @@ impl Renderer {
                         continue;
                     }
                 }
-                ranges.clear();
-                for (ri, (_, _, slot)) in m.ranges.iter().enumerate() {
-                    let mat_id = inst.materials.get(*slot as usize).copied().unwrap_or(0);
-                    let mat = &scene.materials[mat_id];
-                    let mut kind = kind_of(mat.alpha);
-                    let cut_body = kind == PIPE_BLEND && mat.transmap.is_some() && !mat.no_z_write;
-                    if (kind == PIPE_BLEND && !cut_body) || mat.no_z_check {
-                        if dbg_shadow && r >= dbg_r {
-                            log::info!(
-                                "shadow: mesh r={r:.1} at {:?} slot {slot} is blended, never a caster",
-                                inst.origin
-                            );
-                        }
-                        continue;
-                    }
-                    if cut_body {
-                        kind = PIPE_ALPHA_TEST;
-                    }
-                    ranges.push((kind, ri as u32, *slot, mat_id));
-                }
+                let mut receives = [false; SHADOW_SETS];
                 for (cascade, &(range, lvp, min_radius)) in boxes.iter().enumerate() {
                     if !active[cascade] {
                         continue;
@@ -678,22 +700,7 @@ impl Renderer {
                         }
                         continue;
                     }
-                    if dbg {
-                        log::info!(
-                            "shadow: caster r={r:.1} at {:?} slots {:?}",
-                            inst.origin,
-                            ranges.iter().map(|x| x.0).collect::<Vec<_>>()
-                        );
-                    }
-                    for &(kind, ri, slot, mat_id) in &ranges {
-                        out[cascade].push(DrawItem {
-                            pipe: kind,
-                            mesh: inst.mesh as u32,
-                            range: ri,
-                            material: depth_only_material(kind, mat_id),
-                            entry: inst.base + slot,
-                        });
-                    }
+                    receives[cascade] = true;
                 }
                 for &(k, lpos, ldir, half, far) in &spot_cull {
                     let v = c - lpos;
@@ -707,8 +714,46 @@ impl Renderer {
                             continue;
                         }
                     }
+                    receives[3 + k] = true;
+                }
+                // Most of a large map is outside all shadow cameras. Inspect its materials
+                // only after the unchanged geometric tests find a pass that needs it.
+                if !receives.iter().any(|&keep| keep) {
+                    continue;
+                }
+                ranges.clear();
+                for (ri, (_, _, slot)) in m.ranges.iter().enumerate() {
+                    let mat_id = inst.materials.get(*slot as usize).copied().unwrap_or(0);
+                    let mat = &scene.materials[mat_id];
+                    let mut kind = kind_of(mat.alpha);
+                    let cut_body = kind == PIPE_BLEND && mat.transmap.is_some() && !mat.no_z_write;
+                    if (kind == PIPE_BLEND && !cut_body) || mat.no_z_check {
+                        if dbg_shadow && r >= dbg_r {
+                            log::info!(
+                                "shadow: mesh r={r:.1} at {:?} slot {slot} is blended, never a caster",
+                                inst.origin
+                            );
+                        }
+                        continue;
+                    }
+                    if cut_body {
+                        kind = PIPE_ALPHA_TEST;
+                    }
+                    ranges.push((kind, ri as u32, *slot, mat_id));
+                }
+                if dbg_shadow && receives[0] && r >= dbg_r {
+                    log::info!(
+                        "shadow: caster r={r:.1} at {:?} slots {:?}",
+                        inst.origin,
+                        ranges.iter().map(|x| x.0).collect::<Vec<_>>()
+                    );
+                }
+                for (cascade, keep) in receives.into_iter().enumerate() {
+                    if !keep {
+                        continue;
+                    }
                     for &(kind, ri, slot, mat_id) in &ranges {
-                        out[3 + k].push(DrawItem {
+                        out[cascade].push(DrawItem {
                             pipe: kind,
                             mesh: inst.mesh as u32,
                             range: ri,
@@ -722,9 +767,9 @@ impl Renderer {
         };
         if active.iter().any(|a| *a) {
             let n = scene.instances.len();
-            let (parts, chunk) = split_parts(self.encoding_pool.as_ref(), n);
+            let (parts, chunk) = split_parts(self.encoding_pool.as_deref(), n);
             let mut found: [Vec<DrawItem>; SHADOW_SETS] = std::array::from_fn(|_| Vec::new());
-            for part in run_parts(self.encoding_pool.as_ref(), parts, |p| {
+            for part in run_parts(self.encoding_pool.as_deref(), parts, |p| {
                 casters(p * chunk..((p + 1) * chunk).min(n))
             }) {
                 for (a, b) in found.iter_mut().zip(part) {
@@ -944,10 +989,10 @@ impl Renderer {
             Some((i, z, inside))
         };
         let n = scene.instances.len();
-        let (parts, chunk) = split_parts(self.encoding_pool.as_ref(), n);
+        let (parts, chunk) = split_parts(self.encoding_pool.as_deref(), n);
         let (mut visible, mut found): (Vec<(usize, f32, bool)>, Vec<([u64; 4], f32)>) =
             (Vec::new(), Vec::new());
-        for (v, sizes) in run_parts(self.encoding_pool.as_ref(), parts, |p| {
+        for (v, sizes) in run_parts(self.encoding_pool.as_deref(), parts, |p| {
             let mut sizes = Vec::new();
             let v: Vec<_> = (p * chunk..((p + 1) * chunk).min(n))
                 .filter_map(|i| cull_one(i, &mut sizes))
@@ -1068,7 +1113,7 @@ impl Renderer {
             .iter()
             .any(|&(i, _, _)| scene.instances[i].presurface);
         let mut prepass_found: Option<(Vec<u32>, Vec<Batch>)> = None;
-        let pool = self.encoding_pool.as_ref();
+        let pool = self.encoding_pool.as_deref();
         in_scope(pool, |scope| {
             if prepass_on {
                 let job = &prepass_job;
@@ -1359,7 +1404,7 @@ impl Renderer {
             };
             record_bundles(
                 &self.device,
-                self.encoding_pool.as_ref(),
+                self.encoding_pool.as_deref(),
                 scene,
                 &main_batches,
                 pp,
@@ -1466,8 +1511,7 @@ impl Renderer {
                 pose.far,
             )
                 .to_cols_array_2d();
-            self.queue
-                .write_buffer(&self.spot_cam_bufs[k], 0, bytemuck::bytes_of(&cu_spot));
+            self.write_buffer(&self.spot_cam_bufs[k], 0, bytemuck::bytes_of(&cu_spot));
             let tile = self.spot_tile;
             let x = (k as u32 % 4) * tile;
             let y = self.options.shadow_size + (k as u32 / 4) * tile;
@@ -1511,8 +1555,7 @@ impl Renderer {
                     height.div_ceil(2) as f32,
                 ],
             };
-            self.queue
-                .write_buffer(&self.ao_buf, 0, bytemuck::bytes_of(&u));
+            self.write_buffer(&self.ao_buf, 0, bytemuck::bytes_of(&u));
             let ao = self.ao.as_ref().unwrap();
             {
                 let mut pass = prepass_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1704,7 +1747,7 @@ impl Renderer {
             && main_bundles.len() >= 2
             && ::legacy_config::env::var_os("OMSI_NO_MAIN_SPLIT").is_none()
         {
-            main_bundles.len().min(2)
+            main_bundles.len().min(MAIN_PASS_PARTS)
         } else {
             1
         };
@@ -1806,7 +1849,8 @@ impl Renderer {
                     },
                 },
             });
-            let per_part = main_bundles.len().div_ceil(parts.max(1));
+            // (part g draws bundles part_start(g)..part_start(g + 1), as evenly as they go)
+            let part_start = |g: usize| g * main_bundles.len() / parts.max(1);
             let sky_clear = wgpu::LoadOp::Clear(wgpu::Color {
                 r: sky.x as f64,
                 g: sky.y as f64,
@@ -1893,14 +1937,11 @@ impl Renderer {
                             pass.draw_indexed(0..self.sky_mesh.2, 0, 0..1);
                         }
                     }
-                    pass.execute_bundles(
-                        main_bundles[g * per_part..((g + 1) * per_part).min(main_bundles.len())]
-                            .iter(),
-                    );
+                    pass.execute_bundles(main_bundles[part_start(g)..part_start(g + 1)].iter());
                 }
                 main_parts.push(part);
             }
-            let tail = (parts - 1) * per_part;
+            let tail = part_start(parts - 1);
             let main_attachment = Some(wgpu::RenderPassColorAttachment {
                 view: draw_view,
                 depth_slice: None,
@@ -2134,8 +2175,7 @@ impl Renderer {
                 ],
                 d: [lighting.nightmap_glow * 4.0, 0.0, 0.0, 0.0],
             };
-            self.queue
-                .write_buffer(&self.post_buf, 0, bytemuck::bytes_of(&pu));
+            self.write_buffer(&self.post_buf, 0, bytemuck::bytes_of(&pu));
             let fxaa = with_overlays
                 && self.options.fxaa
                 && ::legacy_config::env::var_os("OMSI_NO_FXAA").is_none();
@@ -2254,7 +2294,7 @@ impl Renderer {
         }
         if let Some((_, bg)) = &scene_target {
             let sharpen = (1.0 - width as f32 / full_w as f32) * 2.0;
-            self.queue.write_buffer(
+            self.write_buffer(
                 &self.upscale_buf,
                 0,
                 bytemuck::cast_slice(&[
@@ -2317,6 +2357,30 @@ impl Renderer {
             }
         }
         stage(self, "encode", "mirror.encode");
+        // this picture's writes, copied before its commands
+        let mut upload_encoder =
+            self.device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("picture uploads"),
+                });
+        self.flush_uploads(&mut upload_encoder);
+        if defer {
+            let mut queued = self.queued.borrow_mut();
+            queued.extend([upload_encoder, shadow_encoder, prepass_encoder]);
+            queued.extend(main_parts);
+            queued.push(encoder);
+            drop(queued);
+            if let (Some(t), false) = (
+                self.gpu_timers[with_overlays as usize].as_mut(),
+                timed.is_empty(),
+            ) {
+                t.pending = timed;
+                t.unresolved = true;
+            }
+            stage(self, "finish", "mirror.finish");
+            return;
+        }
+        let upload_commands = upload_encoder.finish();
         let big = shadow_batches.iter().map(|b| b.len()).sum::<usize>() + prepass_batches.len()
             > 64
             || !main_parts.is_empty();
@@ -2332,7 +2396,7 @@ impl Renderer {
         let (shadow_commands, prepass_commands, part_commands, commands, finish_times) =
             if big && self.encoding_pool.is_some() {
                 self.encoding_pool
-                    .as_ref()
+                    .as_deref()
                     .unwrap()
                     .in_place_scope_fifo(|scope| {
                         let (shadow_tx, shadow_rx) = std::sync::mpsc::sync_channel(1);
@@ -2454,7 +2518,7 @@ impl Renderer {
         }
         stage(self, "finish", "mirror.finish");
         self.queue.submit(
-            [shadow_commands, prepass_commands]
+            [upload_commands, shadow_commands, prepass_commands]
                 .into_iter()
                 .chain(part_commands)
                 .chain([commands]),
@@ -2473,6 +2537,24 @@ impl Renderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn secondary_views_share_the_origin_across_cell_boundaries() {
+        for origin in [DVec3::ZERO, DVec3::splat(-100.0), DVec3::splat(1_000_000.0)] {
+            for offset in [DVec3::splat(-0.1), DVec3::splat(100.1)] {
+                assert_eq!(view_render_origin(origin + offset, origin, true), origin);
+                assert_ne!(view_render_origin(origin + offset, origin, false), origin);
+            }
+        }
+    }
+
+    #[test]
+    fn distant_secondary_cameras_and_initial_views_rebase() {
+        let position = DVec3::new(1000.5, -201.0, 2.0);
+        let expected = DVec3::new(1000.0, -300.0, 0.0);
+        assert_eq!(view_render_origin(position, DVec3::ZERO, true), expected);
+        assert_eq!(view_render_origin(position, DVec3::ZERO, false), expected);
+    }
 
     #[test]
     fn ordered_meshes_ignore_recycled_scene_instance_ids() {
