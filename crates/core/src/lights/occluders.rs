@@ -3,8 +3,8 @@ use super::geom::{body_box, seg_hit};
 use super::tuning::*;
 use glam::{DVec2, DVec3, Vec2, Vec3};
 use ::render::{Occluder, PointLight, Scene};
-use ::simulation::collision::{CollisionWorld, Obb};
 use ::simulation::VehicleInstance;
+use ::simulation::collision::{CollisionWorld, Obb};
 use std::collections::HashMap;
 
 type Key = (i64, i64, i64, u32, i32);
@@ -53,7 +53,13 @@ fn tri_sphere(t: &[DVec3; 3]) -> (DVec3, f64) {
     (c, t.iter().map(|v| (*v - c).length()).fold(0.0, f64::max))
 }
 
-fn spot_casters(seen: &CollisionWorld, pos: DVec3, dir: Vec3, radius: f32, cone_out: f32) -> Vec<Occluder> {
+fn spot_casters(
+    seen: &CollisionWorld,
+    pos: DVec3,
+    dir: Vec3,
+    radius: f32,
+    cone_out: f32,
+) -> Vec<Occluder> {
     let range = (radius as f64).clamp(2.0, SPOT_REACH);
     let axis = dir.as_dvec3().normalize_or_zero();
     let probe = Obb::point(pos + axis * (range * 0.5), range * 0.5 + SPOT_MARGIN + 2.0);
@@ -86,7 +92,12 @@ fn spot_casters(seen: &CollisionWorld, pos: DVec3, dir: Vec3, radius: f32, cone_
     tris.into_iter().map(|(_, t)| tri_occluder(t)).collect()
 }
 
-fn point_casters(coll: &CollisionWorld, seen: &CollisionWorld, pos: DVec3, radius: f32) -> Vec<Occluder> {
+fn point_casters(
+    coll: &CollisionWorld,
+    seen: &CollisionWorld,
+    pos: DVec3,
+    radius: f32,
+) -> Vec<Occluder> {
     let reach = (radius as f64).clamp(2.0, SHADOW_REACH);
     let probe = Obb::point(pos, reach);
     let mut boxes = seen.obstacles_near(&probe);
@@ -181,7 +192,11 @@ fn body_casters(l: &PointLight, o: &Obb, oc: &Occluder, spot: bool, out: &mut Ve
     let on_end = dy < 0.6 || dy < dx || by_aim;
     let front = if by_aim { aim.dot(fw) > 0.0 } else { lf > 0.0 };
     if on_side {
-        let (a, b) = if lr > 0.0 { (-hx, lr - 0.05) } else { (lr + 0.05, hx) };
+        let (a, b) = if lr > 0.0 {
+            (-hx, lr - 0.05)
+        } else {
+            (lr + 0.05, hx)
+        };
         if b - a > 0.1 {
             let mut part = *oc;
             part.center = o.center + r * ((a + b) * 0.5);
@@ -190,7 +205,11 @@ fn body_casters(l: &PointLight, o: &Obb, oc: &Occluder, spot: bool, out: &mut Ve
         }
     }
     if on_end {
-        let (a, b) = if front { (-hy, lf - 0.05) } else { (lf + 0.05, hy) };
+        let (a, b) = if front {
+            (-hy, lf - 0.05)
+        } else {
+            (lf + 0.05, hy)
+        };
         if b - a > 0.1 {
             let mut part = *oc;
             part.center = o.center + fw * ((a + b) * 0.5);

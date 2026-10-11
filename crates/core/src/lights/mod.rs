@@ -1,7 +1,7 @@
 mod beam;
 mod collect;
-mod config;
 mod cones;
+mod config;
 mod fader;
 mod frame;
 mod geom;
@@ -19,9 +19,9 @@ mod weather;
 
 pub use collect::collect;
 pub(crate) use config::{
-    exterior_cfg, interior_cfg, reset_exterior_cfg, reset_interior_cfg, set_exterior_cfg,
-    set_interior_cfg, set_settings, settings, BeamCfg, ExteriorCfg, InteriorCfg, LampLightCfg,
-    LightSettings, MapSpotCfg, SourceCfg, SpillCfg, Spot2Cfg,
+    BeamCfg, ExteriorCfg, InteriorCfg, LampLightCfg, LightSettings, MapSpotCfg, SourceCfg,
+    SpillCfg, Spot2Cfg, exterior_cfg, interior_cfg, reset_exterior_cfg, reset_interior_cfg,
+    set_exterior_cfg, set_interior_cfg, set_settings, settings,
 };
 pub use config::{reset_screen_fx, screen_fx, set_led_glow, set_screen_fx};
 pub use sprites::{

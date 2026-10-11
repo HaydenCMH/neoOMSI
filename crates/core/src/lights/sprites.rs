@@ -35,7 +35,12 @@ pub fn set_corona_root(root: &Path) {
 
 pub fn corona_texture_id(model_dir: &Path, name: &str) -> u16 {
     let key = (model_dir.to_path_buf(), name.to_string());
-    let (known, root) = with(|r| (r.named.get(&key).copied(), r.root.clone().unwrap_or_default()));
+    let (known, root) = with(|r| {
+        (
+            r.named.get(&key).copied(),
+            r.root.clone().unwrap_or_default(),
+        )
+    });
     if let Some(id) = known {
         return id;
     }

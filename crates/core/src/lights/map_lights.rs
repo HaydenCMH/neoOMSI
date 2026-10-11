@@ -58,15 +58,20 @@ impl NearCache {
             lamps_on: f.lamps_on,
         };
         let counts = (static_lights.len(), static_coronas.len());
-        let stale = self.key != Some(key)
-            || self.counts != counts
-            || f.dist(self.centre) > NEAR_MARGIN;
+        let stale =
+            self.key != Some(key) || self.counts != counts || f.dist(self.centre) > NEAR_MARGIN;
 
         if self.build.as_ref().is_some_and(|b| b.key != key) {
             self.build = None;
         }
         if stale && self.build.is_none() {
-            self.build = Some(Self::start_build(f, key, counts, &static_lights, &static_coronas));
+            self.build = Some(Self::start_build(
+                f,
+                key,
+                counts,
+                &static_lights,
+                &static_coronas,
+            ));
         }
         drop((static_lights, static_coronas));
 
@@ -150,7 +155,8 @@ impl NearCache {
             let i = sw.cursor;
             if i < nl {
                 let p = self.lights[i].position;
-                self.light_vis[i] = (p - sw.eye).length() > OCC_LIGHT_RANGE || sees(&f.coll, sw.eye, p);
+                self.light_vis[i] =
+                    (p - sw.eye).length() > OCC_LIGHT_RANGE || sees(&f.coll, sw.eye, p);
             } else {
                 let p = self.coronas[i - nl].position;
                 self.corona_vis[i - nl] =
@@ -162,11 +168,19 @@ impl NearCache {
     }
 
     fn visible_lights(&self) -> impl Iterator<Item = &PointLight> {
-        self.lights.iter().zip(&self.light_vis).filter(|(_, v)| **v).map(|(l, _)| l)
+        self.lights
+            .iter()
+            .zip(&self.light_vis)
+            .filter(|(_, v)| **v)
+            .map(|(l, _)| l)
     }
 
     fn visible_coronas(&self) -> impl Iterator<Item = &Corona> {
-        self.coronas.iter().zip(&self.corona_vis).filter(|(_, v)| **v).map(|(c, _)| c)
+        self.coronas
+            .iter()
+            .zip(&self.corona_vis)
+            .filter(|(_, v)| **v)
+            .map(|(c, _)| c)
     }
 
     pub(super) fn emit(&self, f: &Frame, scene: &mut Scene) {
@@ -246,7 +260,8 @@ impl Build {
             }
             self.lights.push(l);
         }
-        while self.li >= self.src_lights.len() && self.ci < self.src_coronas.len() && !out_of_time() {
+        while self.li >= self.src_lights.len() && self.ci < self.src_coronas.len() && !out_of_time()
+        {
             let c = self.src_coronas[self.ci];
             self.ci += 1;
             if enclosure(&f.coll, c.position).is_none() {
@@ -311,10 +326,14 @@ impl ObjectLampVis {
                 with_light.extend_from_slice(&scene.coronas[first..]);
             }
         }
-        with_light.sort_by(|a, b| {
-            f.dist(a.position).total_cmp(&f.dist(b.position))
-        });
+        with_light.sort_by(|a, b| f.dist(a.position).total_cmp(&f.dist(b.position)));
         with_light.truncate(SRC_MAX_OBJECTS * 3);
-        corona_lights(&f.cfg, &with_light, f.dark, SRC_MAX_OBJECTS, &mut scene.lights);
+        corona_lights(
+            &f.cfg,
+            &with_light,
+            f.dark,
+            SRC_MAX_OBJECTS,
+            &mut scene.lights,
+        );
     }
 }

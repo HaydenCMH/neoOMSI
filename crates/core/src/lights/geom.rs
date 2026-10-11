@@ -1,7 +1,7 @@
 use super::tuning::*;
-use ::simulation::collision::{CollisionWorld, Obb};
-use ::simulation::VehicleInstance;
 use glam::{DVec2, DVec3, Mat4, Vec3};
+use ::simulation::VehicleInstance;
+use ::simulation::collision::{CollisionWorld, Obb};
 
 pub(super) fn seg_hit(a: DVec3, b: DVec3, o: &Obb) -> Option<f64> {
     let [r, f] = o.axes();

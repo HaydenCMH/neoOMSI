@@ -24,7 +24,9 @@ fn plume_alpha(p: &Particle) -> f32 {
     let d = plume_diameter(p).max(0.05);
     let start = p.size0.max(p.grow * PLUME_FADE_IN).max(0.0);
     let depth = -(1.0 - p.alpha().min(0.99)).ln() * start * start / (d * d);
-    (1.0 - (-depth).exp()) * smoothstep(0.0, PLUME_FADE_IN, p.age) * (1.0 - smoothstep(0.4, 1.0, age01))
+    (1.0 - (-depth).exp())
+        * smoothstep(0.0, PLUME_FADE_IN, p.age)
+        * (1.0 - smoothstep(0.4, 1.0, age01))
 }
 
 fn plume_turn_and_pull(p: &Particle, radius: f32) -> (f32, f32) {

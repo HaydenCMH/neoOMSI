@@ -1,4 +1,4 @@
-use super::config::{interior_cfg, LightSettings};
+use super::config::{LightSettings, interior_cfg};
 use super::fader::Faders;
 use super::geom::body_box;
 use super::tuning::*;
@@ -54,14 +54,26 @@ pub(super) fn interior_spill(
             if ic.off {
                 continue;
             }
-            let target = if value_of(&il.variable) >= 0.5 { 1.0 } else { 0.0 };
-            let level = faders.level(owner, SLOT_SALOON + li as u32, target, SALOON_RISE, SALOON_FALL);
+            let target = if value_of(&il.variable) >= 0.5 {
+                1.0
+            } else {
+                0.0
+            };
+            let level = faders.level(
+                owner,
+                SLOT_SALOON + li as u32,
+                target,
+                SALOON_RISE,
+                SALOON_FALL,
+            );
             if level < 0.01 {
                 continue;
             }
             let at = Vec3::from(il.pos) + Vec3::from(ic.shift);
             if let Some(b) = bbox {
-                if (at.x - b[3]).abs() >= b[0] * 0.5 - 0.3 || (at.y - b[4]).abs() >= b[1] * 0.5 - 0.1 {
+                if (at.x - b[3]).abs() >= b[0] * 0.5 - 0.3
+                    || (at.y - b[4]).abs() >= b[1] * 0.5 - 0.1
+                {
                     continue;
                 }
             }
@@ -97,7 +109,8 @@ pub(super) fn spill_vehicles(
 ) -> Vec<bool> {
     static DISABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     let sp = cfg.spill;
-    let off = *DISABLED.get_or_init(|| ::legacy_config::env::var_os("OMSI_NO_SPILL").is_some()) || !sp.on;
+    let off =
+        *DISABLED.get_or_init(|| ::legacy_config::env::var_os("OMSI_NO_SPILL").is_some()) || !sp.on;
     let mut ok = vec![false; vehicles.len()];
     if off {
         return ok;

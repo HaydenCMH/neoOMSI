@@ -38,7 +38,9 @@ pub fn collect(
     let mut guard = STATE.lock().unwrap_or_else(|e| e.into_inner());
     let st = &mut *guard;
     st.frame += 1;
-    let dt = st.last.map_or(0.016, |t| started.duration_since(t).as_secs_f32());
+    let dt = st
+        .last
+        .map_or(0.016, |t| started.duration_since(t).as_secs_f32());
     st.last = Some(started);
     st.faders.begin_frame(dt);
 
@@ -75,7 +77,11 @@ pub fn collect(
     occluders::assign(&f, &mut st.occluders, scene, vehicles);
 
     let total = started.elapsed();
-    if total.as_millis() > 10 && st.last_log.map_or(true, |t| t.elapsed().as_secs_f32() > 2.0) {
+    if total.as_millis() > 10
+        && st
+            .last_log
+            .map_or(true, |t| t.elapsed().as_secs_f32() > 2.0)
+    {
         st.last_log = Some(Instant::now());
         log::info!(
             "lights.collect {:.0} ms: map {:.0}, vehicles+screens {:.0}, occluders {:.0} ({} lights, {} coronas, {} occluders, {} vehicles)",

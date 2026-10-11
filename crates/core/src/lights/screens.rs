@@ -2,7 +2,7 @@ use super::config::{led_glow, screen_fx};
 use super::frame::Frame;
 use super::tuning::*;
 use glam::{DVec3, Vec3};
-use ::render::{LightMode, PointLight, Scene, SCREEN_CONE};
+use ::render::{LightMode, PointLight, SCREEN_CONE, Scene};
 use ::simulation::VehicleInstance;
 
 struct Panel {
@@ -40,7 +40,10 @@ pub(super) fn emit(f: &Frame, scene: &mut Scene, vehicles: &[&VehicleInstance]) 
             side_away_from_vehicle(p.centre, vehicles)
         };
         let (radius, intensity) = if p.led {
-            (LED_RADIUS, LED_INTENSITY * glow * p.gate * (0.2 + 0.8 * night))
+            (
+                LED_RADIUS,
+                LED_INTENSITY * glow * p.gate * (0.2 + 0.8 * night),
+            )
         } else {
             (SCREEN_RADIUS, SCREEN_INTENSITY * p.gate * night)
         };
@@ -80,7 +83,9 @@ fn find_panels(f: &Frame, scene: &Scene) -> Vec<Panel> {
         let best = |led: bool| {
             let mut best = (0.0f32, SCREEN_COLOR, usize::MAX);
             for (k, m) in inst.materials.iter().enumerate() {
-                let Some(mat) = scene.materials.get(*m) else { continue };
+                let Some(mat) = scene.materials.get(*m) else {
+                    continue;
+                };
                 let matches = if led {
                     mat.is_led()
                 } else {
@@ -89,11 +94,20 @@ fn find_panels(f: &Frame, scene: &Scene) -> Vec<Panel> {
                 if !matches {
                     continue;
                 }
-                let gate = inst.slot_light.get(k).copied().unwrap_or(1.0).clamp(0.0, 1.0);
-                let seen = |t: Option<usize>| t.and_then(|t| luma.as_ref().and_then(|l| l.get(&t).copied()));
+                let gate = inst
+                    .slot_light
+                    .get(k)
+                    .copied()
+                    .unwrap_or(1.0)
+                    .clamp(0.0, 1.0);
+                let seen = |t: Option<usize>| {
+                    t.and_then(|t| luma.as_ref().and_then(|l| l.get(&t).copied()))
+                };
                 let (shown, colour) = if led {
                     (
-                        seen(mat.transmap.map(|t| t.0)).map(|(_, a, _)| a).unwrap_or(0.0),
+                        seen(mat.transmap.map(|t| t.0))
+                            .map(|(_, a, _)| a)
+                            .unwrap_or(0.0),
                         LED_COLOR,
                     )
                 } else {
@@ -160,18 +174,24 @@ fn find_panels(f: &Frame, scene: &Scene) -> Vec<Panel> {
 fn side_away_from_vehicle(c: DVec3, vehicles: &[&VehicleInstance]) -> DVec3 {
     let Some(v) = vehicles
         .iter()
-        .min_by(|a, b| (a.position - c).length().total_cmp(&(b.position - c).length()))
+        .min_by(|a, b| {
+            (a.position - c)
+                .length()
+                .total_cmp(&(b.position - c).length())
+        })
         .filter(|v| (v.position - c).length() < 20.0)
     else {
         return DVec3::ZERO;
     };
-    let b = v
-        .ty
-        .def
-        .bounding_box
-        .unwrap_or([2.5, 12.0, 3.0, 0.0, 0.0, 0.0]);
+    let b =
+        v.ty.def
+            .bounding_box
+            .unwrap_or([2.5, 12.0, 3.0, 0.0, 0.0, 0.0]);
     let h = v.heading.to_radians();
-    let (fwd, right) = (DVec3::new(h.sin(), h.cos(), 0.0), DVec3::new(h.cos(), -h.sin(), 0.0));
+    let (fwd, right) = (
+        DVec3::new(h.sin(), h.cos(), 0.0),
+        DVec3::new(h.cos(), -h.sin(), 0.0),
+    );
     let d = c - v.position;
     let (lx, ly) = (d.dot(right) - b[3] as f64, d.dot(fwd) - b[4] as f64);
     let (ex, ey) = (

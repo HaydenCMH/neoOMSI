@@ -1,4 +1,4 @@
-use super::config::{half_cos, LightSettings};
+use super::config::{LightSettings, half_cos};
 use super::geom::cell3;
 use super::tuning::*;
 use glam::Vec3;
@@ -44,7 +44,10 @@ pub(super) fn corona_light(cfg: &LightSettings, c: &Corona, dark: f32) -> Option
     if !sc.on {
         return None;
     }
-    let radius = SRC_RADIUS * (0.6 + 0.4 * c.size.clamp(0.0, 1.0)) * c.spread.max(0.05) * sc.spread.max(0.05);
+    let radius = SRC_RADIUS
+        * (0.6 + 0.4 * c.size.clamp(0.0, 1.0))
+        * c.spread.max(0.05)
+        * sc.spread.max(0.05);
     let (direction, cone) = if sc.directional && facing {
         (dir, [half_cos(sc.inner.min(sc.outer)), half_cos(sc.outer)])
     } else {

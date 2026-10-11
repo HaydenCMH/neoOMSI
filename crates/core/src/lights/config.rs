@@ -18,7 +18,7 @@ pub(crate) struct BeamCfg {
     pub gain: f32,
     pub range: f32,
     pub core: f32,
-    
+
     pub yaw: f32,
     pub pitch: f32,
     pub color: [f32; 3],
@@ -190,19 +190,19 @@ pub(crate) struct LightSettings {
     pub headlight: f32,
     pub vanilla: f32,
     pub low_beam_gain: f32,
-    
+
     pub cone_offset: f32,
     pub cone_side: f32,
     pub cone_height: f32,
-    
+
     pub lamp_yaw: f32,
     pub lamp_pitch: f32,
-    
+
     pub lamp_color: [f32; 3],
-    
+
     pub beam_marker: bool,
     pub weather_night: f32,
-    
+
     pub nightmap_gain: f32,
     pub lightmap_gain: f32,
     pub corona: f32,

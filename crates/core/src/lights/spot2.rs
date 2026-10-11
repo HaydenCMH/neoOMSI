@@ -1,5 +1,5 @@
 use super::beam::*;
-use super::config::{half_cos, LightSettings};
+use super::config::{LightSettings, half_cos};
 use super::fader::Faders;
 use super::tuning::*;
 use glam::{DVec3, Mat4, Vec3};
@@ -61,8 +61,18 @@ pub(super) fn spotlights_2(
     let nose_of = |dir_y: f32| extent.map(|(hi, lo)| if dir_y > 0.0 { hi } else { lo });
 
     for (si, sp) in model.spotlights_2.iter().enumerate() {
-        let target = if value_of(&sp.variable) >= 0.5 { 1.0 } else { 0.0 };
-        let level = faders.level(s.owner, SLOT_SPOT2 + si as u32, target, LAMP_RISE, LAMP_FALL);
+        let target = if value_of(&sp.variable) >= 0.5 {
+            1.0
+        } else {
+            0.0
+        };
+        let level = faders.level(
+            s.owner,
+            SLOT_SPOT2 + si as u32,
+            target,
+            LAMP_RISE,
+            LAMP_FALL,
+        );
         if level < 0.01 {
             continue;
         }

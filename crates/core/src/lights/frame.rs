@@ -1,10 +1,10 @@
-use super::config::{settings, LightSettings};
+use super::config::{LightSettings, settings};
 use super::tuning::*;
 use super::weather::visible_range;
 use crate::scene::World;
 use glam::DVec3;
-use ::simulation::collision::CollisionWorld;
 use ::simulation::Daylight;
+use ::simulation::collision::CollisionWorld;
 use std::sync::Arc;
 
 pub(super) struct Frame {

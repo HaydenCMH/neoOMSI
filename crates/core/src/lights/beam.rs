@@ -1,4 +1,4 @@
-use super::config::{half_cos, LightSettings};
+use super::config::{LightSettings, half_cos};
 use super::fader::Faders;
 use super::sprites::glow_texture_id;
 use super::tuning::*;
@@ -26,7 +26,10 @@ pub(super) fn headlight_core(range: f32) -> f32 {
 }
 
 pub(super) fn spot_reach(range: f32, low: f32) -> f32 {
-    range.clamp(0.5, low).max(range * low / 100.0).min(low * 5.0)
+    range
+        .clamp(0.5, low)
+        .max(range * low / 100.0)
+        .min(low * 5.0)
 }
 
 pub(super) fn short_range_gain(range: f32) -> f32 {
@@ -78,7 +81,12 @@ pub(super) fn facing(dir: Vec3) -> f32 {
     }
 }
 
-pub(super) fn spot_face(lamp: Option<f32>, edge: Option<f32>, apex_y: f32, dir: f32) -> Option<f32> {
+pub(super) fn spot_face(
+    lamp: Option<f32>,
+    edge: Option<f32>,
+    apex_y: f32,
+    dir: f32,
+) -> Option<f32> {
     let fwd = |y: f32| y * dir;
     let lamp = lamp.filter(|l| fwd(*l) > fwd(apex_y));
     let face = match (lamp, edge) {
@@ -94,7 +102,9 @@ pub(super) fn ai_spotlight(lamps: &[[f32; 3]]) -> Option<[f32; 12]> {
     let nose = lamps.iter().map(|l| l[1]).reduce(f32::max)?;
     let front: Vec<&[f32; 3]> = lamps.iter().filter(|l| nose - l[1] < 0.4).collect();
     let z = front.iter().map(|l| l[2]).sum::<f32>() / front.len() as f32;
-    Some([0.0, nose, z, 0.0, 1.0, -0.05, 255.0, 245.0, 225.0, 40.0, 30.0, 70.0])
+    Some([
+        0.0, nose, z, 0.0, 1.0, -0.05, 255.0, 245.0, 225.0, 40.0, 30.0, 70.0,
+    ])
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,7 +145,11 @@ impl Profile {
         }
     }
 
-    pub(super) fn of_model(path: &str, spots: usize, has_var: &dyn Fn(&str) -> bool) -> Option<Self> {
+    pub(super) fn of_model(
+        path: &str,
+        spots: usize,
+        has_var: &dyn Fn(&str) -> bool,
+    ) -> Option<Self> {
         Self::of_path(path).or_else(|| {
             (spots == 11 && has_var("lights_fern_led") && has_var("lights_abbl_halo"))
                 .then_some(Self::LedHalo)
@@ -291,9 +305,7 @@ pub(super) fn headlamps(
         lit.and_then(|i| p.partner(i)).filter(|&i| i < spots.len())
     } else {
         (0..spots.len())
-            .filter(|&i| {
-                kinds[i] == BeamKind::Dipped && !profile.is_some_and(|p| p.visual_only(i))
-            })
+            .filter(|&i| kinds[i] == BeamKind::Dipped && !profile.is_some_and(|p| p.visual_only(i)))
             .min_by(|&a, &b| ranges[a].total_cmp(&ranges[b]))
     };
     let main_lit = lit.is_some_and(|i| i < spots.len() && kinds[i] == BeamKind::Main);
@@ -302,7 +314,13 @@ pub(super) fn headlamps(
     let owner = super::owner_key(v);
     for (i, vals) in spots.iter().enumerate() {
         let on = !visual_only && (lit == Some(i) || (main_lit && partner == Some(i)));
-        let level = faders.level(owner, i as u32, if on { 1.0 } else { 0.0 }, LAMP_RISE, LAMP_FALL);
+        let level = faders.level(
+            owner,
+            i as u32,
+            if on { 1.0 } else { 0.0 },
+            LAMP_RISE,
+            LAMP_FALL,
+        );
         if level < 0.01 {
             continue;
         }
@@ -396,7 +414,7 @@ fn emit_headlamp(
     } else {
         half_width * 0.6
     }
-        .min(half_width.max(0.3));
+    .min(half_width.max(0.3));
     let right = h.body.transform_vector3(Vec3::X).normalize_or_zero();
     let base = h.body.transform_point3(Vec3::new(0.0, apex.y, apex.z));
 
@@ -424,7 +442,10 @@ fn emit_headlamp(
 
     // A dipped beam also lights the bumper area right in front of the lamps.
     if h.kind == BeamKind::Dipped && h.role == LampRole::Beam {
-        let forward = h.body.transform_vector3(axis_at(apex.z)).normalize_or_zero();
+        let forward = h
+            .body
+            .transform_vector3(axis_at(apex.z))
+            .normalize_or_zero();
         lights.push(PointLight {
             position: h.origin + (base + forward * 0.35).as_dvec3(),
             radius: 1.6,
@@ -449,7 +470,10 @@ fn emit_headlamp(
             .collect()
     };
     for (at, mount_z) in sources {
-        let d = h.body.transform_vector3(axis_at(mount_z)).normalize_or_zero();
+        let d = h
+            .body
+            .transform_vector3(axis_at(mount_z))
+            .normalize_or_zero();
         let lamp = PointLight {
             position: h.origin + at.as_dvec3(),
             color,
@@ -481,7 +505,13 @@ fn emit_headlamp(
         // vanilla renderer's lamp
         lights.push(PointLight {
             radius: reach_vanilla,
-            intensity: cfg.vanilla * 0.5 * (0.3 + 0.7 * h.night) * short * role_gain * h.level * h.gain,
+            intensity: cfg.vanilla
+                * 0.5
+                * (0.3 + 0.7 * h.night)
+                * short
+                * role_gain
+                * h.level
+                * h.gain,
             mode: LightMode::Vanilla,
             ..lamp
         });
@@ -529,7 +559,10 @@ mod tests {
 
     #[test]
     fn led_halo_profile_roles() {
-        let p = Profile::of_model("x.bus", 11, &|n| n == "lights_fern_led" || n == "lights_abbl_halo").unwrap();
+        let p = Profile::of_model("x.bus", 11, &|n| {
+            n == "lights_fern_led" || n == "lights_abbl_halo"
+        })
+        .unwrap();
         assert_eq!(p, Profile::LedHalo);
         assert_eq!(p.kind(0), BeamKind::Main);
         assert_eq!(p.kind(4), BeamKind::Dipped);

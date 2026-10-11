@@ -22,7 +22,14 @@ impl Faders {
         }
     }
 
-    pub(super) fn level(&mut self, owner: usize, slot: u32, target: f32, rise: f32, fall: f32) -> f32 {
+    pub(super) fn level(
+        &mut self,
+        owner: usize,
+        slot: u32,
+        target: f32,
+        rise: f32,
+        fall: f32,
+    ) -> f32 {
         let (frame, dt) = (self.frame, self.dt);
         let e = self.levels.entry((owner, slot)).or_insert(Entry {
             level: target,

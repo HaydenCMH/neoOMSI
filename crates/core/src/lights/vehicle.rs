@@ -40,7 +40,9 @@ pub(super) fn emit_all(
     vehicles: &[&VehicleInstance],
 ) {
     if cache.hiding.len() > 128 {
-        cache.hiding.retain(|_, h| f.index.saturating_sub(h.last_seen) < 120);
+        cache
+            .hiding
+            .retain(|_, h| f.index.saturating_sub(h.last_seen) < 120);
         if cache.hiding.len() > 128 {
             cache.hiding.clear();
         }
@@ -116,9 +118,10 @@ fn cull_hidden(
             ];
             if (n + frame) % 8 == 0 && budget.lamp_tests > 0 {
                 budget.lamp_tests -= 1;
-                hiding
-                    .lamps
-                    .insert(key, blocked_by_meshes(&f.coll, &f.seen, f.camera, c.position));
+                hiding.lamps.insert(
+                    key,
+                    blocked_by_meshes(&f.coll, &f.seen, f.camera, c.position),
+                );
             }
             if hiding.lamps.get(&key).copied().unwrap_or(false) {
                 return false;
@@ -146,7 +149,9 @@ fn road_and_lamp_lights(
     let ty = &v.ty;
     let value_of = |name: &str| -> f32 {
         let t = name.trim();
-        t.parse::<f32>().ok().unwrap_or_else(|| v.var(t).unwrap_or(0.0))
+        t.parse::<f32>()
+            .ok()
+            .unwrap_or_else(|| v.var(t).unwrap_or(0.0))
     };
     let transform_of = |def_index: usize| -> Mat4 {
         match ty.meshes.iter().position(|m| m.def_index == def_index) {
