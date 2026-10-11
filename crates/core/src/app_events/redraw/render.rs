@@ -540,7 +540,7 @@ impl App {
             ::config::get_int("graphics", "led_glow").unwrap_or(6) as u8 as f32 * 0.25;
         lights::set_led_glow(lighting.led_glow);
         lighting.nightmap_glow =
-            ::config::get_int("graphics", "nightmap_glow").unwrap_or(6) as u8 as f32 * 0.25;
+            ::config::get_int("graphics", "nightmap_glow").unwrap_or(6) as u8 as f32 * 0.1875;
         lighting.led_mips = ::config::get_float("graphics", "led_mips").unwrap_or(1.3) as f32;
         lighting.atmosphere_brightness =
             ::config::get_float("graphics", "atmosphere_brightness").unwrap_or(1.0) as f32;

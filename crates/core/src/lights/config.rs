@@ -228,7 +228,7 @@ impl LightSettings {
         lamp_color: [1.0; 3],
         beam_marker: false,
         weather_night: 0.6,
-        nightmap_gain: 0.75,
+        nightmap_gain: 0.529,
         lightmap_gain: 1.0,
         corona: 1.0,
     };
