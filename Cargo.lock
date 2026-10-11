@@ -256,6 +256,7 @@ dependencies = [
  "legacy-config",
  "legacy-vehicle",
  "log",
+ "mods",
  "parking_lot",
  "symphonia",
  "ureq",
@@ -2007,6 +2008,7 @@ dependencies = [
  "glam",
  "legacy-config",
  "log",
+ "mods",
  "thiserror 2.0.20",
 ]
 
@@ -2035,6 +2037,7 @@ version = "0.2.0"
 dependencies = [
  "legacy-config",
  "log",
+ "mods",
 ]
 
 [[package]]
@@ -2236,6 +2239,7 @@ version = "0.2.0"
 dependencies = [
  "legacy-config",
  "log",
+ "mods",
  "thiserror 2.0.20",
  "unicode-normalization",
 ]
@@ -2344,6 +2348,7 @@ version = "0.2.0"
 dependencies = [
  "legacy-config",
  "log",
+ "mods",
 ]
 
 [[package]]
@@ -2950,6 +2955,7 @@ dependencies = [
  "log",
  "map",
  "model",
+ "mods",
  "parking_lot",
  "rayon",
  "scenery",
@@ -3798,6 +3804,7 @@ dependencies = [
  "legacy-config",
  "log",
  "model",
+ "mods",
 ]
 
 [[package]]
@@ -3978,6 +3985,7 @@ dependencies = [
  "legacy-vehicle",
  "log",
  "model",
+ "mods",
  "parking_lot",
  "scenery",
  "texture",
@@ -4256,6 +4264,7 @@ dependencies = [
  "image",
  "legacy-config",
  "log",
+ "mods",
  "parking_lot",
  "rayon",
  "thiserror 2.0.20",
@@ -4307,6 +4316,7 @@ version = "0.2.0"
 dependencies = [
  "legacy-config",
  "log",
+ "mods",
 ]
 
 [[package]]

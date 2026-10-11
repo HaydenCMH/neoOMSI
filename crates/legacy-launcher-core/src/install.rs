@@ -1,3 +1,4 @@
+
 use anyhow::{Context, Result, anyhow};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -507,9 +508,9 @@ fn run(job: &Job, content: &Path) -> Result<()> {
     } else {
         src.file_name()
     }
-        .map(|s| s.to_string_lossy().to_string())
-        .filter(|n| safe_rel(n).as_deref() == Some(n.as_str()) && !n.starts_with('.'))
-        .unwrap_or_else(|| "mod".into());
+    .map(|s| s.to_string_lossy().to_string())
+    .filter(|n| safe_rel(n).as_deref() == Some(n.as_str()) && !n.starts_with('.'))
+    .unwrap_or_else(|| "mod".into());
     if ["shared", WAITING, "installed", UNINSTALLED, PLUGINS_HELD]
         .iter()
         .any(|r| r.eq_ignore_ascii_case(&name))
@@ -683,12 +684,12 @@ fn unpack_other(
                 }
                 Ok(wrote)
             })
-                .with_context(|| {
-                    format!(
-                        "unpacking {} (the archive may be damaged or encrypted)",
-                        src.display()
-                    )
-                })?;
+            .with_context(|| {
+                format!(
+                    "unpacking {} (the archive may be damaged or encrypted)",
+                    src.display()
+                )
+            })?;
         }
         ArchiveKind::Rar => {
             let mut archive = unrar_rs::RarArchive::open(std::fs::File::open(src)?)

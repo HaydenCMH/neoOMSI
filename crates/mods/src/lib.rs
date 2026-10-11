@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, RwLock};
 
 mod layout;
+mod resolver;
 pub use layout::{Layer, ModEntry, ModKind, SHARED_DIR, discover, ensure_layout};
+pub use resolver::*;
 
 struct State {
     mods_dir: PathBuf,
@@ -28,17 +30,17 @@ pub fn init(mods_dir: &Path, legacy: Option<&Path>) -> std::io::Result<()> {
 
     // forget the previous registration
     for r in REGISTERED.lock().unwrap().drain(..) {
-        legacy_config::clear_root_scope(&r);
-        legacy_config::remove_content_root(&r);
+        clear_root_scope(&r);
+        remove_content_root(&r);
     }
 
     let mut registered = Vec::new();
     let mut register = |root: PathBuf, fallbacks: Vec<PathBuf>| {
         match &legacy {
-            Some(l) => legacy_config::add_content_root_before(root.clone(), l),
-            None => legacy_config::add_content_root(root.clone()),
+            Some(l) => add_content_root_before(root.clone(), l),
+            None => add_content_root(root.clone()),
         }
-        legacy_config::set_root_scope(root.clone(), fallbacks);
+        set_root_scope(root.clone(), fallbacks);
         registered.push(root);
     };
 
@@ -62,8 +64,8 @@ pub fn init(mods_dir: &Path, legacy: Option<&Path>) -> std::io::Result<()> {
     register(shared.clone(), legacy.iter().cloned().collect());
     if let Some(l) = &legacy {
         // the legacy root ends its own chain: a stock file never picks up a mod's copy
-        legacy_config::add_content_root(l.clone());
-        legacy_config::set_root_scope(l.clone(), Vec::new());
+        add_content_root(l.clone());
+        set_root_scope(l.clone(), Vec::new());
     }
     *REGISTERED.lock().unwrap() = registered;
     *STATE.write().unwrap() = Some(State {
@@ -111,7 +113,7 @@ pub fn layer_of(path: &Path) -> Option<Layer> {
 }
 
 pub fn resolve(base: &Path, rel: &str) -> PathBuf {
-    legacy_config::resolve_path(base, rel)
+    resolve_path(base, rel)
 }
 
 pub fn resolve_layered(base: &Path, rel: &str) -> Option<Resolved> {
@@ -159,10 +161,6 @@ fn list_find(dir: &Path, name: &str) -> Option<std::ffi::OsString> {
         .into_iter()
         .find(|(n, _)| n.to_string_lossy().to_lowercase() == key)
         .map(|(n, _)| n)
-}
-
-pub fn read_dir_merged(rel: &str) -> Vec<PathBuf> {
-    legacy_config::read_dir_merged(rel)
 }
 
 pub fn read(path: &Path) -> std::io::Result<Vec<u8>> {

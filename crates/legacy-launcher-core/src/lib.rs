@@ -325,16 +325,17 @@ fn register_roots(content: &Path) {
     static DONE: std::sync::Once = std::sync::Once::new();
     let content = content.to_path_buf();
     DONE.call_once(|| {
-        ::legacy_config::add_content_root(content.clone());
+        ::mods::add_content_root(content.clone());
         mount_archives(&content);
     });
     // the OMSI folder - also one chosen under Setup while the launcher runs (it was only
     // looked for once, at the start, and a folder set later was never a root)
     let legacy = find_root(&load_config_raw().root);
+    // mods/<name>[.zip] -> mods/shared -> legacy (registers the legacy root too)
     if let Err(e) = ::mods::init(&content.join("mods"), legacy.as_deref()) {
         log_to_file(&format!("mods folder: {e}"));
         if let Some(r) = legacy {
-            ::legacy_config::add_content_root(r);
+            ::mods::add_content_root(r);
         }
     }
 }
@@ -371,8 +372,8 @@ fn mount_archives(content: &Path) {
 pub(crate) fn mount_archive(zip: &Path) {
     match ::legacy_config::vfs::mount_zip(zip) {
         Ok(m) => match find_root(&load_config_raw().root) {
-            Some(r) => ::legacy_config::add_content_root_before(m, &r),
-            None => ::legacy_config::add_content_root(m),
+            Some(r) => ::mods::add_content_root_before(m, &r),
+            None => ::mods::add_content_root(m),
         },
         Err(e) => {
             log_to_file(&format!("archive {}: {e}", zip.display()));
@@ -407,12 +408,12 @@ fn resolve_content(rel: &str) -> Result<PathBuf> {
         if b == root {
             continue;
         }
-        let p = ::legacy_config::resolve_path(&b, rel);
+        let p = ::mods::resolve_path(&b, rel);
         if ::legacy_config::vfs::exists(&p) {
             return Ok(p);
         }
     }
-    Ok(::legacy_config::resolve_path(&root, rel))
+    Ok(::mods::resolve_path(&root, rel))
 }
 
 /// The folders the lists are made of: the content folder first, then the archives used in
@@ -621,8 +622,9 @@ fn tree_signature(p: &Path) -> (u64, u64, u64) {
 
 /// The inbox watcher: something dropped into mods/ is installed once it has stopped
 /// growing (the same size and time on two looks at least two seconds apart); packs in
-
+/// mods/waiting are installed once their bus is. Returns the sources of the jobs started.
 fn watch_inbox(_content: &Path) -> Vec<String> {
+    // mods/ is the mod folder itself now: what lies in it is a mod already (see `mods`)
     Vec::new()
 }
 
@@ -934,14 +936,14 @@ fn missing_packs_of(model: &Path) -> Vec<String> {
         if !l.starts_with("..") {
             continue;
         }
-        let p = ::legacy_config::resolve_path(dir, l);
+        let p = ::mods::resolve_path(dir, l);
         // (the game also finds a part from the model's parent folders - `<vehicle>/model`
         // and the vehicle folder for a cfg in `model/Configuration Files`: mesh_path)
-        let found = |d: &Path| ::legacy_config::vfs::is_file(&::legacy_config::resolve_path(d, l));
+        let found = |d: &Path| ::legacy_config::vfs::is_file(&::mods::resolve_path(d, l));
         if ::legacy_config::vfs::is_file(&p) || dir.ancestors().skip(1).take(2).any(found) {
             continue;
         }
-        if let Some(pack) = ::legacy_config::missing_vehicle_pack(&p) {
+        if let Some(pack) = ::mods::missing_vehicle_pack(&p) {
             if !out.contains(&pack) {
                 out.push(pack);
             }
@@ -958,15 +960,15 @@ fn paint_schemes(vehicle: &::legacy_vehicle::Vehicle) -> (Vec<String>, Vec<PathB
     let Some(model_rel) = vehicle.model.as_ref() else {
         return (names, dirs_read);
     };
-    let model_path = ::legacy_config::resolve_path(vehicle.dir(), model_rel);
+    let model_path = ::mods::resolve_path(vehicle.dir(), model_rel);
     let Ok(model) = ::model::Model::load(&model_path) else {
         return (names, dirs_read);
     };
     for c in &model.ctc {
-        let dir = ::legacy_config::resolve_path(vehicle.dir(), &c.path);
+        let dir = ::mods::resolve_path(vehicle.dir(), &c.path);
         let mut files: Vec<PathBuf> = Vec::new();
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let mut copies = ::legacy_config::mirrored_dirs(&dir);
+        let mut copies = ::mods::mirrored_dirs(&dir);
         if !copies.contains(&dir) {
             copies.push(dir.clone());
         }
@@ -1220,7 +1222,7 @@ fn read_vehicle_folder(
             .to_string_lossy()
             .to_ascii_lowercase();
         // a vehicle file whose model is not there would load as nothing
-        let model = v.model.as_ref().map(|m| ::legacy_config::resolve_path(v.dir(), m));
+        let model = v.model.as_ref().map(|m| ::mods::resolve_path(v.dir(), m));
         if !model
             .as_ref()
             .map(|m| ::legacy_config::vfs::is_file(m))
@@ -3552,7 +3554,7 @@ mod tests {
         std::fs::create_dir_all(&obj).unwrap();
         std::fs::create_dir_all(&cfgs).unwrap();
         std::fs::write(obj.join("a.o3d"), b"x").unwrap();
-        ::legacy_config::add_content_root(root.clone());
+        ::mods::add_content_root(root.clone());
         let model = cfgs.join("m.cfg");
         std::fs::write(
             &model,
@@ -3560,7 +3562,7 @@ mod tests {
         )
             .unwrap();
         let packs = super::missing_packs_of(&model);
-        ::legacy_config::remove_content_root(&root);
+        ::mods::remove_content_root(&root);
         let _ = std::fs::remove_dir_all(&root);
         assert_eq!(packs, vec!["Other".to_string()]);
     }
