@@ -330,8 +330,12 @@ fn register_roots(content: &Path) {
     });
     // the OMSI folder - also one chosen under Setup while the launcher runs (it was only
     // looked for once, at the start, and a folder set later was never a root)
-    if let Some(r) = find_root(&load_config_raw().root) {
-        ::legacy_config::add_content_root(r);
+    let legacy = find_root(&load_config_raw().root);
+    if let Err(e) = ::mods::init(&content.join("mods"), legacy.as_deref()) {
+        log_to_file(&format!("mods folder: {e}"));
+        if let Some(r) = legacy {
+            ::legacy_config::add_content_root(r);
+        }
     }
 }
 
@@ -500,7 +504,7 @@ pub struct ModsStatus {
     pub inbox: String,
     /// What lies in the inbox now.
     pub inbox_items: Vec<String>,
-    /// Packs waiting in Mods/waiting for the bus they belong to.
+    /// Packs waiting in mods/waiting for the bus they belong to.
     pub waiting: Vec<String>,
     /// Archives used in place (in `<content>/Archives`): (name, size in bytes).
     pub archives: Vec<(String, u64)>,
@@ -521,7 +525,7 @@ pub fn start_install(src: &Path, mode: &str) -> Result<install::Progress> {
     if !src.exists() {
         return Err(anyhow!("{} does not exist", src.display()));
     }
-    let from_inbox = src.starts_with(content.join("Mods"));
+    let from_inbox = src.starts_with(content.join("mods"));
     let job = install::start(
         content,
         root().ok(),
@@ -558,7 +562,7 @@ pub fn install_mod_blocking(
 }
 
 fn inbox_entries(content: &Path) -> Vec<PathBuf> {
-    let inbox = content.join("Mods");
+    let inbox = content.join("mods");
     let Ok(rd) = std::fs::read_dir(&inbox) else {
         return Vec::new();
     };
@@ -615,114 +619,11 @@ fn tree_signature(p: &Path) -> (u64, u64, u64) {
     acc
 }
 
-/// The inbox watcher: something dropped into Mods/ is installed once it has stopped
+/// The inbox watcher: something dropped into mods/ is installed once it has stopped
 /// growing (the same size and time on two looks at least two seconds apart); packs in
-/// Mods/waiting are installed once their bus is. Returns the sources of the jobs started.
-fn watch_inbox(content: &Path) -> Vec<String> {
-    struct Seen {
-        sig: (u64, u64, u64),
-        at: std::time::Instant,
-        started: bool,
-        /// When the signature was last read (a big folder whose install failed is looked
-        /// at again only now and then).
-        checked: std::time::Instant,
-    }
-    static SEEN: std::sync::Mutex<Option<std::collections::HashMap<PathBuf, Seen>>> =
-        std::sync::Mutex::new(None);
-    // a mod deleted from Mods/installed is taken out of the lists (#819)
-    let gone = install::uninstall_removed(content);
-    for g in &gone {
-        log_line(&format!(
-            "mods: {g} was deleted from Mods/installed - uninstalled, its folders are in Mods/{}/{g}",
-            install::UNINSTALLED
-        ));
-    }
-    if !gone.is_empty() {
-        ::legacy_config::content_changed();
-    }
-    let mut started = Vec::new();
-    let mut guard = SEEN.lock().unwrap_or_else(|e| e.into_inner());
-    let seen = guard.get_or_insert_with(Default::default);
-    let waiting_dir = content.join("Mods").join(install::WAITING);
-    let items = inbox_entries(content);
-    seen.retain(|p, _| items.contains(p) || (p.starts_with(&waiting_dir) && p.exists()));
-    for p in items {
-        if install::is_busy(&p) {
-            continue;
-        }
-        let now = std::time::Instant::now();
-        if seen
-            .get(&p)
-            .map(|s| {
-                s.started && now.duration_since(s.checked) < std::time::Duration::from_secs(30)
-            })
-            .unwrap_or(false)
-        {
-            continue;
-        }
-        let sig = tree_signature(&p);
-        if let Some(s) = seen.get_mut(&p) {
-            s.checked = now;
-        }
-        match seen.get_mut(&p) {
-            Some(s) if s.sig == sig => {
-                if !s.started && now.duration_since(s.at) >= std::time::Duration::from_secs(2) {
-                    s.started = true;
-                    install::start(
-                        content.to_path_buf(),
-                        root().ok(),
-                        p.clone(),
-                        install::InstallMode::Auto,
-                        true,
-                    );
-                    started.push(p.to_string_lossy().to_string());
-                }
-            }
-            // new, still growing (a copy in progress), or changed after a failed try
-            _ => {
-                seen.insert(
-                    p.clone(),
-                    Seen {
-                        sig,
-                        at: now,
-                        started: false,
-                        checked: now,
-                    },
-                );
-            }
-        }
-    }
-    let busy = install::jobs().iter().any(|j| j.finished.is_none());
-    if !busy {
-        for p in install::waiting_ready(content, root().ok().as_deref()) {
-            let sig = tree_signature(&p);
-            if seen
-                .get(&p)
-                .map(|s| s.started && s.sig == sig)
-                .unwrap_or(false)
-            {
-                continue;
-            }
-            seen.insert(
-                p.clone(),
-                Seen {
-                    sig,
-                    at: std::time::Instant::now(),
-                    started: true,
-                    checked: std::time::Instant::now(),
-                },
-            );
-            install::start(
-                content.to_path_buf(),
-                root().ok(),
-                p.clone(),
-                install::InstallMode::Extract,
-                true,
-            );
-            started.push(p.to_string_lossy().to_string());
-        }
-    }
-    started
+
+fn watch_inbox(_content: &Path) -> Vec<String> {
+    Vec::new()
 }
 
 /// Install everything in the inbox (and the waiting packs whose bus is there) now, and
@@ -773,7 +674,7 @@ pub fn mods_status() -> Result<ModsStatus> {
             .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
             .collect::<Vec<_>>()
     };
-    let waiting: Vec<PathBuf> = std::fs::read_dir(content.join("Mods").join(install::WAITING))
+    let waiting: Vec<PathBuf> = std::fs::read_dir(content.join("mods").join(install::WAITING))
         .map(|rd| rd.flatten().map(|e| e.path()).collect())
         .unwrap_or_default();
     let mut archives: Vec<(String, u64)> = std::fs::read_dir(content.join(install::ARCHIVES))
@@ -798,7 +699,7 @@ pub fn mods_status() -> Result<ModsStatus> {
     Ok(ModsStatus {
         content_dir: content.to_string_lossy().to_string(),
         folders,
-        inbox: content.join("Mods").to_string_lossy().to_string(),
+        inbox: content.join("mods").to_string_lossy().to_string(),
         inbox_items: names(inbox_entries(&content)),
         waiting: names(waiting),
         archives,
@@ -824,7 +725,7 @@ pub fn poll() -> Result<Poll> {
     let started = content.as_deref().map(watch_inbox).unwrap_or_default();
     let stamp = index::content_stamp(
         &bases(),
-        content.as_ref().map(|c| c.join("Mods")).as_deref(),
+        content.as_ref().map(|c| c.join("mods")).as_deref(),
     );
     Ok(Poll {
         stamp,

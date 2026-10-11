@@ -336,7 +336,13 @@ pub(crate) fn prepare(
     if let Some(c) = content_dir() {
         legacy_config::vfs::mount_dir_zips(&c.join("Archives"));
     }
-    legacy_config::add_content_root(args.root.clone());
+    let mods_dir = content_dir()
+        .map(|c| c.join("mods"))
+        .unwrap_or_else(|| PathBuf::from("mods"));
+    if let Err(e) = ::mods::init(&mods_dir, Some(&args.root)) {
+        log::warn!("mods folder {}: {e}", mods_dir.display());
+        legacy_config::add_content_root(args.root.clone());
+    }
     Ok(Some((args, server_cfg)))
 }
 

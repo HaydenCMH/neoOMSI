@@ -468,7 +468,7 @@ pub fn windows_components(rel: &str) -> Vec<&str> {
     let n = parts.len();
     let mut out = Vec::with_capacity(n);
     for (i, c) in parts.into_iter().enumerate() {
-        if c.is_empty() || c == "." {
+        if c.is_empty() || c == "." || c.contains([':', '\0']) {
             continue;
         }
         if c == ".." {
@@ -487,6 +487,13 @@ pub fn windows_components(rel: &str) -> Vec<&str> {
         }
     }
     out
+}
+
+fn pop_within_roots(cur: &mut PathBuf) {
+    if CONTENT_ROOTS.lock().unwrap().iter().any(|r| r == cur) {
+        return;
+    }
+    cur.pop();
 }
 
 /// How names compare, as on Windows: without regard to case (letters beyond ASCII too -
@@ -609,6 +616,48 @@ pub fn remove_content_root(root: &Path) {
     content_changed();
 }
 
+static ROOT_SCOPES: std::sync::Mutex<Vec<(PathBuf, Vec<PathBuf>)>> =
+    std::sync::Mutex::new(Vec::new());
+
+pub fn set_root_scope(root: PathBuf, fallbacks: Vec<PathBuf>) {
+    let mut s = ROOT_SCOPES.lock().unwrap();
+    s.retain(|(r, _)| r != &root);
+    s.push((root, fallbacks));
+    drop(s);
+    content_changed();
+}
+
+pub fn clear_root_scope(root: &Path) {
+    ROOT_SCOPES.lock().unwrap().retain(|(r, _)| r != root);
+    content_changed();
+}
+
+/// The roots a lookup from `base` searches, highest priority first: the scope of the root
+/// `base` lies in, or all content roots when that root has none.
+fn chain_for(base: &Path) -> Vec<PathBuf> {
+    let roots = content_roots();
+    let Some(owner) = owner_root(base, &roots).cloned() else {
+        return roots;
+    };
+    let scopes = ROOT_SCOPES.lock().unwrap();
+    match scopes.iter().find(|(r, _)| r == &owner) {
+        // a lookup from the end-of-chain root itself (a `Vehicles/..` path of the menu, the
+        // `--bus` argument) is an entry point: the mods in front of it are searched in
+        // their order, as for a path under any other root
+        Some((_, fallbacks)) if fallbacks.is_empty() && owner == base => roots,
+        Some((_, fallbacks)) => {
+            let mut chain = vec![owner];
+            for f in fallbacks {
+                if !chain.contains(f) {
+                    chain.push(f.clone());
+                }
+            }
+            chain
+        }
+        None => roots,
+    }
+}
+
 static SANDBOX_ROOTS: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
 
 /// Mark a content root as a sandbox: content received from another machine. It is read as
@@ -709,7 +758,7 @@ fn resolve_existing(base: &Path, rel: &[&str]) -> Option<PathBuf> {
             continue;
         }
         if *comp == ".." {
-            cur.pop();
+            pop_within_roots(&mut cur);
             continue;
         }
         let found = find_in_dir(&cur, comp).map(|n| cur.join(n))?;
@@ -856,7 +905,7 @@ pub fn resolve_path(base: &Path, rel: &str) -> PathBuf {
     let rel = rel.as_slice();
     // a mod's copy first: the same place under a content root of higher priority than the
     // one `base` belongs to
-    let roots = content_roots();
+    let roots = chain_for(base);
     let owner = if roots.len() > 1 {
         owner_root(base, &roots).cloned()
     } else {
@@ -882,7 +931,7 @@ pub fn resolve_path(base: &Path, rel: &str) -> PathBuf {
     let mut cur = base.to_path_buf();
     for comp in rel {
         if *comp == ".." {
-            cur.pop();
+            pop_within_roots(&mut cur);
             continue;
         }
         let direct = cur.join(comp);
@@ -905,6 +954,10 @@ pub fn resolve_path(base: &Path, rel: &str) -> PathBuf {
                 }
             }
         }
+    }
+    let all = content_roots();
+    if owner_root(base, &all).is_some() && owner_root(&cur, &all).is_none() {
+        return base.to_path_buf();
     }
     cur
 }
@@ -1043,24 +1096,7 @@ pub fn is_writable(dir: &Path) -> bool {
 /// Create the content folder layout at `dir` (idempotent).
 pub fn ensure_content_layout(dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
-    for f in CONTENT_FOLDERS {
-        std::fs::create_dir_all(dir.join(f))?;
-    }
-    std::fs::create_dir_all(dir.join("Mods"))?;
-    let marker = dir.join(CONTENT_MARKER);
-    if !marker.exists() {
-        std::fs::write(
-            &marker,
-            "This folder holds neoOMSI's own content and installed mods, laid out like the original game.\nDrop a mod folder or zip into Mods/ and the launcher sorts it into place.\n",
-        )?;
-    }
-    let readme = dir.join("Mods").join("README.txt");
-    if !readme.exists() {
-        std::fs::write(
-            &readme,
-            "Put a mod here (a folder or a .zip) and start the launcher: it works out what the mod is\n(a bus, a map, scenery objects, splines, textures, fonts ...) and sorts it into the folders\nnext to this one. The original OMSI 2 folder is never written to.\n",
-        )?;
-    }
+    std::fs::create_dir_all(dir.join("mods").join("shared"))?;
     Ok(())
 }
 
