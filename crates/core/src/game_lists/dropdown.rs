@@ -478,7 +478,7 @@ pub(super) fn select_options(key: &str) -> Vec<(&'static str, &'static str)> {
             ("0.67", "67%"),
             ("0.5", "50%"),
         ],
-        "anisotropy" => vec![("1", "Off"), ("2", "2x"), ("4", "4x"), ("8", "8x")],
+        "anisotropy" => vec![("1", "Off"), ("2", "2x"), ("4", "4x"), ("8", "8x"), ("16", "16x")],
         "shadow_size" => vec![("1024", "1024"), ("2048", "2048"), ("4096", "4096")],
         "shadow_casters" => vec![
             ("all", "Every solid mesh"),
