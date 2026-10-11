@@ -41,6 +41,8 @@ mod quit;
 mod rain;
 mod real_time;
 mod run_statistics;
+#[cfg(all(feature = "devtools", debug_assertions))]
+mod sampler;
 mod scene;
 mod schedule;
 mod schedule_paper;
@@ -182,6 +184,8 @@ pub fn run() -> Result<()> {
     if protocol {
         return control::run();
     }
+    #[cfg(all(feature = "devtools", debug_assertions))]
+    sampler::start();
     log::info!(
         "neoOMSI {VERSION}, build {BUILD}{}",
         if std::env::var_os("MallocLargeCache").is_some() {
