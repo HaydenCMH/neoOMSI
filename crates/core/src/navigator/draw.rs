@@ -12,28 +12,65 @@ impl Navigator {
             self.shown = target;
         }
         self.time += f.dt;
-        if let Some(rx) = self.building.as_ref() {
-            if let Ok((net, pos, streets, graph, surfaces)) = rx.try_recv() {
-                self.surfaces = Some(std::sync::Arc::new(surfaces));
-                self.city.roads = None;
-                log::info!(
-                    "navigator: the map's road network is there ({} lanes, {} streets named)",
-                    net.lanes.len(),
-                    streets.names.len()
-                );
-                self.streets = Some(std::sync::Arc::new(streets));
-                self.graph = Some(std::sync::Arc::new(graph));
-                self.global = Some(std::sync::Arc::new(net));
-                self.stop_pos = std::sync::Arc::new(pos);
-                self.global_version += 1;
-                self.building = None;
-                self.roads = None;
-                self.route = Route {
-                    version: self.route.version + 1,
-                    ..Route::default()
-                };
-                self.route_mesh = RouteMesh::default();
-                self.route_jam.clear();
+        while let Some(rx) = self.building.as_ref() {
+            match rx.try_recv() {
+                Ok(MapPart::Chunks(part)) => {
+                    let near = part.iter().any(|(k, _)| {
+                        (crate::navmap::SurfaceMap::chunk_origin(*k) - self.bus_at.truncate())
+                            .length()
+                            < 700.0
+                    });
+                    let map = std::sync::Arc::make_mut(
+                        self.surfaces
+                            .get_or_insert_with(|| std::sync::Arc::new(Default::default())),
+                    );
+                    map.chunks.extend(part);
+                    if near {
+                        self.roads = None;
+                        self.city.roads = None;
+                    }
+                }
+                Ok(MapPart::GroundDone(meta)) => {
+                    let meta = *meta;
+                    let map = std::sync::Arc::make_mut(
+                        self.surfaces
+                            .get_or_insert_with(|| std::sync::Arc::new(Default::default())),
+                    );
+                    map.rails = meta.rails;
+                    map.materials = meta.materials;
+                    self.city.roads = None;
+                    self.roads = None;
+                    log::info!("navigator: the map's ground is there ({} chunks)", map.chunks.len());
+                }
+                Ok(MapPart::Network(part)) => {
+                    let (net, pos, streets, graph) = *part;
+                    log::info!(
+                        "navigator: the map's road network is there ({} lanes, {} streets named)",
+                        net.lanes.len(),
+                        streets.names.len()
+                    );
+                    self.streets = Some(std::sync::Arc::new(streets));
+                    self.graph = Some(std::sync::Arc::new(graph));
+                    self.global = Some(std::sync::Arc::new(net));
+                    self.stop_pos = std::sync::Arc::new(pos);
+                    self.global_version += 1;
+                    self.city.roads = None;
+                    self.roads = None;
+                    self.route = Route {
+                        version: self.route.version + 1,
+                        ..Route::default()
+                    };
+                    self.route_mesh = RouteMesh::default();
+                    self.route_jam.clear();
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    if self.global.is_none() || self.surfaces.is_none() {
+                        log::warn!("navigator: the map build stopped before it was done");
+                        self.build_failed = self.global.is_none();
+                    }
+                    self.building = None;
+                }
             }
         }
         if ::legacy_config::env::var_os("OMSI_DEBUG_NAV").is_some() && self.time < 0.15 {

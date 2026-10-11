@@ -7,6 +7,12 @@ use ::user_interface::{Atlas, Color, Draw, Fonts, Gpu, Layer, Painter, Rect, Wei
 
 use crate::traffic::Traffic;
 
+pub(crate) enum MapPart {
+    Network(Box<(Network, HashMap<i64, DVec3>, Streets, RoadGraph)>),
+    Chunks(Vec<((i32, i32), std::sync::Arc<crate::navmap::Chunk>)>),
+    GroundDone(Box<crate::navmap::SurfaceMap>),
+}
+
 mod api;
 mod city;
 mod draw;
@@ -149,16 +155,8 @@ pub struct Navigator {
     graph: Option<std::sync::Arc<RoadGraph>>,
     /// Navigator 2.0's ground: the surfaces the map really draws.
     surfaces: Option<std::sync::Arc<crate::navmap::SurfaceMap>>,
-    #[allow(clippy::type_complexity)]
-    building: Option<
-        std::sync::mpsc::Receiver<(
-            Network,
-            HashMap<i64, DVec3>,
-            Streets,
-            RoadGraph,
-            crate::navmap::SurfaceMap,
-        )>,
-    >,
+    building: Option<std::sync::mpsc::Receiver<MapPart>>,
+    build_failed: bool,
     pub global_version: u64,
     roads: Option<Roads>,
     route: Route,

@@ -133,7 +133,10 @@ impl App {
                         nav.opacity = vr_nav_display.map(|d| d.placement.opacity).unwrap_or(0.95);
                     }
                     if let Some(w) = self.world.as_ref() {
-                        nav.start_map(w.clone());
+                        nav.start_map(
+                            w.clone(),
+                            glam::DVec2::new(p.vehicle.position.x, p.vehicle.position.y),
+                        );
                     }
                     if let (Some(places), Some(d)) = (nav.places(), self.duty.as_mut()) {
                         if !self.duty_places {

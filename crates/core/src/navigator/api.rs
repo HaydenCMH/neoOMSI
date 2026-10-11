@@ -1,5 +1,25 @@
 use super::*;
 
+fn build_pool() -> Option<std::sync::Arc<rayon::ThreadPool>> {
+    let cpus = std::thread::available_parallelism().map_or(4, |n| n.get());
+    rayon::ThreadPoolBuilder::new()
+        .num_threads((cpus / 4).clamp(1, 3))
+        .thread_name(|i| format!("navigator map {i}"))
+        .build()
+        .ok()
+        .map(std::sync::Arc::new)
+}
+
+fn on_pool<T: Send>(
+    pool: &Option<std::sync::Arc<rayon::ThreadPool>>,
+    f: impl FnOnce() -> T + Send,
+) -> T {
+    match pool {
+        Some(p) => p.install(f),
+        None => f(),
+    }
+}
+
 impl Navigator {
     pub fn new(enabled: bool, opacity: f32, corner: &str) -> Navigator {
         Navigator {
@@ -37,6 +57,7 @@ impl Navigator {
             streets: None,
             graph: None,
             building: None,
+            build_failed: false,
             surfaces: None,
             global_version: 0,
             roads: None,
@@ -64,16 +85,39 @@ impl Navigator {
         }
     }
 
-    pub fn start_map(&mut self, world: std::sync::Arc<crate::scene::World>) {
-        if self.building.is_some() || self.global.is_some() {
+    pub fn start_map(&mut self, world: std::sync::Arc<crate::scene::World>, centre: DVec2) {
+        if self.building.is_some() || self.global.is_some() || self.build_failed {
             return;
         }
         let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::Builder::new()
+        let spawned = std::thread::Builder::new()
             .name("navigator map".into())
             .spawn(move || {
-                let m = world.navigation_map();
-                let surfaces = crate::navmap::build_surface_map(&world, &m.lanes);
+                let t0 = std::time::Instant::now();
+                let pool = build_pool();
+                let m = on_pool(&pool, || world.navigation_map());
+                let lanes_for_ground = m.lanes.clone();
+                let tx_ground = tx.clone();
+                let world_ground = world.clone();
+                let pool_ground = pool.clone();
+                let ground = std::thread::Builder::new()
+                    .name("navigator ground".into())
+                    .spawn(move || {
+                        on_pool(&pool_ground, || {
+                            let tx_part = tx_ground.clone();
+                            let mut emit = |part| {
+                                let _ = tx_part.send(MapPart::Chunks(part));
+                            };
+                            let meta = crate::navmap::build_surface_stream(
+                                &world_ground,
+                                &lanes_for_ground,
+                                centre,
+                                &mut emit,
+                            );
+                            let _ = tx_ground.send(MapPart::GroundDone(Box::new(meta)));
+                        });
+                    })
+                    .ok();
                 let mut net = Network {
                     lanes: m.lanes,
                     ..Default::default()
@@ -83,9 +127,20 @@ impl Navigator {
                 probe_lanes(&net);
                 let streets = build_streets(&net, &m.signs);
                 let graph = RoadGraph::build(&net, &m.carriageways);
-                let _ = tx.send((net, m.places, streets, graph, surfaces));
+                log::info!(
+                    "navigator: network built in {:.0} ms",
+                    t0.elapsed().as_secs_f64() * 1e3
+                );
+                let _ = tx.send(MapPart::Network(Box::new((net, m.places, streets, graph))));
+                if let Some(g) = ground {
+                    let _ = g.join();
+                }
             })
-            .ok();
+            .is_ok();
+        if !spawned {
+            self.build_failed = true;
+            return;
+        }
         self.building = Some(rx);
     }
 

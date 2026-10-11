@@ -164,9 +164,9 @@ pub struct MaterialInfo {
 }
 
 /// The map's surfaces, chunk by chunk.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct SurfaceMap {
-    pub chunks: HashMap<(i32, i32), Chunk>,
+    pub chunks: HashMap<(i32, i32), std::sync::Arc<Chunk>>,
     /// Rails (centre lines of the tracks) outside tunnels.
     pub rails: Vec<Vec<glam::DVec3>>,
     pub materials: Vec<MaterialInfo>,
@@ -189,7 +189,7 @@ impl SurfaceMap {
         for y in y0..=y1 {
             for x in x0..=x1 {
                 if let Some(ch) = self.chunks.get(&(x, y)) {
-                    out.push(((x, y), ch));
+                    out.push(((x, y), &**ch));
                 }
             }
         }
@@ -197,4 +197,4 @@ impl SurfaceMap {
     }
 }
 
-pub use self::build::build_surface_map;
+pub use self::build::{build_surface_map, build_surface_stream};

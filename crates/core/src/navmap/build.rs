@@ -385,6 +385,20 @@ pub(super) fn classify(name: &str, cfg: &::texture::TextureCfg, st: [f64; 4]) ->
 /// Build the map's surfaces (see the module) from its tiles and its paths (`lanes`: every
 /// lane of the map, editor-only ones too).
 pub fn build_surface_map(world: &World, lanes: &[Lane]) -> SurfaceMap {
+    let mut all: HashMap<(i32, i32), Arc<Chunk>> = HashMap::new();
+    let mut map = build_surface_stream(world, lanes, DVec2::ZERO, &mut |part| {
+        all.extend(part);
+    });
+    map.chunks = all;
+    map
+}
+
+pub fn build_surface_stream(
+    world: &World,
+    lanes: &[Lane],
+    centre: DVec2,
+    emit: &mut dyn FnMut(Vec<((i32, i32), Arc<Chunk>)>),
+) -> SurfaceMap {
     let t0 = std::time::Instant::now();
     let ts = tile_size();
     let tiles = world.map_tiles();
@@ -665,17 +679,30 @@ pub fn build_surface_map(world: &World, lanes: &[Lane]) -> SurfaceMap {
         let c = class.get(top.material as usize).copied().unwrap_or(0);
         (c != 0).then(|| (c, ground(p.extend(0.0))))
     };
-    let chunks: HashMap<(i32, i32), Chunk> = faces
-        .into_iter()
-        .collect::<Vec<_>>()
-        .into_par_iter()
-        .filter_map(|(k, faces)| {
-            let ch = build_chunk(k, &faces, &class, &paint_masks, &painted);
-            (!ch.areas.is_empty()).then_some((k, ch))
-        })
-        .collect::<Vec<_>>()
-        .into_iter()
-        .collect();
+    let mut todo: Vec<((i32, i32), Vec<Face>)> = faces.into_iter().collect();
+    let dist = |k: (i32, i32)| {
+        (SurfaceMap::chunk_origin(k) + DVec2::splat(CHUNK * 0.5) - centre).length_squared()
+    };
+    todo.sort_by(|a, b| dist(a.0).total_cmp(&dist(b.0)));
+    let (mut chunk_count, mut area_count) = (0usize, 0usize);
+    let (mut done, mut batch) = (0usize, 16usize);
+    while done < todo.len() {
+        let end = (done + batch).min(todo.len());
+        let part: Vec<((i32, i32), Arc<Chunk>)> = todo[done..end]
+            .par_iter()
+            .filter_map(|(k, faces)| {
+                let ch = build_chunk(*k, faces, &class, &paint_masks, &painted);
+                (!ch.areas.is_empty()).then(|| (*k, Arc::new(ch)))
+            })
+            .collect();
+        chunk_count += part.len();
+        area_count += part.iter().map(|(_, c)| c.areas.len()).sum::<usize>();
+        if !part.is_empty() {
+            emit(part);
+        }
+        done = end;
+        batch = (batch * 2).min(128);
+    }
     let rails = lanes
         .iter()
         .filter(|l| l.kind == LaneKind::Rail && !l.invisible && !l.reversed && l.points.len() >= 2)
@@ -703,13 +730,13 @@ pub fn build_surface_map(world: &World, lanes: &[Lane]) -> SurfaceMap {
         infos.len(),
         with_paint,
         objects.lock().len(),
-        chunks.len(),
-        chunks.values().map(|c| c.areas.len()).sum::<usize>(),
+        chunk_count,
+        area_count,
         t0.elapsed().as_secs_f64(),
         t_gather
     );
     SurfaceMap {
-        chunks,
+        chunks: HashMap::new(),
         rails,
         materials: infos,
     }
