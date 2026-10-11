@@ -27,6 +27,9 @@ struct State {
 
 static STATE: LazyLock<Mutex<State>> = LazyLock::new(Default::default);
 
+pub static TIMES: Mutex<[f64; 7]> = Mutex::new([0.0; 7]);
+pub static GATHERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 pub fn collect(
     world: &World,
     scene: &mut Scene,
@@ -50,9 +53,18 @@ pub fn collect(
     ::simulation::particles::set_eye(camera_pos);
     let f = Frame::new(world, daylight, camera_pos, st.frame);
 
+    let mut t = [0.0f64; 7];
+    let mut lap = Instant::now();
+    let mut tick = |i: usize| {
+        let now = Instant::now();
+        t[i] += (now - lap).as_secs_f64();
+        lap = now;
+    };
     st.near.update(&f, world);
+    tick(0);
     st.near.emit(&f, scene);
     st.objects.emit(&f, world, scene);
+    tick(1);
     for list in world.particle_objects.lock().values() {
         for po in list {
             if f.dist(po.pos) < f.visible_range {
@@ -60,11 +72,14 @@ pub fn collect(
             }
         }
     }
+    tick(2);
     let t_map = Instant::now();
 
     vehicle::emit_all(&f, &mut st.faders, &mut st.vehicles, scene, vehicles);
     cones::shape(scene, f.cfg.corona);
+    tick(3);
     screens::emit(&f, scene, vehicles);
+    tick(4);
     let t_vehicles = Instant::now();
 
     if ::legacy_config::env::var_os("OMSI_DEBUG_LIGHT").is_some() {
@@ -74,7 +89,10 @@ pub fn collect(
     scene
         .lights
         .sort_by_cached_key(|l| ((l.position - camera_pos).length_squared() * 16.0) as u64);
+    tick(5);
     occluders::assign(&f, &mut st.occluders, scene, vehicles);
+    tick(6);
+    *TIMES.lock().unwrap_or_else(|e| e.into_inner()) = t;
 
     let total = started.elapsed();
     if total.as_millis() > 10

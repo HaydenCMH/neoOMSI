@@ -17,7 +17,7 @@ mod tuning;
 mod vehicle;
 mod weather;
 
-pub use collect::collect;
+pub use collect::{GATHERS, TIMES, collect};
 pub(crate) use config::{
     BeamCfg, ExteriorCfg, InteriorCfg, LampLightCfg, LightSettings, MapSpotCfg, SourceCfg,
     SpillCfg, Spot2Cfg, exterior_cfg, interior_cfg, reset_exterior_cfg, reset_interior_cfg,

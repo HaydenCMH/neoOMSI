@@ -13,6 +13,8 @@ type Key = (i64, i64, i64, u32, i32);
 pub(super) struct OccluderCache {
     generation: u64,
     map: HashMap<Key, Vec<Occluder>>,
+    prev: Vec<Option<Key>>,
+    job: Option<(Key, std::sync::mpsc::Receiver<Vec<Occluder>>)>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -221,12 +223,12 @@ fn body_casters(l: &PointLight, o: &Obb, oc: &Occluder, spot: bool, out: &mut Ve
 
 fn key_of(l: &PointLight, kind: Kind) -> Key {
     let (grid, aimed) = match kind {
-        Kind::Spill => (0.5, true),
-        Kind::Spot => (0.5, true),
+        Kind::Spill => (1.0, true),
+        Kind::Spot => (1.0, true),
         Kind::Point => (2.0, false),
     };
     let aim_key = if aimed {
-        ((l.direction.x.atan2(l.direction.y).to_degrees() / 10.0).round() as i32) * 64
+        ((l.direction.x.atan2(l.direction.y).to_degrees() / 15.0).round() as i32) * 64
             + (l.cone[1] * 100.0).round() as i32 * 4096
             + (l.direction.z.clamp(-1.0, 1.0) * 8.0).round() as i32
             + 1
@@ -237,7 +239,7 @@ fn key_of(l: &PointLight, kind: Kind) -> Key {
         (l.position.x * grid).round() as i64,
         (l.position.y * grid).round() as i64,
         (l.position.z * grid).round() as i64,
-        l.radius.to_bits(),
+        (l.radius * 2.0).round() as u32,
         aim_key,
     )
 }
@@ -252,13 +254,25 @@ pub(super) fn assign(
     if cache.generation != f.generation || cache.map.len() > OCC_CACHE_MAX {
         cache.generation = f.generation;
         cache.map.clear();
+        cache.prev.clear();
+        cache.job = None;
     }
+    if let Some((k, rx)) = cache.job.take() {
+        match rx.try_recv() {
+            Ok(made) => {
+                cache.map.insert(k, made);
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => cache.job = Some((k, rx)),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {}
+        }
+    }
+    let mut now: Vec<Option<Key>> = vec![None; scene.lights.len()];
     let bodies = vehicle_bodies(f, vehicles);
     let mut lights = std::mem::take(&mut scene.lights);
     let (mut points, mut spots, mut gathers) = (0usize, 0usize, 0usize);
     let mut prev_spot: Option<(DVec3, Vec3, bool)> = None;
 
-    for l in lights.iter_mut() {
+    for (i, l) in lights.iter_mut().enumerate() {
         l.occ_first = 0;
         l.occ_count = 0;
         if l.radius <= 0.0 || l.is_screen() {
@@ -296,22 +310,38 @@ pub(super) fn assign(
             }
         }
 
-        let key = key_of(l, kind);
+        let mut key = key_of(l, kind);
         if !capped && !cache.map.contains_key(&key) {
-            if gathers >= GATHERS_PER_FRAME {
-                capped = true;
+            if cache.job.is_some() || gathers >= GATHERS_PER_FRAME {
+                match cache.prev.get(i).copied().flatten() {
+                    Some(old) if cache.map.contains_key(&old) => key = old,
+                    _ => capped = true,
+                }
             } else {
                 gathers += 1;
-                let made = match kind {
-                    Kind::Point => point_casters(&f.coll, &f.seen, l.position, l.radius),
-                    Kind::Spot | Kind::Spill => {
-                        spot_casters(&f.seen, l.position, l.direction, l.radius, l.cone[1])
-                    }
-                };
-                cache.map.insert(key, made);
+                // the triangle search takes milliseconds: it runs beside the frame, and the
+                // light keeps its last occluders until the result is in
+                let (tx, rx) = std::sync::mpsc::channel();
+                let (coll, seen) = (f.coll.clone(), f.seen.clone());
+                let (pos, dir, radius, cone) = (l.position, l.direction, l.radius, l.cone[1]);
+                std::thread::spawn(move || {
+                    let made = match kind {
+                        Kind::Point => point_casters(&coll, &seen, pos, radius),
+                        Kind::Spot | Kind::Spill => spot_casters(&seen, pos, dir, radius, cone),
+                    };
+                    let _ = tx.send(made);
+                });
+                cache.job = Some((key, rx));
+                match cache.prev.get(i).copied().flatten() {
+                    Some(old) if cache.map.contains_key(&old) => key = old,
+                    _ => capped = true,
+                }
             }
         }
 
+        if !capped {
+            now[i] = Some(key);
+        }
         let first = scene.occluders.len() as u32;
         if !capped {
             if let Some(cached) = cache.map.get(&key) {
@@ -336,4 +366,6 @@ pub(super) fn assign(
         }
     }
     scene.lights = lights;
+    cache.prev = now;
+    super::GATHERS.store(gathers, std::sync::atomic::Ordering::Relaxed);
 }

@@ -72,7 +72,7 @@ pub(super) const SPOT_REACH: f64 = 40.0;
 pub(super) const SPOT_MAX: usize = 32;
 pub(super) const SPOT_MIN_AREA: f64 = 0.01;
 pub(super) const SPOT_MARGIN: f64 = 2.0;
-pub(super) const GATHERS_PER_FRAME: usize = 2;
+pub(super) const GATHERS_PER_FRAME: usize = 1;
 pub(super) const OCC_CACHE_MAX: usize = 4000;
 
 pub(super) const CODE_DIPPED: f32 = 200.0;
