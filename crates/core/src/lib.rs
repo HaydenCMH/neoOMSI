@@ -509,6 +509,7 @@ pub(crate) fn make_app(
         humans_populate_t: 0.0,
         radio: radio::Radio::load(&args_root_for_keys),
         profile: Default::default(),
+        redraw_ended: None,
         profile_prev: Default::default(),
         first_populate: true,
         envir: None,
@@ -660,6 +661,8 @@ pub(crate) fn make_app(
         #[cfg(all(feature = "devtools", debug_assertions))]
         devtools: None,
         cpu_mark: None,
+        thread_cpu_mark: Vec::new(),
+        profile_mark: None,
         touch: touch::Touch::new(),
     };
     app.lan = lan;
