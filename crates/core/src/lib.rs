@@ -1,7 +1,5 @@
 mod admin;
 mod ambience;
-#[cfg(target_os = "android")]
-mod android;
 mod camera_arm;
 mod career;
 mod describe;
@@ -35,6 +33,7 @@ mod radio;
 mod rail_drive;
 mod touch;
 mod updater;
+mod voice;
 mod vr_navigator;
 
 mod puddles;
@@ -563,6 +562,7 @@ pub(crate) fn make_app(
         clock_hold: 0.0,
         pad_look: [false; 4],
         teleport_pick: false,
+        teleport_down: None,
         discord: None,
         discord_next_update: Instant::now(),
         headtrack: None,
@@ -647,6 +647,7 @@ pub(crate) fn make_app(
         cursor_kind: 0,
         lan: None,
         remotes: Default::default(),
+        voice: Default::default(),
         spikes: 0,
         worst_ms: 0.0,
         governor: (0.0, 0, 0.0),
