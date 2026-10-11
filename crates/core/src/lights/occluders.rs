@@ -286,7 +286,7 @@ pub(super) fn assign(
             Kind::Point
         };
         let dist = f.dist(l.position);
-        let mut capped = false;
+        let mut capped;
         match kind {
             Kind::Spot => {
                 if dist > SPOT_SHADOW_RANGE {
