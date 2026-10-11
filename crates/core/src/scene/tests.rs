@@ -706,3 +706,48 @@ fn standard_traffic_lamps_are_state_driven() {
         None
     );
 }
+
+/// Drawn ground over a buried road face carries the wheel, as in Omsi.exe (#208).
+#[test]
+fn drawn_ground_over_a_buried_road_face_carries_the_wheel() {
+    let probe_over = |road_z: f32, ground: f32, top: f64, cut: bool| {
+        let side = tile_size() as f32;
+        let (a, b) = (side * 0.25, side * 0.75);
+        let face = MeshData {
+            positions: vec![
+                glam::Vec3::new(a, a, road_z),
+                glam::Vec3::new(b, a, road_z),
+                glam::Vec3::new(b, b, road_z),
+                glam::Vec3::new(a, b, road_z),
+            ],
+            indices: vec![0, 1, 2, 0, 2, 3],
+            ..Default::default()
+        };
+        let mut ts = TileSurface::new(SURFACE_RASTER);
+        ts.add_drive_mesh(&face, &Mat4::IDENTITY, DVec3::ZERO, 0, 0, None);
+        if cut {
+            ts.rasterize_hole(&face, &Mat4::IDENTITY, DVec3::ZERO, 0, 0);
+        }
+        ts.finish();
+        let mut terrain = Terrain::flat();
+        terrain.heights.fill(ground);
+        let mid = tile_size() * 0.5;
+        probe_tile(Some(&ts), Some(&terrain), (0, 0), mid, mid, top).below
+    };
+    let near = |got: Option<f64>, want: f64| got.is_some_and(|z| (z - want).abs() < 1e-3);
+    // #208: ground at 0.10 over the pavement's top at -0.67
+    let got = probe_over(-0.67, 0.1, 1.5, false);
+    assert!(near(got, 0.1), "{got:?}");
+    // the ground a few centimetres through the asphalt is still the road
+    let got = probe_over(0.0, 0.05, 1.5, false);
+    assert!(near(got, 0.0), "{got:?}");
+    // half way through the ramp: half way up, no step
+    let got = probe_over(0.0, 0.15, 1.5, false);
+    assert!(near(got, 0.075), "{got:?}");
+    // ground cut away over the road is not drawn: the road carries
+    let got = probe_over(-0.67, 0.1, 1.5, true);
+    assert!(near(got, -0.67), "{got:?}");
+    // ground over the wheel (a road under an embankment) is no floor
+    let got = probe_over(0.0, 4.0, 1.5, false);
+    assert!(near(got, 0.0), "{got:?}");
+}
