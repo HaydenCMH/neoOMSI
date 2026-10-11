@@ -124,7 +124,7 @@
           "name": "View turns with steering"
         },
         "steer_look_angle": {
-          "desc": "How far the view turns at full steering lock",
+          "desc": "How far the view turns when the steering is turned fully",
           "name": "Steering view angle"
         },
         "steer_look_response": {
@@ -189,7 +189,7 @@
           "name": "Gamepad stick dead zone"
         },
         "stick_sens": {
-          "desc": "How far a small stick movement turns the wheel; pushing the stick fully still gives full lock",
+          "desc": "How far a small stick movement turns the wheel; pushing the stick all the way still gives full lock",
           "name": "Gamepad steering sensitivity"
         },
         "wheel_lock": {
@@ -365,10 +365,10 @@
         },
         "pax_pack": {
           "download": "Download",
-          "downloading": "Downloading. They are used from the next start of the game",
+          "downloading": "Downloading. Used from the next start of the game",
           "installed": "Installed",
-          "installing": "Installing. They are used from the next start of the game",
-          "missing": "Not downloaded yet; the \"Realistic\" passenger models need them",
+          "installing": "Installing. Used from the next start of the game",
+          "missing": "Not downloaded yet; needed for the \"Realistic\" passenger models",
           "name": "Realistic passenger models",
           "next_start": "Up to date. A game started before the download still has the old passengers",
           "outdated": "A newer version is available",
@@ -1025,7 +1025,7 @@
         "press_enter_to_change_esc_to_cancel": "Press Enter to apply, Esc to cancel",
         "change_the_current_time_press_enter_to_change": "Change the current time (press Enter to apply)",
         "exact_date": "Current date",
-        "change_the_current_date_press_enter_to_change": "Change the current date (press Enter to change)",
+        "change_the_current_date_press_enter_to_change": "Change the current date (press Enter to apply)",
         "hour": "Hour",
         "set_the_hour_of_the_day_directly": "Set the hour of the day directly",
         "minute": "Minute",
@@ -1286,7 +1286,7 @@
       "blinker_warn_toggle": "Hazard lights",
       "brake": "Brake",
       "bus_20h_switch": "20 h switch",
-      "bus_dooraft": "Door Release",
+      "bus_dooraft": "Door release",
       "bus_doorfront0": "Front door 1",
       "bus_doorfront1": "Front door 2",
       "bus_doorfront5": "Front door 6",

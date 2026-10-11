@@ -1266,7 +1266,7 @@
       "no_routes": "Keine Liniennummern in der Betriebshofdatei oder im Fahrplan",
       "no_hofs": "Dieser Bus hat keine Betriebshofdateien (.hof)",
       "entry": "Spawnpunkt {number}",
-      "no_entries": "Diese Karte hat keine Spawnpunkt",
+      "no_entries": "Diese Karte hat keine Spawnpunkte",
       "maker_models": "{name}  ({count} Modelle)",
       "unknown_maker": "Unbekannter Hersteller",
       "no_numbers": "Dieser Bus hat keine Liste mit Wagennummern",
