@@ -904,6 +904,18 @@ impl App {
                         lights: scene.lights.len(),
                         interior_lights: scene.interior_lights.len(),
                         coronas: scene.coronas.len(),
+                        gpu_passes: r.gpu_pass_times(),
+                        draw_report: r
+                            .counts
+                            .borrow()
+                            .iter()
+                            .map(|(k, v)| format!("{k}: {v:.1}"))
+                            .collect(),
+                        light_stats: devtools::LightStats::gather(
+                            scene,
+                            &lighting,
+                            cam.position,
+                        ),
                     };
                     let scale = self
                         .window
