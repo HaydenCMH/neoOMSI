@@ -1,7 +1,5 @@
 mod admin;
 mod ambience;
-#[cfg(target_os = "android")]
-mod android;
 mod camera_arm;
 mod career;
 mod describe;
@@ -26,6 +24,7 @@ mod mac_hid;
 mod menu;
 mod money;
 mod navigator;
+pub mod navmap;
 #[cfg(windows)]
 mod openxr;
 mod placing;
@@ -193,16 +192,20 @@ pub fn run() -> Result<()> {
         return Ok(());
     };
     if args.launcher || (bare && !args.menu) {
-        // `--launcher` always means the built-in one
-        if !args.launcher {
-            match omsi_launcher_lib::start_external_launcher(&std::env::current_exe()?) {
-                Ok(true) => return Ok(()),
-                Ok(false) => {}
-                Err(e) => log::warn!("{e:#}: the built-in launcher opens instead"),
+        let exe = std::env::current_exe()?;
+        match omsi_launcher_lib::start_external_launcher(&exe) {
+            Ok(true) => return Ok(()),
+            Ok(false) => {
+                let expected = omsi_launcher_lib::shipped_launcher(&exe)
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "dist/<platform>/launcher".to_string());
+                anyhow::bail!(
+                    "neoOMSI desktop launcher was not found at {expected}.\n\
+                     To run the engine directly for development, specify a map (e.g. `--map maps/Grundorf/global.cfg`) or `--menu`."
+                );
             }
+            Err(e) => anyhow::bail!("Failed to start neoOMSI desktop launcher: {e:#}"),
         }
-        launcher_statics();
-        return launcher::run(graphics_instance());
     }
     if server_cfg.is_none() {
         game_link::connect();
@@ -300,7 +303,7 @@ pub(crate) fn prepare(
     if let Some(c) = content_dir() {
         match legacy_config::ensure_content_layout(&c) {
             Ok(()) => {
-                legacy_config::add_content_root(c.clone());
+                ::mods::add_content_root(c.clone());
                 log::info!("content folder (mods): {}", c.display());
             }
             Err(e) => log::warn!("content folder {}: {e}", c.display()),
@@ -310,7 +313,7 @@ pub(crate) fn prepare(
         if let Some(content) = content_dir() {
             let pack = pax_pack::folder(&content);
             if pack.join("Humans").is_dir() {
-                legacy_config::add_content_root(pack.clone());
+                ::mods::add_content_root(pack.clone());
                 log::info!("realistic passengers: {}", pack.display());
             } else {
                 log::warn!(
@@ -324,15 +327,21 @@ pub(crate) fn prepare(
         }
     }
     for z in &args.content_zip {
-        if let Err(e) = legacy_config::add_content_zip(z) {
+        if let Err(e) = ::mods::add_content_zip(z) {
             log::warn!("content zip {}: {e}", z.display());
         }
     }
-    legacy_config::vfs::mount_env_zips();
+    ::mods::mount_env_zips();
     if let Some(c) = content_dir() {
-        legacy_config::vfs::mount_dir_zips(&c.join("Archives"));
+        ::mods::mount_dir_zips(&c.join("Archives"));
     }
-    legacy_config::add_content_root(args.root.clone());
+    let mods_dir = content_dir()
+        .map(|c| c.join("mods"))
+        .unwrap_or_else(|| PathBuf::from("mods"));
+    if let Err(e) = ::mods::init(&mods_dir, Some(&args.root)) {
+        log::warn!("mods folder {}: {e}", mods_dir.display());
+        ::mods::add_content_root(args.root.clone());
+    }
     Ok(Some((args, server_cfg)))
 }
 
@@ -551,6 +560,7 @@ pub(crate) fn make_app(
         clock_hold: 0.0,
         pad_look: [false; 4],
         teleport_pick: false,
+        teleport_down: None,
         discord: None,
         discord_next_update: Instant::now(),
         headtrack: None,

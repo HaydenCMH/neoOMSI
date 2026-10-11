@@ -4,7 +4,7 @@ use super::*;
 
 pub(super) fn weather_files() -> Vec<String> {
     scan_cached(&WEATHER_SCAN, || {
-        let mut files: Vec<String> = ::legacy_config::read_dir_merged("Weather")
+        let mut files: Vec<String> = ::mods::read_dir_merged("Weather")
             .into_iter()
             .filter(|p| {
                 p.extension()
@@ -735,4 +735,21 @@ pub(crate) fn preset_row(
         None => value_label("preset", "custom", "Custom"),
     };
     Some((row(name, 'o', &label, desc, None), "preset".to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::select_options;
+
+    #[test]
+    fn window_mode_choices_remain_distinct() {
+        assert_eq!(
+            select_options("window_mode"),
+            vec![
+                ("windowed", "Windowed"),
+                ("borderless", "Windowed Borderless"),
+                ("fullscreen", "Fullscreen"),
+            ]
+        );
+    }
 }
