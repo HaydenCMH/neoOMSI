@@ -142,6 +142,8 @@ pub struct MultiLight {
     /// live `[matl_freetex]` textures present when it was made.  The latter is normally
     /// empty, but a dashboard may combine a live screen with several light maps.
     pub cache: HashMap<(u32, Vec<Option<TextureId>>), (MaterialId, MaterialId)>,
+    /// The rebuilt items 2, 3, ... for each light-map and FreeTex combination.
+    pub more_cache: HashMap<(u32, Vec<Option<TextureId>>), Vec<MaterialId>>,
     pub current: u32,
     /// Composite maps are shared like the vehicles' pictures (see `FreeTex::shared`).
     pub shared: Arc<Mutex<HashMap<PathBuf, (TextureId, usize)>>>,
@@ -237,6 +239,10 @@ pub struct FreeTex {
     pub textures: Arc<::texture::TextureCache>,
     /// File name (lower case) → the materials already built for it.
     pub cache: HashMap<String, (MaterialId, MaterialId)>,
+    /// File name (lower case) → the rebuilt items 2, 3, ... of a `[matl_change]`.
+    /// A roller blind can be a free texture in every light state, not only the first
+    /// powered item.
+    pub more_cache: HashMap<String, Vec<MaterialId>>,
     /// File name (lower case) → its resolved GPU texture, including failed lookups.
     pub texture_cache: HashMap<String, Option<TextureId>>,
     /// The name currently applied.
@@ -474,6 +480,9 @@ impl SlotSpec {
             if let Some(source_item) = &source.item {
                 replace(item, source_item);
             }
+        }
+        for (more, source_more) in spec.more.iter_mut().zip(&source.more) {
+            replace(more, source_more);
         }
         spec
     }

@@ -245,7 +245,9 @@ pub(super) fn sync_materials(
                         None => v.spec.clone(),
                     };
                     let p = spec.build(renderer, scene, v.base_tex);
-                    f.cache.insert(key, p);
+                    let more = spec.build_more(renderer, scene, v.base_tex, |_, material| material);
+                    f.more_cache.insert(key.clone(), more);
+                    f.cache.insert(key.clone(), p);
                     p
                 }
             };
@@ -254,6 +256,9 @@ pub(super) fn sync_materials(
             }
             if f.item_only || !item_has_freetex {
                 v.item = pair.1;
+                if let Some(more) = f.more_cache.get(&key) {
+                    v.more = more.clone();
+                }
             }
         }
         if freetex_changed {
@@ -283,10 +288,10 @@ pub(super) fn sync_materials(
                 l.current = mask;
                 let free_state: Vec<Option<TextureId>> = v.free.iter().map(|f| f.texture).collect();
                 let cache_key = (mask, free_state);
-                let pair = if v.free.is_empty() && mask == 0 {
-                    l.plain
+                let (pair, more) = if v.free.is_empty() && mask == 0 {
+                    (l.plain, None)
                 } else if let Some(p) = l.cache.get(&cache_key) {
-                    *p
+                    (*p, l.more_cache.get(&cache_key).cloned())
                 } else {
                     let tex = (mask != 0)
                         .then(|| l.composite(renderer, scene, mask))
@@ -305,11 +310,16 @@ pub(super) fn sync_materials(
                     }
                     spec.set_lightmap(tex);
                     let p = spec.build(renderer, scene, v.base_tex);
-                    l.cache.insert(cache_key, p);
-                    p
+                    let more = spec.build_more(renderer, scene, v.base_tex, |_, material| material);
+                    l.cache.insert(cache_key.clone(), p);
+                    l.more_cache.insert(cache_key, more.clone());
+                    (p, Some(more))
                 };
                 v.base = pair.0;
                 v.item = pair.1;
+                if let Some(more) = more {
+                    v.more = more;
+                }
             }
         }
         if let Some(inst) = render.instances.get(v.mesh) {
