@@ -1,7 +1,5 @@
 mod admin;
 mod ambience;
-#[cfg(target_os = "android")]
-mod android;
 mod camera_arm;
 mod career;
 mod describe;
