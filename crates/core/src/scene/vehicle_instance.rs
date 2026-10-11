@@ -491,9 +491,9 @@ impl World {
                 "{}: drawn in model order (a blended slot writes depth before an opaque one)",
                 vt.def.path.display()
             );
-            for &i in &instances {
+            for (n, &i) in instances.iter().enumerate() {
                 if scene.instances.get(i).is_some_and(|x| !x.blob) {
-                    renderer.set_ordered(scene, i, true);
+                    renderer.set_ordered(scene, i, n as u32 + 1);
                 }
             }
         }

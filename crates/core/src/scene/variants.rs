@@ -335,37 +335,52 @@ impl SlotSpec {
         diffuse: bool,
         item_only: bool,
     ) -> Self {
+        self.with_freetex_from(self, key, tex, diffuse, item_only)
+    }
+
+    pub(super) fn with_freetex_from(
+        &self,
+        from: &SlotSpec,
+        key: Option<TextureId>,
+        tex: TextureId,
+        diffuse: bool,
+        item_only: bool,
+    ) -> Self {
         let mut spec = self.clone();
-        let replace = |look: &mut Look| {
-            if (diffuse && look.diffuse.is_none()) || (key.is_some() && look.diffuse == key) {
+        let replace = |look: &mut Look, src: &Look| {
+            if (diffuse && src.diffuse.is_none()) || (key.is_some() && src.diffuse == key) {
                 look.diffuse = Some(tex);
             }
             if let Some(key) = key {
-                for stage in [&mut look.night, &mut look.lightmap] {
-                    if *stage == Some(key) {
-                        *stage = Some(tex);
-                    }
+                if src.night == Some(key) {
+                    look.night = Some(tex);
                 }
-                if let Some((id, _)) = &mut look.transmap {
-                    if *id == key {
+                if src.lightmap == Some(key) {
+                    look.lightmap = Some(tex);
+                }
+                if let (Some((id, _)), Some((sid, _))) = (&mut look.transmap, &src.transmap) {
+                    if *sid == key {
                         *id = tex;
                     }
                 }
-                if let Some((id, _)) = &mut look.envmap {
-                    if *id == key {
+                if let (Some((id, _)), Some((sid, _))) = (&mut look.envmap, &src.envmap) {
+                    if *sid == key {
                         *id = tex;
                     }
                 }
             }
         };
         if !item_only {
-            replace(&mut spec.base);
+            let src = from.base.clone();
+            replace(&mut spec.base, &src);
         }
         if let Some(item) = &mut spec.item {
-            replace(item);
+            let src = from.item.clone().unwrap_or_else(|| item.clone());
+            replace(item, &src);
         }
-        for it in &mut spec.more {
-            replace(it);
+        for (i, it) in spec.more.iter_mut().enumerate() {
+            let src = from.more.get(i).cloned().unwrap_or_else(|| it.clone());
+            replace(it, &src);
         }
         spec
     }
@@ -385,12 +400,15 @@ impl SlotSpec {
     }
 
     pub fn set_lightmap(&mut self, tex: Option<TextureId>) {
-        self.base.lightmap = tex;
+        let Some(tex) = tex else {
+            return;
+        };
+        self.base.lightmap = Some(tex);
         if let Some(it) = &mut self.item {
-            it.lightmap = tex;
+            it.lightmap = Some(tex);
         }
         for it in &mut self.more {
-            it.lightmap = tex;
+            it.lightmap = Some(tex);
         }
     }
 
