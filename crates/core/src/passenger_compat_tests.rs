@@ -1182,6 +1182,56 @@ fn procedural_waiting_points_start_on_the_floor_and_keep_it_when_walking() {
 }
 
 #[test]
+fn a_waiting_passenger_stays_on_a_raised_platform_above_a_sloped_kerb() {
+    let f = Fixture::new();
+    f.world
+        .terrains
+        .write()
+        .insert((0, 0), Arc::new(::map::Terrain::flat()));
+    let mut h = Humans::new(&f.root);
+    let floor = 0.25;
+    let mut platform = stop(DVec3::new(2.0, 2.0, 0.0), 0.0, "Platform");
+    platform.spots[0].pos.z = floor;
+    h.stops.insert(1, platform);
+    let mut pax = Pax::new(1.1);
+    pax.task = Task::WaitingForBus;
+    pax.stop = Some(1);
+    pax.spot = Some(0);
+    pax.pos = DVec3::new(2.0, 2.0, floor);
+    pax.movement = Movement::Standing;
+    let mut person = f.person(7, State::Pax(Box::new(pax)), false);
+    person.position = DVec3::new(2.0, 2.0, floor);
+    h.people.push(person);
+
+    h.pax_move(0, 0.05, 50.0, &f.world, &[], &HashMap::new());
+
+    assert_eq!(h.pax(0).unwrap().pos.z, floor);
+
+    // Returning to the place must keep the same floor while walking, not merely once the
+    // passenger is standing there again.
+    {
+        let p = h.pax_mut(0).unwrap();
+        p.task = Task::WalkingToBusstop;
+        p.movement = Movement::ToTarget;
+        p.target = DVec3::new(3.0, 2.0, floor);
+    }
+    h.pax_move(0, 0.05, 50.0, &f.world, &[], &HashMap::new());
+    assert_eq!(h.pax(0).unwrap().pos.z, floor);
+
+    // The task transition itself samples the nearby road too; it must retain the waiting
+    // point's floor rather than snapping down for one frame before the next movement tick.
+    h.pax_mut(0).unwrap().pos.z = 0.0;
+    h.set_task(
+        0,
+        Task::WaitingForBus,
+        &[],
+        &HashMap::new(),
+        &f.world,
+    );
+    assert_eq!(h.pax(0).unwrap().pos.z, floor);
+}
+
+#[test]
 fn streamed_floor_correction_changes_the_passenger_authority() {
     let f = Fixture::new();
     let mut p = Pax::new(1.1);
@@ -1967,6 +2017,27 @@ fn a_seat_being_vacated_still_counts_for_the_scripts() {
 }
 
 #[test]
+fn a_seated_on_foot_player_counts_for_the_vehicle_scripts() {
+    let f = Fixture::new();
+    let mut h = Humans::new(&f.root);
+    h.buses.player_cabin = Some(cabin());
+    h.avatars.avatar_cmds.insert(
+        0,
+        AvatarCmd {
+            pos: DVec3::ZERO,
+            heading: 0.0,
+            vel: DVec2::ZERO,
+            lift: 0.0,
+            seat: Some((BusId::Player, 1)),
+            floor: None,
+            aboard: None,
+            wheel: None,
+        },
+    );
+    assert_eq!(h.seat_counts()[2], 1);
+}
+
+#[test]
 fn opening_another_exit_preserves_the_current_path_progress() {
     let f = Fixture::new();
     let mut h = Humans::new(&f.root);
@@ -2576,6 +2647,52 @@ fn a_client_without_timetable_records_keeps_the_hosts_line_permission() {
     h.buses.last_buses = vec![b.clone()];
     assert_eq!(h.grant_eligible(&grant), Some(true));
     assert_eq!(h.bus_for(0, 1, &[b], &ix), Some(BusId::Player));
+}
+
+#[test]
+fn a_hof_line_prefix_does_not_make_a_timetable_service_ineligible() {
+    let f = Fixture::new();
+    let mut h = Humans::new(&f.root);
+    let mut pax = Pax::new(1.1);
+    pax.task = Task::WaitingForBus;
+    pax.stop = Some(1);
+    pax.journey.allowed_termini = Some(["Apsley Station".into()].into_iter().collect());
+    h.people.push(f.person(7, State::Pax(Box::new(pax)), false));
+    let mut s = stop(DVec3::ZERO, 0.0, "Apsley Station");
+    s.buses.push((BusId::Player, true));
+    h.stops.insert(1, s);
+    let grant = PassengerGrant {
+        id: 7,
+        transfer: 1,
+        stop: 1,
+        spot: 0,
+        destination: Some("Apsley Station".into()),
+        alternative: None,
+        alternative_m: 0.0,
+        ride_km: 12.0,
+        line_destination: Some("Apsley Station".into()),
+        allowed_termini: Some(vec!["Apsley Station".into()]),
+    };
+    let mut b = bus(cabin());
+    b.terminus = Some("402 Apsley Station".into());
+    h.buses.last_buses = vec![b.clone()];
+    assert_eq!(h.grant_eligible(&grant), Some(true));
+    let ix = [(b.id, 0)].into_iter().collect();
+    assert_eq!(h.bus_for(0, 1, &[b], &ix), Some(BusId::Player));
+}
+
+#[test]
+fn a_hof_line_prefix_is_not_part_of_the_terminus_stop_name() {
+    let mut h = Humans::new(Path::new("/nonexistent"));
+    h.stops.insert(1, stop(DVec3::ZERO, 0.0, "Apsley Station"));
+    let mut b = bus(cabin());
+    b.terminus = Some("B2 Apsley Station".into());
+    let regs = h.register_buses(std::slice::from_ref(&b), 0.05);
+    assert!(regs[&b.id].all_exit);
+    assert!(h.stops[&1].buses.is_empty());
+    b.terminus = Some("402 Apsley Bus Station".into());
+    let regs = h.register_buses(&[b], 0.05);
+    assert!(!regs[&BusId::Player].all_exit, "similar names remain distinct");
 }
 
 #[test]

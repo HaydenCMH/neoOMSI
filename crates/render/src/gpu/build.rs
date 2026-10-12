@@ -209,7 +209,7 @@ impl Renderer {
             ),
             _ => {}
         }
-        let vram = dedicated_vram_mb(&info);
+        let vram = dedicated_vram_mb(&info).or_else(|| vulkan_vram_mb(&adapter));
         let guess_mb: u64 = match info.device_type {
             wgpu::DeviceType::DiscreteGpu => vram.filter(|v| *v >= 512).map_or(1600, |v| {
                 if v <= 2560 {
@@ -223,6 +223,10 @@ impl Renderer {
             _ => 800,
         };
         ADAPTER_TEXTURE_MB.store(guess_mb, std::sync::atomic::Ordering::Relaxed);
+        ADAPTER_IDS.store(
+            ((info.vendor as u64) << 32) | info.device as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         log::info!(
             "graphics adapter: {} ({:?}, {:?}{}), texture memory taken for it: {guess_mb} MB",
             info.name,

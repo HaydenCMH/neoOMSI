@@ -79,6 +79,7 @@ impl Renderer {
             light_grid: Default::default(),
             last_lights: Vec::new(),
             bind_groups: HashMap::new(),
+            material_uniform_page: None,
             pbr_maps: HashMap::new(),
             snow_textures: Default::default(),
         }
@@ -98,7 +99,8 @@ impl Renderer {
             .map(|r| r.2)
             .max()
             .map(|m| m as usize + 1)
-            .unwrap_or(1);
+            .unwrap_or(1)
+            .max(materials.len());
         scene.instances.push(Instance {
             mesh,
             transform,
@@ -151,7 +153,8 @@ impl Renderer {
             .map(|r| r.2)
             .max()
             .map(|m| m as usize + 1)
-            .unwrap_or(1);
+            .unwrap_or(1)
+            .max(materials.len());
         scene.instances.push(Instance {
             mesh,
             transform,

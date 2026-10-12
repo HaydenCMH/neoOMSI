@@ -843,6 +843,12 @@ impl World {
                                         .as_ref()
                                         .map(|p| p.str_var(tt.variable.trim()).is_some())
                                         .unwrap_or(false);
+                                    let slot_ov: Vec<&MaterialDef> = overrides
+                                        .iter()
+                                        .filter(|o| {
+                                            !o.item && ::simulation::vehicle::override_slot(o3d_mats, o) == Some(slot)
+                                        })
+                                        .collect();
                                     if scripted_text {
                                         let atlas = self.fonts.lock().get(&tt.font, &|p| {
                                             ::texture::decode_file(p)
@@ -856,12 +862,13 @@ impl World {
                                         let (w, h) =
                                             (tt.width.max(1) as u32, tt.height.max(1) as u32);
                                         let tex = gpu.add_blank_mips(renderer, scene, w, h);
-                                        let mat = renderer.add_material(
+                                        let mat = scenery_text_material(
+                                            renderer,
                                             scene,
-                                            Some(tex),
+                                            tex,
                                             AlphaMode::Blend,
-                                            [1.0; 4],
                                             true,
+                                            &slot_ov,
                                         );
                                         let mat = gpu.material(renderer, scene, mat);
                                         tg.textures.push(tex);
@@ -879,7 +886,7 @@ impl World {
                                         .cloned()
                                         .unwrap_or_default();
                                     let alpha = text_alpha(o3d_mats, slot, overrides);
-                                    let key = scenery_text_key(tt, &text, alpha);
+                                    let key = scenery_text_key(tt, &text, alpha, &slot_ov);
                                     if let Some(e) = gpu.text_textures.get_mut(&key) {
                                         e.2 += 1;
                                         let mat = e.1;
@@ -899,12 +906,13 @@ impl World {
                                     let tex = gpu.add_image(renderer, scene, &image, true);
                                     // (lit like the rest of the object: Omsi.exe only swaps
                                     // the slot's texture, a sign does not shine at night)
-                                    let mat = renderer.add_material(
+                                    let mat = scenery_text_material(
+                                        renderer,
                                         scene,
-                                        Some(tex),
+                                        tex,
                                         alpha,
-                                        [1.0; 4],
                                         false,
+                                        &slot_ov,
                                     );
                                     let mat = gpu.material(renderer, scene, mat);
                                     gpu.text_textures.insert(key.clone(), (tex, mat, 1));
