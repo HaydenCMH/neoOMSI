@@ -78,12 +78,18 @@ impl App {
         {
             return;
         }
+        let fire = self.door_key_fire(n);
+        self.door_key_triggers.insert(code, fire);
+    }
+
+    /// Door key `n` (front to back) worked on the player's bus; the triggers fired.
+    pub(crate) fn door_key_fire(&mut self, n: usize) -> Vec<String> {
         let Some(p) = self.player.as_mut() else {
-            return;
+            return Vec::new();
         };
         let groups = crate::player::door_keys(&p.vehicle.ty);
         let Some(group) = n.checked_sub(1).and_then(|i| groups.get(i)) else {
-            return;
+            return Vec::new();
         };
         let fire = crate::player::door_group_to_fire(&mut p.vehicle, group);
         log::info!("door key {n}: {}", fire.join(" + "));
@@ -99,7 +105,7 @@ impl App {
         for name in &fire {
             p.vehicle.trigger(name);
         }
-        self.door_key_triggers.insert(code, fire);
+        fire
     }
 
     /// `doors_release`: the bus's own door release, whatever its script calls it; the triggers fired.

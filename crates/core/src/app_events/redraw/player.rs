@@ -288,11 +288,11 @@ impl App {
         let mut actions = actions;
         if self.game_menu.is_none() {
             let mut game: Vec<String> = Vec::new();
-            let mut release: Vec<bool> = Vec::new();
+            let mut doors: Vec<(String, bool)> = Vec::new();
             actions.retain(|(name, down)| {
                 let n = name.to_ascii_lowercase();
-                if n == "doors_release" {
-                    release.push(*down);
+                if n == "doors_release" || n.starts_with("doorkey_") {
+                    doors.push((n, *down));
                     return false;
                 }
                 if let Some(k) = [
@@ -321,12 +321,16 @@ impl App {
                 }
                 true
             });
-            for down in release {
-                if down {
-                    self.pad_door_release = self.door_release();
-                } else {
-                    let fired = std::mem::take(&mut self.pad_door_release);
+            for (n, down) in doors {
+                if !down {
+                    let fired = self.pad_doors.remove(&n).unwrap_or_default();
                     self.door_triggers_off(&fired);
+                } else if self.view != "free" {
+                    let fired = match n.strip_prefix("doorkey_").and_then(|k| k.parse().ok()) {
+                        Some(k) => self.door_key_fire(k),
+                        None => self.door_release(),
+                    };
+                    self.pad_doors.insert(n, fired);
                 }
             }
             for n in game {
