@@ -209,7 +209,7 @@ impl Renderer {
             ),
             _ => {}
         }
-        let vram = dedicated_vram_mb(&info);
+        let vram = dedicated_vram_mb(&info).or_else(|| vulkan_vram_mb(&adapter));
         let guess_mb: u64 = match info.device_type {
             wgpu::DeviceType::DiscreteGpu => vram.filter(|v| *v >= 512).map_or(1600, |v| {
                 if v <= 2560 {

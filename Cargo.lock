@@ -3675,6 +3675,7 @@ name = "render"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "ash",
  "bytemuck",
  "geometry",
  "glam",

@@ -70,11 +70,63 @@ pub(crate) fn dedicated_vram_mb(info: &wgpu::AdapterInfo) -> Option<u64> {
         }
         None
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        // (the DRM driver's sysfs: amdgpu; NVIDIA's own driver tells it through Vulkan only)
+        let hex = |p: std::path::PathBuf| {
+            let t = std::fs::read_to_string(p).ok()?;
+            u32::from_str_radix(t.trim().trim_start_matches("0x"), 16).ok()
+        };
+        for e in std::fs::read_dir("/sys/class/drm").ok()?.flatten() {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            if !name.starts_with("card") || name.contains('-') {
+                continue;
+            }
+            let dev = e.path().join("device");
+            if hex(dev.join("vendor")) != Some(info.vendor)
+                || hex(dev.join("device")) != Some(info.device)
+            {
+                continue;
+            }
+            let bytes = std::fs::read_to_string(dev.join("mem_info_vram_total"))
+                .ok()
+                .and_then(|t| t.trim().parse::<u64>().ok());
+            if let Some(b) = bytes.filter(|b| *b > 0) {
+                return Some(b >> 20);
+            }
+        }
+        None
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         let _ = info;
         None
     }
+}
+
+/// The largest device-local memory heap of a Vulkan adapter (MB): the card's own memory
+/// where the system does not tell it (NVIDIA's driver on Linux).
+#[cfg(target_os = "linux")]
+pub(crate) fn vulkan_vram_mb(adapter: &wgpu::Adapter) -> Option<u64> {
+    // SAFETY: the adapter outlives the borrow, and only its memory properties are read
+    let hal = unsafe { adapter.as_hal::<wgpu::hal::api::Vulkan>() }?;
+    // SAFETY: the physical device belongs to this instance
+    let props = unsafe {
+        hal.shared_instance()
+            .raw_instance()
+            .get_physical_device_memory_properties(hal.raw_physical_device())
+    };
+    props.memory_heaps[..props.memory_heap_count as usize]
+        .iter()
+        .filter(|h| h.flags.contains(ash::vk::MemoryHeapFlags::DEVICE_LOCAL))
+        .map(|h| h.size >> 20)
+        .max()
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn vulkan_vram_mb(_adapter: &wgpu::Adapter) -> Option<u64> {
+    None
 }
 
 pub(crate) struct DevicePoller {
