@@ -248,20 +248,23 @@ impl FontAtlas {
         if text.contains('@') {
             let lh = self.font.height.max(1) as u32;
             let mut out = vec![0u8; (w * h * 4) as usize];
-            let lines: Vec<&str> = text.strip_prefix('@').unwrap_or(text).split('@').collect();
-            // the block of lines is centred vertically, like a single line is
-            let block = lh * lines.len() as u32;
-            let top = h.saturating_sub(block) / 2;
+            let lines: Vec<&str> = text.split('@').collect();
+            let block = i64::from(lh) * lines.len() as i64;
+            let top = (i64::from(h) - block) / 2;
             for (i, line) in lines.iter().enumerate() {
-                let y0 = top + i as u32 * lh;
-                if y0 >= h {
+                let y0 = top + i as i64 * i64::from(lh);
+                if y0 >= i64::from(h) {
                     break;
                 }
-                let rows = lh.min(h - y0);
+                let start = y0.max(0);
+                let end = (y0 + i64::from(lh)).min(i64::from(h));
+                if start >= end {
+                    continue;
+                }
                 let img = self.render_aligned(line, w, lh, full_color, rgb, align);
-                for y in 0..rows as usize {
-                    let src = y * w as usize * 4;
-                    let dst = (y0 as usize + y) * w as usize * 4;
+                for y in start..end {
+                    let src = (y - y0) as usize * w as usize * 4;
+                    let dst = y as usize * w as usize * 4;
                     out[dst..dst + w as usize * 4].copy_from_slice(&img[src..src + w as usize * 4]);
                 }
             }
@@ -336,6 +339,70 @@ impl FontAtlas {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn line_atlas(height: u32) -> FontAtlas {
+        let font = Font {
+            height: height as i32,
+            chars: ['A', 'B', 'C']
+                .into_iter()
+                .enumerate()
+                .map(|(x, ch)| FontChar {
+                    ch,
+                    x0: x as i32,
+                    x1: x as i32 + 1,
+                    y: 0,
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let colors = [[255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 255, 255]];
+        let color = (0..height)
+            .flat_map(|_| colors.into_iter().flatten())
+            .collect();
+        FontAtlas::new(font, 3, height, color, vec![255; (3 * height * 4) as usize])
+    }
+
+    #[test]
+    fn leading_and_trailing_line_breaks_preserve_empty_lines() {
+        let atlas = line_atlas(2);
+        for (text, expected) in [
+            ("@A", "....AA.."),
+            ("A@", "..AA...."),
+            ("@@A@", "....AA.."),
+            ("@@", "........"),
+        ] {
+            let image = atlas.render(text, 1, 8, true, [255; 3]);
+            let expected: Vec<u8> = expected
+                .chars()
+                .flat_map(|c| if c == 'A' { [255, 0, 0, 255] } else { [0; 4] })
+                .collect();
+            assert_eq!(image, expected, "{text}");
+        }
+    }
+
+    #[test]
+    fn nlc_menu_centres_oversized_block_including_blank_lines() {
+        // NLC_FAP_Display_Menu: 62 px font, 186 px texture. Its script builds
+        // "@consumption@fuel@distance@": the empty outer lines lie outside it.
+        let atlas = line_atlas(62);
+        let image = atlas.render("@A@B@C@", 1, 186, true, [255; 3]);
+        for (y, pixel) in image.chunks_exact(4).enumerate() {
+            let expected = match y / 62 {
+                0 => [255, 0, 0, 255],
+                1 => [0, 255, 0, 255],
+                _ => [0, 0, 255, 255],
+            };
+            assert_eq!(pixel, expected, "row {y}");
+        }
+    }
+
+    #[test]
+    fn oversized_block_clips_partial_lines_with_signed_centring() {
+        let atlas = line_atlas(2);
+        // (3 - 6) / 2 truncates to -1, as OMSI's signed division does.
+        let image = atlas.render("A@B@C", 1, 3, true, [255; 3]);
+        assert_eq!(image, [255, 0, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255]);
+    }
 
     #[test]
     fn whitespace_does_not_draw_visible_first_glyph() {

@@ -1,6 +1,37 @@
 use super::*;
 
 #[test]
+fn scenery_text_cache_separates_addressing_and_border_colours() {
+    let tt = ::model::TextTexture::default();
+    let model = ::model::Model::parse(&::legacy_config::CfgFile::from_str(
+        "display.sco",
+        "[mesh]\ndisplay.o3d\n[matl]\nwrap.bmp\n0\n[matl]\nclamp.bmp\n0\n[matl_texadress_clamp]\n[matl]\nmirror.bmp\n0\n[matl_texadress_mirror]\n[matl]\nonce.bmp\n0\n[matl_texadress_mirroronce]\n[matl]\nborder.bmp\n0\n[matl_texadress_border]\n255\n0\n0\n0\n[matl]\nother_border.bmp\n0\n[matl_texadress_border]\n0\n255\n0\n0\n",
+    ));
+    let keys: Vec<String> = model.meshes[0]
+        .materials
+        .iter()
+        .map(|o| scenery_text_key(&tt, "same text", AlphaMode::Blend, &[o]))
+        .collect();
+    assert_eq!(keys.len(), 6);
+    for (i, key) in keys.iter().enumerate() {
+        for other in &keys[..i] {
+            assert_ne!(key, other, "different addressing must not share a material");
+        }
+    }
+    assert_eq!(
+        keys[0],
+        scenery_text_key(&tt, "same text", AlphaMode::Blend, &[])
+    );
+    // A slot without its own addressing command keeps an earlier block's mode.
+    let inherited = MaterialDef::default();
+    let clamped = &model.meshes[0].materials[1];
+    assert_eq!(
+        keys[1],
+        scenery_text_key(&tt, "same text", AlphaMode::Blend, &[clamped, &inherited])
+    );
+}
+
+#[test]
 fn null_texture_names() {
     assert!(is_null_texture("null.bmp"));
     assert!(is_null_texture(" NULL.BMP "));

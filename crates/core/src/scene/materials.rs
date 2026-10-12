@@ -313,11 +313,15 @@ pub(super) fn text_alpha(
     }
 }
 
-/// Placement is part of the picture: otherwise a centred sign can lend its cached
-/// texture to a left-aligned one showing the same words.
-pub(super) fn scenery_text_key(tt: &::model::TextTexture, text: &str, alpha: AlphaMode) -> String {
+/// The cache shares both texture and material, so placement and addressing must match
+pub(super) fn scenery_text_key(
+    tt: &::model::TextTexture,
+    text: &str,
+    alpha: AlphaMode,
+    overrides: &[&MaterialDef],
+) -> String {
     format!(
-        "{}|{}|{}x{}|{}|{:?}|{:?}|{}|{}",
+        "{}|{}|{}x{}|{}|{:?}|{:?}|{}|{}|{:?}|{:?}",
         tt.font.to_ascii_lowercase(),
         text,
         tt.width.max(1),
@@ -327,6 +331,36 @@ pub(super) fn scenery_text_key(tt: &::model::TextTexture, text: &str, alpha: Alp
         alpha,
         tt.orientation,
         tt.grid,
+        tex_addressing(overrides.iter().copied()),
+        material_extra(overrides, None, None, [0.0; 4]).border,
+    )
+}
+
+/// Replacing a scenery slot with generated text must retain its addressing
+pub(super) fn scenery_text_material(
+    renderer: &Renderer,
+    scene: &mut Scene,
+    texture: TextureId,
+    alpha: AlphaMode,
+    unlit: bool,
+    overrides: &[&MaterialDef],
+) -> MaterialId {
+    renderer.address_next.set(tex_addressing(overrides.iter().copied()));
+    renderer.add_material_extra(
+        scene,
+        Some(texture),
+        alpha,
+        [1.0; 4],
+        unlit,
+        None,
+        None,
+        None,
+        None,
+        [0.0; 3],
+        MaterialExtra {
+            border: material_extra(overrides, None, None, [0.0; 4]).border,
+            ..Default::default()
+        },
     )
 }
 
