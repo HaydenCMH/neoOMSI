@@ -233,21 +233,11 @@ pub fn run() -> Result<()> {
     });
     let mut app = app;
     let r = event_loop.run_app(&mut app);
+    // (with what was missed while driving, too)
+    game_link::write_diagnostics();
     lan_mods::clean_up();
     r?;
     Ok(())
-}
-
-pub(crate) fn launcher_statics() {
-    ENHANCED.store(
-        (config::get_string("graphics", "graphics").as_deref() == Some("enhanced")) || legacy_config::env::var_os("OMSI_ENHANCED").is_some(),
-        std::sync::atomic::Ordering::Relaxed,
-    );
-    CLASSIC.store(config::get_string("graphics", "graphics").as_deref() == Some("vanilla"), std::sync::atomic::Ordering::Relaxed);
-    CLOUDS.store(
-        config::get_bool("graphics", "clouds").unwrap_or(true) && legacy_config::env::var_os("OMSI_NO_CLOUDS").is_none(),
-        std::sync::atomic::Ordering::Relaxed,
-    );
 }
 
 pub(crate) fn prepare(
@@ -313,8 +303,9 @@ pub(crate) fn prepare(
     if let Some(memo) = root_memo().filter(|_| is_omsi_root(&args.root)) {
         let _ = std::fs::write(memo, args.root.to_string_lossy().as_bytes());
     }
-    if let Some(c) = content_dir() {
-        match legacy_config::ensure_content_layout(&c) {
+    let content = content_dir();
+    if let Some(c) = &content {
+        match legacy_config::ensure_content_layout(c) {
             Ok(()) => {
                 ::mods::add_content_root(c.clone());
                 log::info!("content folder (mods): {}", c.display());
@@ -323,7 +314,7 @@ pub(crate) fn prepare(
         }
     }
     if config::get_string("passengers", "models").unwrap_or_else(|| "omsi".into()) == "realistic" {
-        if let Some(content) = content_dir() {
+        if let Some(content) = content.clone() {
             let pack = pax_pack::folder(&content);
             if pack.join("Humans").is_dir() {
                 ::mods::add_content_root(pack.clone());
@@ -345,14 +336,12 @@ pub(crate) fn prepare(
         }
     }
     ::mods::mount_env_zips();
-    if let Some(c) = content_dir() {
-        ::mods::mount_dir_zips(&c.join("Archives"));
-    }
-    let mods_dir = content_dir()
-        .map(|c| c.join("mods"))
-        .unwrap_or_else(|| PathBuf::from("mods"));
-    if let Err(e) = ::mods::init(&mods_dir, Some(&args.root)) {
-        log::warn!("mods folder {}: {e}", mods_dir.display());
+    let mods = match &content {
+        Some(c) => ::mods::init(c, Some(&args.root))
+            .map_err(|e| log::warn!("mods folder {}: {e}", c.join(::mods::MODS_DIR).display())),
+        None => Err(()),
+    };
+    if mods.is_err() {
         ::mods::add_content_root(args.root.clone());
     }
     Ok(Some((args, server_cfg)))

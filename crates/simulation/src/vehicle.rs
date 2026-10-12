@@ -336,6 +336,9 @@ impl VehicleType {
         input.stringvarlists = def.scripts.stringvarlists.clone();
         input.constfiles = def.scripts.constfiles.clone();
         input.scripts = def.scripts.scripts.clone();
+        for p in input.varlists.iter().chain(&input.stringvarlists).chain(&input.constfiles).chain(&input.scripts) {
+            ::mods::diagnostics::missing(bus_file, p, ::mods::diagnostics::Kind::Script);
+        }
         let program = compile(&input);
         for e in &program.errors {
             log::warn!("{e}");
@@ -403,16 +406,19 @@ impl VehicleType {
                             skin,
                         })
                     }
-                    Err(e) => match ::mods::missing_vehicle_pack(&p) {
-                        Some(pack) => match missing_packs
-                            .iter_mut()
-                            .find(|(n, _)| n.eq_ignore_ascii_case(&pack))
-                        {
-                            Some(m) => m.1 += 1,
-                            None => missing_packs.push((pack, 1)),
-                        },
-                        None => log::warn!("{}: {e}", p.display()),
-                    },
+                    Err(e) => {
+                        ::mods::diagnostics::missing(&model_path, &p, ::mods::diagnostics::Kind::Mesh);
+                        match ::mods::missing_vehicle_pack(&p) {
+                            Some(pack) => match missing_packs
+                                .iter_mut()
+                                .find(|(n, _)| n.eq_ignore_ascii_case(&pack))
+                            {
+                                Some(m) => m.1 += 1,
+                                None => missing_packs.push((pack, 1)),
+                            },
+                            None => log::warn!("{}: {e}", p.display()),
+                        }
+                    }
                 }
             }
         }

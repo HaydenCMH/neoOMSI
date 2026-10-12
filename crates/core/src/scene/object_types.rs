@@ -1,3 +1,4 @@
+use ::mods::diagnostics::Kind;
 use super::*;
 
 /// A street name sign object (the stock Verkehrszeichen_MC `StreetSign_*`, and the
@@ -36,13 +37,21 @@ impl World {
         let path = ::mods::resolve_path(&self.root, rel);
         let loaded = (|| -> Option<Arc<ObjectType>> {
             let mut sco = SceneryObject::load(&path)
-                .map_err(|e| log::warn!("{e}"))
+                .map_err(|e| {
+                    log::warn!("{e}");
+                    ::mods::diagnostics::missing(&self.map_dir, &path, Kind::Object);
+                })
                 .ok()?;
             let sco_dir = path.parent()?.to_path_buf();
             let (model, model_dir) = match &sco.model_file {
                 Some(m) => {
                     let mp = ::mods::resolve_path(&sco_dir, m);
-                    let model = Model::load(&mp).map_err(|e| log::warn!("{e}")).ok()?;
+                    let model = Model::load(&mp)
+                        .map_err(|e| {
+                            log::warn!("{e}");
+                            ::mods::diagnostics::missing(&path, &mp, Kind::Model);
+                        })
+                        .ok()?;
                     (model, mp.parent()?.to_path_buf())
                 }
                 None => (sco.model.clone(), sco_dir.clone()),
@@ -79,7 +88,10 @@ impl World {
                             mesh_def_index.push(start + i);
                             mesh_pivots.push(::simulation::anim::pivot_from_mesh(&m));
                         }
-                        Err(e) => log::debug!("{}: {e}", mesh_path.display()),
+                        Err(e) => {
+                            log::debug!("{}: {e}", mesh_path.display());
+                            ::mods::diagnostics::missing(&path, &mesh_path, Kind::Mesh);
+                        }
                     }
                 }
             }
@@ -342,7 +354,10 @@ impl World {
         }
         let path = ::mods::resolve_path(&self.root, rel);
         let loaded = Spline::load(&path)
-            .map_err(|e| log::warn!("{e}"))
+            .map_err(|e| {
+                log::warn!("{e}");
+                ::mods::diagnostics::missing(&self.map_dir, &path, Kind::Spline);
+            })
             .ok()
             .map(|def| {
                 ::geometry::register_half_cant_width(rel, &def);

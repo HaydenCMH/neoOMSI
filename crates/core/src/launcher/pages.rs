@@ -1125,26 +1125,6 @@ pub fn mods(l: &mut Launcher, area: Rect) {
             y += 22.0;
         }
     }
-    if !m.waiting.is_empty() {
-        y += 8.0;
-        l.ui.heading(
-            Rect::new(inner.x, y, inner.w, 28.0),
-            "Waiting for their bus",
-            None,
-        );
-        y += 30.0;
-        for w in &m.waiting {
-            l.ui.text_in(
-                w,
-                Rect::new(inner.x, y, inner.w, 20.0),
-                12.0,
-                Weight::Regular,
-                TEXT_DIM,
-                Align::Left,
-            );
-            y += 22.0;
-        }
-    }
 }
 
 // --- tutorials --------------------------------------------------------------------------------

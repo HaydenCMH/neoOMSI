@@ -234,10 +234,9 @@ impl From<crate::install::Progress> for InstallProgress {
             report: p.report,
             warnings: p.warnings,
             installed: p.installed,
-            kept_aside: p.kept_aside,
-            from_inbox: p.from_inbox,
             started: p.started,
             finished: p.finished,
+            ..Default::default()
         }
     }
 }
@@ -274,7 +273,20 @@ impl From<crate::ModsStatus> for ModsStatus {
                 .collect(),
             inbox: m.inbox,
             inbox_items: m.inbox_items,
-            waiting: m.waiting,
+            installed: m
+                .installed
+                .into_iter()
+                .map(|i| InstalledMod {
+                    name: i.name,
+                    available: i.available,
+                    installed: i.installed,
+                    size: i.size,
+                    in_place: i.in_place,
+                    has_plugins: i.has_plugins,
+                    plugins_allowed: i.plugins_allowed,
+                    error: i.error,
+                })
+                .collect(),
             archives: m
                 .archives
                 .into_iter()
@@ -283,6 +295,10 @@ impl From<crate::ModsStatus> for ModsStatus {
             free_bytes: m.free_bytes,
             cleaned: m.cleaned,
             jobs: m.jobs.into_iter().map(Into::into).collect(),
+            order_revision: m.order_revision,
+            order_error: m.order_error,
+            new_mods: m.new_mods,
+            ..Default::default()
         }
     }
 }

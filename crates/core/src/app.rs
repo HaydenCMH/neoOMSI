@@ -826,6 +826,14 @@ impl App {
                                 let msg = p.start_up();
                                 self.service_msg = Some((msg, 6.0));
                             }
+                            let found = crate::game_link::diagnostics_shown();
+                            crate::game_link::write_diagnostics();
+                            if let Some(msg) = ::mods::diagnostics::summary(&found) {
+                                self.service_msg = Some(match self.service_msg.take() {
+                                    Some((m, _)) => (format!("{m}   |   {msg}"), 12.0),
+                                    None => (msg, 12.0),
+                                });
+                            }
                             if !p.vehicle.ty.missing_packs.is_empty() {
                                 let packs: Vec<String> = p
                                     .vehicle

@@ -674,6 +674,11 @@ pub const CONTENT_FOLDERS: &[&str] = &[
     "Sound",
 ];
 
+/// Is `name` one of [`CONTENT_FOLDERS`] (any case)?
+pub fn is_content_folder(name: &str) -> bool {
+    CONTENT_FOLDERS.iter().any(|f| f.eq_ignore_ascii_case(name))
+}
+
 /// Marker file of an neoOMSI content folder (so it is never mistaken for the OMSI 2
 /// installation itself).
 pub const CONTENT_MARKER: &str = ".neocontent";
@@ -712,6 +717,23 @@ pub fn content_folder_of(dir: &Path) -> PathBuf {
     }
 }
 
+/// `None` when `dir` lies inside an OMSI 2 installation, which neoOMSI never writes to.
+pub fn usable_content_folder(dir: &Path) -> Option<PathBuf> {
+    let dir = content_folder_of(dir);
+    let is_omsi = |p: &Path| {
+        resolve_existing(p, &["Omsi.exe"]).is_some() && resolve_existing(p, &["maps"]).is_some()
+    };
+    let inside_original = dir.ancestors().skip(1).any(|a| {
+        is_omsi(a)
+            && dir
+                .strip_prefix(a)
+                .ok()
+                .and_then(|rel| rel.components().next())
+                .is_some_and(|c| !c.as_os_str().eq_ignore_ascii_case("neoOMSI"))
+    });
+    (!inside_original).then_some(dir)
+}
+
 /// Check if a directory is writable by attempting to create and remove a probe file.
 pub fn is_writable(dir: &Path) -> bool {
     let probe = dir.join(".neoomsi-write-test");
@@ -723,13 +745,33 @@ pub fn is_writable(dir: &Path) -> bool {
 /// Create the content folder layout at `dir` (idempotent).
 pub fn ensure_content_layout(dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
-    std::fs::create_dir_all(dir.join("mods").join("shared"))?;
+    // earlier versions named it `Mods`, which a case-sensitive disk keeps apart from `mods`
+    let old = dir.join("Mods");
+    if old.is_dir() && !dir.join("mods").exists() {
+        std::fs::rename(&old, dir.join("mods"))?;
+    }
+    std::fs::create_dir_all(dir.join("mods"))?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_content_folder_never_lies_in_the_original_game() {
+        let omsi = std::env::temp_dir().join(format!("legacy-config-omsi-{}", std::process::id()));
+        std::fs::create_dir_all(omsi.join("maps")).unwrap();
+        std::fs::create_dir_all(omsi.join("Vehicles/Bus")).unwrap();
+        std::fs::write(omsi.join("Omsi.exe"), b"").unwrap();
+        assert_eq!(usable_content_folder(&omsi), Some(omsi.join("neoOMSI")));
+        assert_eq!(usable_content_folder(&omsi.join("neoOMSI")), Some(omsi.join("neoOMSI")));
+        assert_eq!(usable_content_folder(&omsi.join("Vehicles/Bus")), None);
+        assert_eq!(usable_content_folder(&omsi.join("mods")), None);
+        let elsewhere = std::env::temp_dir().join("neoomsi-content-elsewhere");
+        assert_eq!(usable_content_folder(&elsewhere), Some(elsewhere.clone()));
+        std::fs::remove_dir_all(&omsi).ok();
+    }
 
     #[test]
     fn writable_check() {

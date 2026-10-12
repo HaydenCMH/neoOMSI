@@ -37,6 +37,8 @@ pub struct ZipArchive {
     /// The archive file, which is also the folder it is mounted as.
     path: PathBuf,
     file: std::fs::File,
+    /// Size and modification time when it was read (a file replaced since is read anew).
+    stamp: Stamp,
     #[cfg(not(unix))]
     lock: std::sync::Mutex<()>,
     /// The archive's own folder that became the mount root (original spelling, `/` at the end
@@ -49,6 +51,12 @@ pub struct ZipArchive {
 }
 
 static MOUNTS: RwLock<Vec<Arc<ZipArchive>>> = RwLock::new(Vec::new());
+
+type Stamp = (u64, Option<std::time::SystemTime>);
+
+fn stamp_of(md: &std::fs::Metadata) -> Stamp {
+    (md.len(), md.modified().ok())
+}
 
 /// The largest entry that is read into memory (a corrupt size field must not allocate
 /// gigabytes).
@@ -130,10 +138,12 @@ impl ZipArchive {
     /// Read the central directory of `path`.
     pub fn open(path: &Path) -> io::Result<ZipArchive> {
         let file = std::fs::File::open(path)?;
-        let len = file.metadata()?.len();
+        let stamp = stamp_of(&file.metadata()?);
+        let len = stamp.0;
         let archive = ZipArchive {
             path: path.to_path_buf(),
             file,
+            stamp,
             #[cfg(not(unix))]
             lock: std::sync::Mutex::new(()),
             prefix: String::new(),
@@ -234,7 +244,7 @@ impl ZipArchive {
             ));
         }
         let mut archive = archive;
-        archive.prefix = Self::content_prefix(raw.iter().map(|(n, _, _)| n.as_str()));
+        archive.prefix = content_prefix(raw.iter().map(|(n, _, _)| n.as_str()));
         let prefix_lower = archive.prefix.to_lowercase();
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
         for (name, entry, is_dir) in raw {
@@ -275,74 +285,6 @@ impl ZipArchive {
         Ok(archive)
     }
 
-    /// The archive folder that holds OMSI's content folders ("" when the archive starts with
-    /// them). Only a folder that does not lie inside a content folder can be the root: a
-    /// bus's `Vehicles/MAN_Lion/` has `Sound` and `Texture` sub-folders as well, and so has a
-    /// scenery pack's `Sceneryobjects/Pack/`. Of the candidates, the one with the most
-    /// content folders among its children wins - counting first the names found only at the
-    /// top of an installation (`Vehicles`, `maps` ...), then those an add-on has inside too
-    /// (`Sound`, `Texture`, `Scripts`) - then the shallowest, then the first by name.
-    fn content_prefix<'a>(names: impl Iterator<Item = &'a str>) -> String {
-        const SHARED: [&str; 3] = ["Texture", "Sound", "Scripts"];
-        let is_content = |c: &str| {
-            crate::CONTENT_FOLDERS
-                .iter()
-                .any(|f| f.eq_ignore_ascii_case(c))
-        };
-        // folder (lower case) -> (spelling, lower-case names of its sub-folders)
-        let mut children: HashMap<String, (String, Vec<String>)> = HashMap::new();
-        for n in names {
-            let parts: Vec<&str> = n.split('/').filter(|c| !c.is_empty()).collect();
-            let folders = if n.ends_with('/') {
-                parts.len()
-            } else {
-                parts.len().saturating_sub(1)
-            };
-            for k in 0..folders.min(6) {
-                if k > 0 && is_content(parts[k - 1]) {
-                    break; // below a content folder: an add-on's own folders
-                }
-                let dir: String = parts[..k].iter().map(|c| format!("{c}/")).collect();
-                let e = children
-                    .entry(dir.to_lowercase())
-                    .or_insert_with(|| (dir.clone(), Vec::new()));
-                let child = parts[k].to_lowercase();
-                if !e.1.contains(&child) {
-                    e.1.push(child);
-                }
-            }
-        }
-        children
-            .iter()
-            .filter_map(|(key, (dir, kids))| {
-                let present: Vec<&str> = crate::CONTENT_FOLDERS
-                    .iter()
-                    .copied()
-                    .filter(|f| kids.iter().any(|k| k.eq_ignore_ascii_case(f)))
-                    .collect();
-                if present.is_empty() {
-                    return None;
-                }
-                let shared = present
-                    .iter()
-                    .filter(|f| SHARED.iter().any(|s| s.eq_ignore_ascii_case(f)))
-                    .count();
-                let depth = key.matches('/').count();
-                Some((
-                    (
-                        present.len() - shared,
-                        shared,
-                        std::cmp::Reverse(depth),
-                        std::cmp::Reverse(key.as_str()),
-                    ),
-                    dir,
-                ))
-            })
-            .max_by(|a, b| a.0.cmp(&b.0))
-            .map(|(_, dir)| dir.clone())
-            .unwrap_or_default()
-    }
-
     #[cfg(unix)]
     fn read_at(&self, offset: u64, len: usize) -> io::Result<Vec<u8>> {
         use std::os::unix::fs::FileExt;
@@ -379,6 +321,18 @@ impl ZipArchive {
     /// Unpacked size of all files below the mount root.
     pub fn total_size(&self) -> u64 {
         self.entries.values().map(|e| e.size).sum()
+    }
+
+    /// Is there a file or folder `rel` (relative to the mount root, any case)?
+    pub fn contains(&self, rel: &str) -> bool {
+        let key = normalize(rel);
+        self.is_file(&key) || self.is_dir(&key)
+    }
+
+    pub fn has_content(&self) -> bool {
+        self.dirs
+            .get("")
+            .is_some_and(|l| l.iter().any(|(n, is_dir)| *is_dir && crate::is_content_folder(n)))
     }
 
     /// Contents of the entry at `rel` (relative to the mount root, any case).
@@ -459,11 +413,74 @@ impl ZipArchive {
     }
 }
 
+/// The archive folder that holds OMSI's content folders ("" at the top): most top-level
+/// content folders wins, then most add-on ones (`Sound`, `Texture`, `Scripts`), then the
+/// shallowest. Never a folder inside a content folder.
+pub fn content_prefix<'a>(names: impl Iterator<Item = &'a str>) -> String {
+    const SHARED: [&str; 3] = ["Texture", "Sound", "Scripts"];
+    let is_content = crate::is_content_folder;
+    // folder (lower case) -> (spelling, lower-case names of its sub-folders)
+    let mut children: HashMap<String, (String, Vec<String>)> = HashMap::new();
+    for n in names {
+        let parts: Vec<&str> = n.split('/').filter(|c| !c.is_empty()).collect();
+        let folders = if n.ends_with('/') {
+            parts.len()
+        } else {
+            parts.len().saturating_sub(1)
+        };
+        for k in 0..folders.min(6) {
+            if k > 0 && is_content(parts[k - 1]) {
+                break; // below a content folder: an add-on's own folders
+            }
+            let dir: String = parts[..k].iter().map(|c| format!("{c}/")).collect();
+            let e = children
+                .entry(dir.to_lowercase())
+                .or_insert_with(|| (dir.clone(), Vec::new()));
+            let child = parts[k].to_lowercase();
+            if !e.1.contains(&child) {
+                e.1.push(child);
+            }
+        }
+    }
+    children
+        .iter()
+        .filter_map(|(key, (dir, kids))| {
+            let present: Vec<&str> = crate::CONTENT_FOLDERS
+                .iter()
+                .copied()
+                .filter(|f| kids.iter().any(|k| k.eq_ignore_ascii_case(f)))
+                .collect();
+            if present.is_empty() {
+                return None;
+            }
+            let shared = present
+                .iter()
+                .filter(|f| SHARED.iter().any(|s| s.eq_ignore_ascii_case(f)))
+                .count();
+            let depth = key.matches('/').count();
+            Some((
+                (
+                    present.len() - shared,
+                    shared,
+                    std::cmp::Reverse(depth),
+                    std::cmp::Reverse(key.as_str()),
+                ),
+                dir,
+            ))
+        })
+        .max_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, dir)| dir.clone())
+        .unwrap_or_default()
+}
+
 /// Mount the archive at `path` (as the folder `path`). Mounting the same archive twice is a
-/// no-op. Returns the mount point.
+/// no-op; an archive replaced since it was mounted is read anew. Returns the mount point.
 pub fn mount_zip(path: &Path) -> io::Result<PathBuf> {
+    let now = std::fs::metadata(path).map(|m| stamp_of(&m)).ok();
     if let Some(m) = MOUNTS.read().unwrap().iter().find(|m| m.path == path) {
-        return Ok(m.path.clone());
+        if now == Some(m.stamp) {
+            return Ok(m.path.clone());
+        }
     }
     let t0 = std::time::Instant::now();
     let archive = ZipArchive::open(path)?;
@@ -475,27 +492,21 @@ pub fn mount_zip(path: &Path) -> io::Result<PathBuf> {
         archive.prefix,
         t0.elapsed().as_secs_f64() * 1000.0
     );
-    if archive.prefix.is_empty()
-        && !archive
-        .dirs
-        .get("")
-        .map(|l| {
-            l.iter().any(|(n, _)| {
-                crate::CONTENT_FOLDERS
-                    .iter()
-                    .any(|f| f.eq_ignore_ascii_case(n))
-            })
-        })
-        .unwrap_or(false)
-    {
+    if !archive.has_content() {
         log::warn!(
             "zip {}: no OMSI content folders (Vehicles, maps, Sceneryobjects ...) found; mounted as it is",
             path.display()
         );
     }
     let mount = archive.path.clone();
-    MOUNTS.write().unwrap().push(Arc::new(archive));
+    let mut mounts = MOUNTS.write().unwrap();
+    mounts.retain(|m| m.path != mount);
+    mounts.push(Arc::new(archive));
     Ok(mount)
+}
+
+pub fn unmount_zip(path: &Path) {
+    MOUNTS.write().unwrap().retain(|m| m.path != path);
 }
 
 /// The mounted archives.
@@ -735,8 +746,27 @@ mod tests {
     }
 
     #[test]
+    fn a_replaced_archive_is_read_anew_and_a_removed_one_unmounted() {
+        let dir = std::env::temp_dir().join(format!("legacy-config-rezip-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let zip = dir.join("bus.zip");
+        let file = |data: &[u8]| vec![("Vehicles/Bus/bus.bus", data.to_vec(), false)];
+        write_zip(&zip, &file(b"old"));
+        let mount = mount_zip(&zip).unwrap();
+        let bus = mount.join("Vehicles/Bus/bus.bus");
+        assert_eq!(read(&bus).unwrap(), b"old");
+        write_zip(&zip, &file(b"the new one"));
+        mount_zip(&zip).unwrap();
+        assert_eq!(read(&bus).unwrap(), b"the new one");
+        assert_eq!(mounts().iter().filter(|m| m.path() == zip).count(), 1);
+        unmount_zip(&zip);
+        assert!(archive_of(&bus).is_none());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn mount_root_of_an_addon_archive() {
-        let prefix = |names: &[&str]| ZipArchive::content_prefix(names.iter().copied());
+        let prefix = |names: &[&str]| content_prefix(names.iter().copied());
         // a bus: its own Sound and Texture folders do not make it the root
         let bus = [
             "OMSI 2/Vehicles/MAN_Lion/Lion.bus",

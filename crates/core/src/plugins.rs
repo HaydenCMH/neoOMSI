@@ -11,10 +11,27 @@ pub(crate) fn load() -> Plugins {
     if ::legacy_config::env::var_os("OMSI_NO_PLUGINS").is_some() {
         return Plugins::default();
     }
-    // (never from content another machine sent: a LAN host's mods are data only)
+    // never from a LAN host's content; from a mod only with the player's consent
+    let allowed = omsi_launcher_lib::plugin_mods_allowed();
+    let mods_dir = ::mods::mods_dir();
+    let consented = |root: &std::path::Path| {
+        let Some(entry) = mods_dir
+            .as_deref()
+            .and_then(|d| root.strip_prefix(d).ok())
+            .and_then(|rel| rel.components().next())
+        else {
+            return true;
+        };
+        let entry = entry.as_os_str().to_string_lossy();
+        let ok = allowed.iter().any(|a| a.eq_ignore_ascii_case(&entry));
+        if !ok && ::legacy_plugin::resolve_path(root, "plugins").is_some_and(|d| d.is_dir()) {
+            log::warn!("plugins of the mod '{entry}' not loaded: allow them on the Mods page");
+        }
+        ok
+    };
     let dirs: Vec<std::path::PathBuf> = ::mods::content_roots()
         .iter()
-        .filter(|r| !::mods::is_sandbox(r))
+        .filter(|r| !::mods::is_sandbox(r) && consented(r))
         .filter_map(|r| ::legacy_plugin::resolve_path(r, "plugins"))
         .filter(|d| d.is_dir())
         .collect();

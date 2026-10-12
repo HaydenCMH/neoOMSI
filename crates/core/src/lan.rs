@@ -537,16 +537,7 @@ pub(crate) fn data_dir() -> Option<PathBuf> {
 }
 
 fn status_path() -> Option<PathBuf> {
-    let id = ::legacy_config::env::var("OMSI_INSTANCE")
-        .ok()
-        .filter(|s| {
-            !s.is_empty()
-                && s.len() <= 64
-                && s.bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-        })
-        .unwrap_or_else(|| std::process::id().to_string());
-    Some(data_dir()?.join("lan").join(format!("{id}.json")))
+    crate::game_link::instance_file("lan")
 }
 
 pub struct StatusFileGuard;

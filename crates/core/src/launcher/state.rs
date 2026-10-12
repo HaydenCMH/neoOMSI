@@ -684,7 +684,7 @@ impl State {
         });
         self.spawn(move || {
             Msg::Installed(
-                core::start_install(std::path::Path::new(&path), &mode)
+                core::start_install(std::path::Path::new(&path), &mode, false)
                     .map_err(|e| format!("{e:#}")),
             )
         });
@@ -1106,22 +1106,6 @@ impl State {
                 self.polling = false;
                 match r {
                     Ok(p) => {
-                        for s in &p.started {
-                            core::log_to_file(&format!("inbox: installing {s}"));
-                        }
-                        if !p.started.is_empty() {
-                            self.set_status(
-                                format!(
-                                    "Installing from the Mods folder: {}",
-                                    p.started
-                                        .iter()
-                                        .map(|x| x.rsplit('/').next().unwrap_or(x))
-                                        .collect::<Vec<_>>()
-                                        .join(", ")
-                                ),
-                                false,
-                            );
-                        }
                         let mut installed = false;
                         for j in &p.jobs {
                             let was = self

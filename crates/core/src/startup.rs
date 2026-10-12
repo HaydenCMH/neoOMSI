@@ -163,9 +163,6 @@ pub(crate) fn fatal_dialog(title: &str, text: &str) {
     }
 }
 
-/// neoOMSI's own content folder: the folder of the game binary, laid out like an OMSI 2
-/// installation (Vehicles, maps, Sceneryobjects ...). Mods live here; it is searched before
-/// the original installation.
 /// The `Inputs/keyboard.cfg` the game follows: the content folder's once the launcher has
 /// saved key bindings there, else the original installation's (never written) - or, where
 /// that has none, its `keyboard_reset.cfg`, the standard keys OMSI falls back to as well.
@@ -213,9 +210,17 @@ pub(crate) fn own_bindings(root: &Path, modifier: i32) -> std::collections::Hash
         .collect()
 }
 
+/// neoOMSI's content folder (mods live here): beside the game binary if writable, else in
+/// the home folder.
 pub(crate) fn content_dir() -> Option<PathBuf> {
     if let Some(d) = ::legacy_config::env::var_os("OMSI_CONTENT") {
-        return Some(PathBuf::from(d));
+        match ::legacy_config::usable_content_folder(Path::new(&d)) {
+            Some(c) => return Some(c),
+            None => log::error!(
+                "OMSI_CONTENT {} lies inside the original OMSI 2 installation, which neoOMSI never writes to: the default content folder is used",
+                Path::new(&d).display()
+            ),
+        }
     }
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?.to_path_buf();

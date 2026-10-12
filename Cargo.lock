@@ -2413,6 +2413,8 @@ version = "0.2.0"
 dependencies = [
  "legacy-config",
  "log",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

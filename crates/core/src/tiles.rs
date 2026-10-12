@@ -520,6 +520,8 @@ pub fn read_tile(path: &Path, chrono_dirs: &[PathBuf], detail_limit: u8) -> Opti
         Ok(t) => t,
         Err(e) => {
             log::warn!("{e}");
+            let map = path.parent().unwrap_or(path);
+            ::mods::diagnostics::missing(map, path, ::mods::diagnostics::Kind::Tile);
             return None;
         }
     };

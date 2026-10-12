@@ -55,6 +55,16 @@ message Request {
     SaveServersArgs save_servers = 39;
     Empty version = 40;
     InstallUpdateArgs install_update = 41;
+    UninstallModArgs uninstall_mod = 42;
+    AllowModPluginsArgs allow_mod_plugins = 43;
+    MapPictureArgs map_picture = 44;
+    SaveModOrderArgs save_mod_order = 45;
+    ResetModOrderArgs reset_mod_order = 46;
+    ForgetModArgs forget_mod = 47;
+    Empty mod_conflicts = 48;
+    DiagnosticsArgs diagnostics = 49;
+    DismissDiagnosticArgs dismiss_diagnostic = 50;
+    PreflightArgs preflight = 51;
   }
 }
 
@@ -101,6 +111,18 @@ message Response {
     Empty save_servers = 39;
     EngineVersion version = 40;
     GameUpdate install_update = 41;
+    Empty uninstall_mod = 42;
+    Empty allow_mod_plugins = 43;
+    // the map's picture.jpg, from whichever content root has it; empty when none
+    bytes map_picture = 44;
+    ModsStatus save_mod_order = 45;
+    ModsStatus reset_mod_order = 46;
+    ModsStatus forget_mod = 47;
+    ModConflictList mod_conflicts = 48;
+    DiagnosticList diagnostics = 49;
+    Empty dismiss_diagnostic = 50;
+    // what the map names that is not installed, before a game starts
+    DiagnosticList preflight = 51;
   }
 }
 
@@ -437,7 +459,9 @@ message InstallProgress {
   repeated string report = 13;
   repeated string warnings = 14;
   repeated string installed = 15;
+  // deprecated: never set
   repeated string kept_aside = 16;
+  // deprecated: never set
   bool from_inbox = 17;
   uint64 started = 18;
   optional uint64 finished = 19;
@@ -462,11 +486,121 @@ message ModsStatus {
   repeated FolderCount folders = 2;
   string inbox = 3;
   repeated string inbox_items = 4;
+  // deprecated: always empty
   repeated string waiting = 5;
   repeated ArchiveSize archives = 6;
   uint64 free_bytes = 7;
   repeated string cleaned = 8;
   repeated InstallProgress jobs = 9;
+  // the load order, highest priority first
+  repeated InstalledMod installed = 10;
+  uint64 order_revision = 11;
+  // why the saved order could not be read
+  string order_error = 12;
+  // "top" or "bottom"
+  string new_mods = 13;
+}
+
+message InstalledMod {
+  // "Foo", "Foo.zip" or "Archives/Foo.zip"
+  string name = 1;
+  uint64 installed = 2;
+  // 0 for a folder
+  uint64 size = 3;
+  bool in_place = 4;
+  bool has_plugins = 5;
+  bool plugins_allowed = 6;
+  // why the game cannot read it
+  string error = 7;
+  // false: only listed in the load order
+  bool available = 8;
+}
+
+message SaveModOrderArgs {
+  repeated string order = 1;
+  // ModsStatus.order_revision
+  uint64 revision = 2;
+  // "top" or "bottom"
+  string new_mods = 3;
+}
+
+message ResetModOrderArgs {
+  uint64 revision = 1;
+}
+
+message ForgetModArgs {
+  string name = 1;
+}
+
+message ModConflict {
+  string name = 1;
+  uint32 files = 2;
+  // files that hide an entry below
+  uint32 overrides = 3;
+  // files hidden by an entry above
+  uint32 overridden = 4;
+  // files that replace an original OMSI 2 file
+  uint32 replaces_original = 5;
+  repeated string hidden_by = 6;
+  repeated string overrides_mods = 7;
+  // "Vehicles/<folder> (<other entry>)"
+  repeated string clashes = 8;
+}
+
+message DiagnosticsArgs {
+  // Instance.id
+  string instance = 1;
+}
+
+message Diagnostic {
+  // "missing_file", "incomplete_mod", "incomplete_pack", "inactive_dependency",
+  // "missing_dependency"
+  string class = 1;
+  // "OMSI 2" for the original installation
+  string requester = 2;
+  string pack = 3;
+  string provider = 4;
+  // "required", "degraded" or "optional"
+  string severity = 5;
+  uint32 count = 6;
+  repeated string samples = 7;
+  // for dismiss_diagnostic
+  string key = 8;
+}
+
+message PreflightArgs {
+  // as MapInfo.file
+  string map = 1;
+}
+
+message DismissDiagnosticArgs {
+  // Diagnostic.key
+  string key = 1;
+}
+
+message DiagnosticList {
+  repeated Diagnostic findings = 1;
+}
+
+message ModConflictList {
+  // highest priority first
+  repeated ModConflict mods = 1;
+}
+
+message MapPictureArgs {
+  // as MapInfo.file
+  string map = 1;
+}
+
+message AllowModPluginsArgs {
+  // as InstalledMod.name
+  string name = 1;
+  bool allowed = 2;
+}
+
+message UninstallModArgs {
+  // as InstalledMod.name
+  string name = 1;
 }
 
 message ModinfoArgs {
@@ -492,6 +626,8 @@ message InstallArgs {
   string path = 1;
   // unspecified: auto
   InstallMode mode = 2;
+  // move an installed mod of the same name to mods/uninstalled
+  bool replace = 3;
 }
 
 message CancelInstallArgs {

@@ -117,7 +117,31 @@ neoomsi --map maps/Grundorf/global.cfg --bus Vehicles/MAN_SD200/MAN_SD80.bus
 
 ## Modding
 
-Place add-on content into the `Mods/` directory alongside the `neoomsi` executable. neoOMSI mounts add-ons into its virtual filesystem without altering original OMSI 2 files.
+Install mods on the launcher's **Mods** page (an archive - `.zip`, `.7z`, `.rar` - or a folder). Each mod
+goes into the `mods` folder of neoOMSI's content folder, one folder or `.zip` per mod, exactly as it
+was packed; neoOMSI finds the folder with OMSI's content (`Vehicles`, `maps`, `Sceneryobjects` ...)
+inside it by itself. The content folder is the folder of the `neoomsi` program (its `neoOMSI`
+folder when the program sits in the OMSI 2 folder), `~/.neoomsi/content` when that folder cannot be
+written, or the folder `OMSI_CONTENT` names. A folder or `.zip` copied into `mods` by hand works
+the same way. The original OMSI 2 files are never changed.
+
+**Load order.** The Mods page lists your mods by priority: an entry higher in the list wins every
+file it shares with the entries below it, and with the original OMSI 2 files - for example, put an
+add-on above the mod it changes. Files no higher entry has come from the ones below, so a mod can use
+the files of another mod. You decide the order (drag an entry or use its arrows, then **Apply**); the
+launcher never reorders it. A newly installed mod goes to the top or the bottom, as you choose
+there, and an updated mod keeps its place. The order is kept in `mods/.load-order.json`; **Reset**
+returns to the default (archives of the old `Archives` folder, then the mods alphabetically). Each entry shows which files it replaces and which are hidden by entries above it.
+
+A mod's plugins (program code that runs in the game) load only after you allow them for that mod
+on the Mods page. Uninstalling moves a mod to `mods/uninstalled`; nothing is deleted. Changes to
+the installed mods and the load order take effect the next time a game starts.
+
+When content a map or bus needs cannot be found, the game says so once after loading, and the
+session's entry on the launcher's Sessions page shows what is missing: a pack that is not
+installed, one that lies in `mods/uninstalled`, or files missing in a mod. The Drive page checks
+the chosen map before the start (the first check of a big map takes a moment). A finding you
+dismiss is not shown again, unless what is wrong changes.
 
 Set `OMSI_NO_SURF=1` before starting neoOMSI to disable OMSI `.surf` height maps for an A/B comparison of wheel contact.
 

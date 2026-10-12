@@ -5,13 +5,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-const MIN_MARGIN: u64 = 512 * 1024 * 1024;
-const ABORT_BELOW: u64 = 1024 * 1024 * 1024;
+/// Free space an install must leave.
+const MIN_MARGIN: u64 = 1024 * 1024 * 1024;
+/// A running install stops below this; lower than `MIN_MARGIN` so it does not stop near its end.
+const ABORT_BELOW: u64 = 512 * 1024 * 1024;
 pub const STAGING: &str = ".install-staging";
-pub const WAITING: &str = "waiting";
-pub const ARCHIVES: &str = "Archives";
-pub const PLUGINS_HELD: &str = "plugins-not-enabled";
-pub const UNINSTALLED: &str = "uninstalled";
+/// Prefix of a mod being copied into `mods/` (discovery skips dot names).
+const PARTIAL: &str = ".partial-";
+pub const UNINSTALLED: &str = ::mods::UNINSTALLED_DIR;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -49,8 +50,6 @@ pub struct Progress {
     pub report: Vec<String>,
     pub warnings: Vec<String>,
     pub installed: Vec<String>,
-    pub kept_aside: Vec<String>,
-    pub from_inbox: bool,
     pub started: u64,
     pub finished: Option<u64>,
 }
@@ -59,7 +58,7 @@ pub struct Job {
     pub id: u64,
     pub source: PathBuf,
     pub mode: InstallMode,
-    pub from_inbox: bool,
+    pub replace: bool,
     cancel: AtomicBool,
     progress: Mutex<Progress>,
     bytes_done: AtomicU64,
@@ -138,13 +137,7 @@ pub fn clear_finished() {
     JOBS.lock().unwrap().retain(|j| j.is_active());
 }
 
-pub fn start(
-    content: PathBuf,
-    _root: Option<PathBuf>,
-    source: PathBuf,
-    mode: InstallMode,
-    from_inbox: bool,
-) -> Arc<Job> {
+pub fn start(content: PathBuf, source: PathBuf, mode: InstallMode, replace: bool) -> Arc<Job> {
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let name = source
         .file_name()
@@ -154,7 +147,7 @@ pub fn start(
         id,
         source: source.clone(),
         mode,
-        from_inbox,
+        replace,
         cancel: AtomicBool::new(false),
         progress: Mutex::new(Progress {
             id,
@@ -162,7 +155,6 @@ pub fn start(
             name,
             state: "queued".into(),
             mode,
-            from_inbox,
             started: now_secs(),
             message: "waiting for the install before it".into(),
             ..Default::default()
@@ -204,13 +196,13 @@ pub fn start(
 
 pub fn run_blocking(
     content: PathBuf,
-    root: Option<PathBuf>,
     source: PathBuf,
     mode: InstallMode,
+    replace: bool,
     cancel_after: Option<std::time::Duration>,
     verbose: bool,
 ) -> Progress {
-    let job = start(content, root, source, mode, false);
+    let job = start(content, source, mode, replace);
     let t0 = std::time::Instant::now();
     let mut last = String::new();
     loop {
@@ -353,10 +345,6 @@ pub fn cleanup_stale(data_dir: &Path, content: Option<&Path>) -> Vec<String> {
         out.push(format!("removed {}", legacy.display()));
     }
     let Some(content) = content else { return out };
-    let dir = content.join(STAGING);
-    let Ok(rd) = std::fs::read_dir(&dir) else {
-        return out;
-    };
     let active: Vec<u64> = JOBS
         .lock()
         .unwrap()
@@ -364,30 +352,48 @@ pub fn cleanup_stale(data_dir: &Path, content: Option<&Path>) -> Vec<String> {
         .filter(|j| j.is_active())
         .map(|j| j.id)
         .collect();
-    for e in rd.flatten() {
-        let name = e.file_name().to_string_lossy().to_string();
-        let (pid, id) = match name.split_once('-') {
-            Some((p, i)) => (p.parse::<u32>().unwrap_or(0), i.parse::<u64>().unwrap_or(0)),
-            None => (0, 0),
-        };
-        let stale = if pid == std::process::id() {
+    // `<pid>-<job>` in the staging folder, `.partial-<pid>-<job>-<name>` in `mods/`
+    let stale = |tag: &str| {
+        let mut it = tag.splitn(3, '-');
+        let pid = it.next().and_then(|p| p.parse::<u32>().ok()).unwrap_or(0);
+        let id = it.next().and_then(|i| i.parse::<u64>().ok()).unwrap_or(0);
+        if pid == std::process::id() {
             !active.contains(&id)
         } else {
             pid == 0 || !pid_alive(pid)
-        };
-        if stale && std::fs::remove_dir_all(e.path()).is_ok() {
+        }
+    };
+    let staging = content.join(STAGING);
+    let mods = content.join("mods");
+    let staged = std::fs::read_dir(&staging)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| stale(&e.file_name().to_string_lossy()));
+    let partial = std::fs::read_dir(&mods).into_iter().flatten().flatten().filter(|e| {
+        e.file_name()
+            .to_string_lossy()
+            .strip_prefix(PARTIAL)
+            .is_some_and(|tag| stale(tag))
+    });
+    for e in staged.chain(partial) {
+        if remove_any(&e.path()).is_ok() {
             out.push(format!(
                 "removed partial files of an interrupted install ({})",
                 e.path().display()
             ));
         }
     }
-    let _ = std::fs::remove_dir(&dir);
+    let _ = std::fs::remove_dir(&staging);
     out
 }
 
-pub fn waiting_ready(_content: &Path, _root: Option<&Path>) -> Vec<PathBuf> {
-    Vec::new()
+fn remove_any(p: &Path) -> std::io::Result<()> {
+    if p.is_dir() {
+        std::fs::remove_dir_all(p)
+    } else {
+        std::fs::remove_file(p)
+    }
 }
 
 fn safe_rel(name: &str) -> Option<String> {
@@ -511,13 +517,10 @@ fn run(job: &Job, content: &Path) -> Result<()> {
     .map(|s| s.to_string_lossy().to_string())
     .filter(|n| safe_rel(n).as_deref() == Some(n.as_str()) && !n.starts_with('.'))
     .unwrap_or_else(|| "mod".into());
-    if ["shared", WAITING, "installed", UNINSTALLED, PLUGINS_HELD]
-        .iter()
-        .any(|r| r.eq_ignore_ascii_case(&name))
-    {
+    if ::mods::is_reserved(&name) {
         return Err(anyhow!("'{name}' is a reserved name, rename the mod"));
     }
-    std::fs::create_dir_all(mods_dir.join("shared"))?;
+    std::fs::create_dir_all(&mods_dir)?;
 
     let free = free_space(content).unwrap_or(u64::MAX);
     let mut keep_zip = archive == Some(ArchiveKind::Zip) && job.mode == InstallMode::InPlace;
@@ -543,6 +546,24 @@ fn run(job: &Job, content: &Path) -> Result<()> {
             }
         }
     }
+    if keep_zip {
+        if let Some(problem) = zip_in_place_problem(&src)? {
+            return Err(anyhow!("{name} cannot be used in place: {problem}"));
+        }
+        let size = std::fs::metadata(&src)?.len();
+        if size.saturating_add(MIN_MARGIN) > free {
+            return Err(anyhow!(
+                "not enough disk space: copying {name} takes {} and {} must stay free, but only {} is free",
+                gb(size),
+                gb(MIN_MARGIN),
+                gb(free)
+            ));
+        }
+        job.set(|p| {
+            p.files_total = 1;
+            p.bytes_total = size;
+        });
+    }
     job.set(|p| p.mode = if keep_zip { InstallMode::InPlace } else { InstallMode::Extract });
 
     let dest = if keep_zip {
@@ -550,9 +571,13 @@ fn run(job: &Job, content: &Path) -> Result<()> {
     } else {
         mods_dir.join(&name)
     };
-    if mods_dir.join(&name).exists() || mods_dir.join(format!("{name}.zip")).exists() {
+    let existing: Vec<PathBuf> = [mods_dir.join(&name), mods_dir.join(format!("{name}.zip"))]
+        .into_iter()
+        .filter(|p| p.exists())
+        .collect();
+    if !existing.is_empty() && !job.replace {
         return Err(anyhow!(
-            "mod '{name}' is already installed - remove it from the mods folder first"
+            "mod '{name}' is already installed - install it with Replace to update it"
         ));
     }
     let staging = staging_dir(content, job.id);
@@ -560,25 +585,51 @@ fn run(job: &Job, content: &Path) -> Result<()> {
     let staged = staging.join("mod");
     job.state("copying", format!("installing {name} into the mods folder"));
     match archive {
-        Some(ArchiveKind::Zip) if keep_zip => {
-            std::fs::copy(&src, &staged)
-                .with_context(|| format!("copying {}", src.display()))?;
-        }
+        Some(ArchiveKind::Zip) if keep_zip => copy_file(job, content, &src, &staged)?,
         Some(ArchiveKind::Zip) => extract_zip(job, content, &src, &staged)?,
         Some(kind) => unpack_other(job, content, &src, &staged, kind)?,
         None => copy_tree(job, content, &src, &staged)?,
     }
     job.check_cancel()?;
+    let has_content = exposes_content(&staged, keep_zip);
+    let has_plugins = crate::mod_has_plugins(&staged);
+
     job.state("moving", "moving it into place");
-    std::fs::rename(&staged, &dest)
-        .or_else(|_| {
-            if keep_zip {
-                std::fs::copy(&staged, &dest).map(|_| ())
-            } else {
-                copy_tree(job, content, &staged, &dest).map_err(std::io::Error::other)
+    let order_note = |e: String| format!("load order not saved: {e}");
+    if let Err(e) = ::mods::order::materialize(content) {
+        job.set(|p| p.warnings.push(order_note(e)));
+    }
+    let restore = |set_aside: &[(PathBuf, PathBuf)]| {
+        for (old, aside) in set_aside {
+            let _ = std::fs::rename(aside, old);
+        }
+    };
+    let mut set_aside = Vec::new();
+    for old in &existing {
+        match uninstall_path(content, old) {
+            Ok(aside) => set_aside.push((old.clone(), aside)),
+            Err(e) => {
+                restore(&set_aside);
+                return Err(e);
             }
-        })
-        .with_context(|| format!("moving it to {}", dest.display()))?;
+        }
+    }
+    if let Err(e) = move_into_place(job, content, &staged, &dest, keep_zip) {
+        restore(&set_aside);
+        return Err(e);
+    }
+    let id = dest.file_name().unwrap_or_default().to_string_lossy().to_string();
+    // an update keeps the place of the version it replaces
+    let placed = match existing.iter().find(|old| **old != dest) {
+        Some(old) => {
+            let old = old.file_name().unwrap_or_default().to_string_lossy();
+            ::mods::order::rename(content, &old, &id)
+        }
+        None => ::mods::order::materialize(content),
+    };
+    if let Err(e) = placed {
+        job.set(|p| p.warnings.push(order_note(e)));
+    }
     let shown = format!(
         "mods/{}",
         dest.file_name().unwrap_or_default().to_string_lossy()
@@ -587,7 +638,144 @@ fn run(job: &Job, content: &Path) -> Result<()> {
         p.installed.push(shown.clone());
         p.report.push(format!("installed as {shown}"));
         p.message = format!("installed as {shown}");
+        for (_, aside) in &set_aside {
+            p.report
+                .push(format!("the previous version was moved to {}", aside.display()));
+        }
+        if has_plugins {
+            p.warnings.push(format!(
+                "{name} brings plugins (program code that runs in the game): they stay off until you allow them for this mod"
+            ));
+        }
+        if !has_content {
+            p.warnings.push(format!(
+                "no OMSI content folders (Vehicles, maps, Sceneryobjects ...) found in {name}: it adds nothing to the game"
+            ));
+        }
     });
+    Ok(())
+}
+
+fn uninstall_path(content: &Path, entry: &Path) -> Result<PathBuf> {
+    let dir = content.join("mods").join(UNINSTALLED);
+    std::fs::create_dir_all(&dir)?;
+    let name = entry.file_name().unwrap_or_default().to_string_lossy();
+    let target = dir.join(format!("{}-{name}", now_secs()));
+    if target.exists() {
+        return Err(anyhow!("{} already exists", target.display()));
+    }
+    std::fs::rename(entry, &target)
+        .with_context(|| format!("moving {} to {}", entry.display(), target.display()))?;
+    Ok(target)
+}
+
+pub fn uninstall(content: &Path, name: &str) -> Result<PathBuf> {
+    let entry = content.join("mods").join(name);
+    let stem = Path::new(name).file_stem().unwrap_or_default().to_string_lossy();
+    let is_mod =
+        entry.is_dir() || (entry.is_file() && archive_kind(&entry) == Some(ArchiveKind::Zip));
+    if safe_rel(name).as_deref() != Some(name)
+        || name.contains('/')
+        || name.starts_with('.')
+        || ::mods::is_reserved(&stem)
+        || !is_mod
+    {
+        return Err(anyhow!("'{name}' is not an installed mod"));
+    }
+    // an install may be replacing this very mod
+    let _no_install = match RUNNING.try_lock() {
+        Ok(g) => g,
+        Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => {
+            return Err(anyhow!("an install is running - try again when it has finished"));
+        }
+    };
+    let moved = uninstall_path(content, &entry)?;
+    if let Err(e) = ::mods::order::forget(content, name) {
+        crate::log_to_file(&format!("load order: {e}"));
+    }
+    ::legacy_config::content_changed();
+    Ok(moved)
+}
+
+/// When a rename fails (another disk, antivirus), copy under a name discovery skips, then
+/// rename, so a half-copied mod is never mounted.
+fn move_into_place(job: &Job, content: &Path, staged: &Path, dest: &Path, file: bool) -> Result<()> {
+    if std::fs::rename(staged, dest).is_ok() {
+        return Ok(());
+    }
+    let partial = dest.with_file_name(format!(
+        "{PARTIAL}{}-{}-{}",
+        std::process::id(),
+        job.id,
+        dest.file_name().unwrap_or_default().to_string_lossy()
+    ));
+    let copied = if file {
+        copy_file(job, content, staged, &partial)
+    } else {
+        copy_tree(job, content, staged, &partial)
+    };
+    let result = copied.and_then(|_| Ok(std::fs::rename(&partial, dest)?));
+    if result.is_err() {
+        let _ = remove_any(&partial);
+    }
+    result.with_context(|| format!("moving it to {}", dest.display()))
+}
+
+fn exposes_content(staged: &Path, zip: bool) -> bool {
+    if zip {
+        return ::legacy_config::vfs::ZipArchive::open(staged).is_ok_and(|z| z.has_content());
+    }
+    let root = ::mods::folder_content_root(staged);
+    ::legacy_config::vfs::list_dir(&root).is_some_and(|l| {
+        l.iter()
+            .any(|(n, is_dir)| *is_dir && ::legacy_config::is_content_folder(&n.to_string_lossy()))
+    })
+}
+
+/// The game reads stored and deflated entries only.
+fn zip_in_place_problem(src: &Path) -> Result<Option<String>> {
+    let f = std::fs::File::open(src).with_context(|| format!("opening {}", src.display()))?;
+    let mut z = zip::ZipArchive::new(std::io::BufReader::with_capacity(1 << 13, f))
+        .with_context(|| format!("{} is not a readable zip archive", src.display()))?;
+    for i in 0..z.len() {
+        let e = z.by_index_raw(i)?;
+        if e.encrypted() {
+            return Ok(Some(format!("{} is encrypted", e.name())));
+        }
+        if !matches!(
+            e.compression(),
+            zip::CompressionMethod::Stored | zip::CompressionMethod::Deflated
+        ) {
+            return Ok(Some(format!(
+                "{} is compressed with {} (only stored and deflated entries can be read in place)",
+                e.name(),
+                e.compression()
+            )));
+        }
+    }
+    Ok(None)
+}
+
+/// Copy one file in pieces, counting the bytes and stopping when cancelled or the disk
+/// fills.
+fn copy_file(job: &Job, content: &Path, from: &Path, to: &Path) -> Result<()> {
+    use std::io::{Read, Write};
+    let mut input =
+        std::fs::File::open(from).with_context(|| format!("opening {}", from.display()))?;
+    let mut output = std::fs::File::create(to)?;
+    let mut buf = vec![0u8; 8 << 20];
+    loop {
+        job.check_cancel()?;
+        let n = input.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        output.write_all(&buf[..n])?;
+        job.bytes_done.fetch_add(n as u64, Ordering::Relaxed);
+        check_space(content)?;
+    }
+    job.files_done.fetch_add(1, Ordering::Relaxed);
     Ok(())
 }
 
@@ -610,28 +798,17 @@ fn copy_tree(job: &Job, content: &Path, from: &Path, to: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Unpack the archive as it is: the folder the game mounts is found afterwards by the same
+/// rule as for a .zip used in place (`mods::folder_content_root`).
 fn extract_zip(job: &Job, content: &Path, src: &Path, dest: &Path) -> Result<()> {
     let f = std::fs::File::open(src).with_context(|| format!("opening {}", src.display()))?;
     let mut z = zip::ZipArchive::new(std::io::BufReader::with_capacity(1 << 13, f))
         .with_context(|| format!("{} is not a readable zip archive", src.display()))?;
-    let names: Vec<String> = (0..z.len())
-        .filter_map(|i| z.by_index_raw(i).ok().map(|e| e.name().replace('\\', "/")))
-        .collect();
-    let first = names
-        .first()
-        .and_then(|n| n.split('/').next())
-        .map(|s| format!("{s}/"));
-    let strip = first.filter(|f| names.iter().all(|n| n.starts_with(f.as_str())));
     std::fs::create_dir_all(dest)?;
     for i in 0..z.len() {
         job.check_cancel()?;
         let mut e = z.by_index(i)?;
-        let raw = e.name().replace('\\', "/");
-        let rel = match &strip {
-            Some(p) => raw.strip_prefix(p.as_str()).unwrap_or(&raw).to_string(),
-            None => raw,
-        };
-        let Some(rel) = safe_rel(&rel) else { continue };
+        let Some(rel) = safe_rel(e.name()) else { continue };
         if is_junk(&rel) {
             continue;
         }
@@ -671,13 +848,19 @@ fn unpack_other(
                         "install cancelled".into(),
                     ));
                 }
+                if is_junk(&entry.name().replace('\\', "/")) {
+                    // read through it: in a solid archive the next entry follows this one
+                    std::io::copy(reader, &mut std::io::sink())?;
+                    return Ok(true);
+                }
                 let wrote = sevenz_rust2::default_entry_extract_fn(entry, reader, target)?;
                 if wrote && entry.has_stream && !entry.is_directory {
+                    job.bytes_done.fetch_add(entry.size, Ordering::Relaxed);
                     if job.files_done.fetch_add(1, Ordering::Relaxed) % 256 == 255
                         && check_space(content).is_err()
                     {
                         return Err(sevenz_rust2::Error::Io(
-                            std::io::Error::other("free disk space fell below 1 GB"),
+                            std::io::Error::other("free disk space fell below the limit"),
                             "install stopped".into(),
                         ));
                     }
@@ -707,6 +890,9 @@ fn unpack_other(
                     });
                     continue;
                 };
+                if is_junk(&rel) {
+                    continue;
+                }
                 let out = dest.join(&rel);
                 if let Some(parent) = out.parent() {
                     std::fs::create_dir_all(parent)?;
@@ -741,7 +927,7 @@ pub struct SourceInfo {
     pub suggested: InstallMode,
 }
 
-pub fn inspect(content: &Path, _root: Option<&Path>, src: &Path) -> Result<SourceInfo> {
+pub fn inspect(content: &Path, src: &Path) -> Result<SourceInfo> {
     let free = free_space(content).unwrap_or(u64::MAX);
     let Some(kind) = archive_kind(src) else {
         return Ok(SourceInfo {
@@ -756,6 +942,12 @@ pub fn inspect(content: &Path, _root: Option<&Path>, src: &Path) -> Result<Sourc
     let needed = unpacked.saturating_add(MIN_MARGIN);
     let fits = needed <= free;
     let is_zip = kind == ArchiveKind::Zip;
+    let in_place = if is_zip {
+        zip_in_place_problem(src)?.unwrap_or_default()
+    } else {
+        "7z and RAR archives must be unpacked".into()
+    };
+    let in_place_ok = in_place.is_empty();
     Ok(SourceInfo {
         is_archive: true,
         is_zip,
@@ -765,13 +957,9 @@ pub fn inspect(content: &Path, _root: Option<&Path>, src: &Path) -> Result<Sourc
         needed_bytes: needed,
         free_bytes: free,
         fits,
-        in_place: if is_zip {
-            String::new()
-        } else {
-            "7z and RAR archives must be unpacked".into()
-        },
-        in_place_ok: is_zip,
-        suggested: if !fits && is_zip {
+        in_place,
+        in_place_ok,
+        suggested: if !fits && in_place_ok {
             InstallMode::InPlace
         } else {
             InstallMode::Extract
@@ -808,12 +996,104 @@ mod tests {
         std::fs::create_dir_all(&content).unwrap();
         let zip = dir.join("Foo Bus.zip");
         write_zip(&zip, &[("Foo/Vehicles/Foo/foo.bus", 10), ("Foo/Vehicles/Foo/a.dds", 100)]);
-        let p = run_blocking(content.clone(), None, zip.clone(), InstallMode::Extract, None, false);
+        let p = run_blocking(content.clone(), zip.clone(), InstallMode::Extract, false, None, false);
         assert_eq!(p.state, "done", "{p:?}");
-        assert!(content.join("mods/Foo Bus/Vehicles/Foo/foo.bus").exists());
+        assert!(p.warnings.is_empty(), "{p:?}");
+        assert!(content.join("mods/Foo Bus/Foo/Vehicles/Foo/foo.bus").exists());
         assert!(!content.join(STAGING).exists());
-        let p = run_blocking(content.clone(), None, zip, InstallMode::InPlace, None, false);
+        let p = run_blocking(content.clone(), zip, InstallMode::InPlace, false, None, false);
         assert_eq!(p.state, "failed", "{p:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An archive unpacked and the same archive used in place show the game the same files.
+    #[test]
+    fn extracted_and_in_place_mods_match() {
+        let layouts: [&[&str]; 4] = [
+            &["Vehicles/Bus/bus.bus", "Vehicles/Bus/Texture/a.dds"],
+            &["Pack/Vehicles/Bus/bus.bus", "Pack/Vehicles/Bus/Texture/a.dds"],
+            &["readme.txt", "Content/Vehicles/Bus/bus.bus", "Content/Vehicles/Bus/Texture/a.dds"],
+            &["OMSI 2/Sceneryobjects/Signs/a.sco", "Docs/manual.txt"],
+        ];
+        for (k, files) in layouts.iter().enumerate() {
+            let dir = tmp(&format!("parity-{k}"));
+            let zip = dir.join("Mod.zip");
+            write_zip(&zip, &files.iter().map(|f| (*f, 4)).collect::<Vec<_>>());
+            let (a, b) = (dir.join("a"), dir.join("b"));
+            let p = run_blocking(a.clone(), zip.clone(), InstallMode::Extract, false, None, false);
+            assert!(p.state == "done" && p.warnings.is_empty(), "{p:?}");
+            let p = run_blocking(b.clone(), zip, InstallMode::InPlace, false, None, false);
+            assert!(p.state == "done" && p.warnings.is_empty(), "{p:?}");
+            let root = ::mods::folder_content_root(&a.join("mods/Mod"));
+            let mounted = ::legacy_config::vfs::ZipArchive::open(&b.join("mods/Mod.zip")).unwrap();
+            let rel = files.iter().find(|f| f.ends_with(".bus") || f.ends_with(".sco")).unwrap();
+            let rel = &rel[mounted.prefix().len()..];
+            assert!(root.join(rel).is_file(), "layout {k}: {}", root.join(rel).display());
+            assert!(mounted.read(rel).is_ok(), "layout {k}: {rel}");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    #[test]
+    fn a_mod_without_content_folders_is_reported() {
+        let dir = tmp("nocontent");
+        let zip = dir.join("Docs.zip");
+        write_zip(&zip, &[("readme.txt", 4)]);
+        let p = run_blocking(dir.join("c"), zip, InstallMode::Extract, false, None, false);
+        assert_eq!(p.state, "done", "{p:?}");
+        assert_eq!(p.warnings.len(), 1, "{p:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn replace_and_uninstall_keep_the_old_version() {
+        let dir = tmp("replace");
+        let content = dir.join("content");
+        let zip = dir.join("Bus.zip");
+        write_zip(&zip, &[("Vehicles/Bus/bus.bus", 4)]);
+        let p = run_blocking(content.clone(), zip.clone(), InstallMode::Extract, false, None, false);
+        assert_eq!(p.state, "done", "{p:?}");
+        let mods = content.join("mods");
+        let order = || ::mods::order::load(&mods).unwrap().unwrap().order;
+        assert_eq!(order(), ["Bus"]);
+        let other = dir.join("Other.zip");
+        write_zip(&other, &[("Vehicles/Other/o.bus", 4)]);
+        let p = run_blocking(content.clone(), other, InstallMode::Extract, false, None, false);
+        assert_eq!(p.state, "done", "{p:?}");
+        assert_eq!(order(), ["Other", "Bus"], "a new mod goes to the top");
+        write_zip(&zip, &[("Vehicles/Bus/bus.bus", 8)]);
+        let p = run_blocking(content.clone(), zip.clone(), InstallMode::InPlace, true, None, false);
+        assert_eq!(p.state, "done", "{p:?}");
+        assert!(mods.join("Bus.zip").is_file() && !mods.join("Bus").exists());
+        assert_eq!(order(), ["Other", "Bus.zip"], "an update keeps its place");
+        let aside = |n: &str| {
+            std::fs::read_dir(mods.join(UNINSTALLED))
+                .unwrap()
+                .flatten()
+                .filter(|e| e.file_name().to_string_lossy().ends_with(n))
+                .count()
+        };
+        assert_eq!(aside("-Bus"), 1);
+        let moved = uninstall(&content, "Bus.zip").unwrap();
+        assert!(moved.is_file() && !mods.join("Bus.zip").exists());
+        assert_eq!(aside("-Bus.zip"), 1);
+        assert_eq!(order(), ["Other"]);
+        for bad in ["uninstalled", "../Bus", "Missing", ".hidden"] {
+            assert!(uninstall(&content, bad).is_err(), "{bad}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn leftovers_of_an_interrupted_install_are_removed() {
+        let dir = tmp("leftovers");
+        let partial = dir.join("mods").join(format!("{PARTIAL}0-1-Bus"));
+        let staged = dir.join(STAGING).join("0-2");
+        std::fs::create_dir_all(&partial).unwrap();
+        std::fs::create_dir_all(&staged).unwrap();
+        let cleaned = cleanup_stale(&dir.join("data"), Some(&dir));
+        assert_eq!(cleaned.len(), 2, "{cleaned:?}");
+        assert!(!partial.exists() && !staged.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -15,6 +15,32 @@ static CONN: Mutex<Option<Conn>> = Mutex::new(None);
 
 const PROGRESS_EVERY: Duration = Duration::from_millis(250);
 
+/// `~/.neoomsi/<dir>/<instance or pid>.json`.
+pub(crate) fn instance_file(dir: &str) -> Option<std::path::PathBuf> {
+    let id = legacy_config::env::var("OMSI_INSTANCE")
+        .ok()
+        .filter(|s| {
+            !s.is_empty()
+                && s.len() <= 64
+                && s.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        })
+        .unwrap_or_else(|| std::process::id().to_string());
+    Some(crate::lan::data_dir()?.join(dir).join(format!("{id}.json")))
+}
+
+pub(crate) fn diagnostics_shown() -> Vec<::mods::diagnostics::Finding> {
+    omsi_launcher_lib::instances::undismissed(::mods::diagnostics::findings())
+}
+
+pub(crate) fn write_diagnostics() {
+    if let Some(p) = instance_file("diagnostics") {
+        if let Err(e) = ::mods::diagnostics::write(&p) {
+            log::warn!("{}: {e}", p.display());
+        }
+    }
+}
+
 pub(crate) fn connect() {
     let (Ok(addr), Ok(token), Ok(instance)) = (
         legacy_config::env::var(ENV_ADDR),

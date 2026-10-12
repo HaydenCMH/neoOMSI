@@ -52,7 +52,7 @@ anything printed goes to stderr with the log. The launcher shows stderr as diagn
    `events.session`, and `game.link` when the game link is up) and `commands`, the names of every
    command it answers. A different major version is answered with
    `STATUS_CODE_UNSUPPORTED_VERSION`, and the engine stays unready. The launcher does not send
-   commands the engine does not list (`uninstall_mod`, for example, only its mock has so far).
+   commands the engine does not list (an older engine lacks `uninstall_mod`, for example).
 3. Requests run side by side. Their answers come back in any order, matched by `request_id`.
 4. `shutdown` (or closing stdin) ends the engine once the requests still running are answered
    (10 s at most). Games it started keep running, and the next engine finds them through
@@ -70,8 +70,16 @@ launcher shows that the engine went away.
 | `lines`, `ibis` | |
 | `minimap` | roads (`main`: a speed limit of 55 km/h or more), stops and entry points in world metres, each with the `--spawn` it starts at; kept per map and date until the content changes |
 | `profiles`, `profile`, `create_profile`, `delete_profile` | |
-| `mods`, `modinfo` | |
-| `start_install` | returns at once; progress comes as `installs_changed` |
+| `mods`, `modinfo` | `mods.installed` lists the entries of `<content>/mods` the game mounts; `error` says why a damaged `.zip` cannot be read |
+| `start_install` | returns at once; progress comes as `installs_changed`. A mod is installed as `mods/<name>` (unpacked, archive tree kept) or `mods/<name>.zip` (in place); with `replace`, an installed mod of that name moves to `mods/uninstalled` |
+| `uninstall_mod` | moves the entry to `mods/uninstalled/<time>-<name>`; nothing is deleted. Refused while an install runs |
+| `allow_mod_plugins` | a mod's plugins (`plugins/*.opl`, Lua) load only once allowed; the list is `[mods] plugins_allowed` in the settings |
+| `map_picture` | the bytes of a map's `picture.jpg` from whichever content root has it (empty when none) |
+| `save_mod_order`, `reset_mod_order`, `forget_mod` | the load order (`mods.installed`, highest priority first, kept in `mods/.load-order.json`): a change names the `order_revision` it read and is refused when the order changed since; each answers the new `mods` |
+| `mod_conflicts` | per mounted entry: its files, how many it overrides and in which entries, how many are hidden and by which, how many original OMSI 2 files it replaces, and vehicle folders another entry uses for other vehicles |
+| `diagnostics` | what the game `instance` could not find (`~/.neoomsi/diagnostics/<id>.json`, written after loading and when it ends), grouped by the asking entry and pack |
+| `preflight` | before a start: what the map's tiles and AI lists name that is not installed, classified like `diagnostics`; kept until the content changes |
+| `dismiss_diagnostic` | a finding (`Diagnostic.key`) the player does not want to see again; neither `diagnostics`, `preflight` nor the game's message shows it, until what is wrong changes |
 | `cancel_install`, `clear_installs` | |
 | `instances`, `launch`, `stop`, `log` | `stop` asks over the game link first, then by signal |
 | `join` | what a join field means, and the LAN sessions hosted here |
