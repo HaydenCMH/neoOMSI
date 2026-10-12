@@ -520,6 +520,32 @@ fn pipeline_codes_cover_the_table() {
 }
 
 #[test]
+fn only_depth_writing_blends_get_a_depth_pipe_before_the_rain() {
+    for cull in [false, true] {
+        for surface in [false, true] {
+            assert_eq!(
+                blended_depth_pipe(pipe_code(PIPE_BLEND, cull, surface)),
+                Some(cull as u8)
+            );
+            for kind in [PIPE_OPAQUE, PIPE_ALPHA_TEST, PIPE_BLEND_NO_WRITE, PIPE_SURFACE_DEPTH] {
+                assert_eq!(blended_depth_pipe(pipe_code(kind, cull, surface)), None);
+            }
+        }
+    }
+}
+
+#[test]
+fn only_parts_after_a_rain_layer_follow_the_rain() {
+    // pillar, rain pane, divider, another rain pane, sticker
+    let mut seen = false;
+    let follows: Vec<bool> = [false, true, false, true, false]
+        .into_iter()
+        .map(|rain| follows_rain(&mut seen, rain))
+        .collect();
+    assert_eq!(follows, [false, false, true, false, true]);
+}
+
+#[test]
 fn nearest_by_origin_picks_the_closest_mesh_of_each_object() {
     let bus = DVec3::new(0.0, 0.0, 0.0);
     let car = DVec3::new(1.0, 0.0, 0.0);
