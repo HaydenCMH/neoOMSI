@@ -1367,10 +1367,12 @@ fn dsc_candidates(file: &Path, lang: &str) -> Vec<PathBuf> {
         .collect()
 }
 
-fn omsi_suffix(lang: &str) -> &str {
+/// OMSI's three-letter name of a language in its file names (`_ENG.dsc`, `DEU_key_game.olf`).
+pub fn omsi_suffix(lang: &str) -> &str {
     match lang {
         "en" => "ENG",
         "de" => "DEU",
+        "fr" => "FRA",
         other => other,
     }
 }
@@ -2455,6 +2457,7 @@ pub fn apply_settings(v: &Value) {
 pub const LANGUAGES: &[(&str, &str, &str, &[&str])] = &[
     ("en", "English", "en", &["en", "english"]),
     ("de", "Deutsch", "de", &["de", "ger", "german", "deutsch"]),
+    ("fr", "Français", "fr", &["fr", "fra", "french", "français", "francais"]),
 ];
 
 /// The settings' language code from any spelling the game accepts (English when unknown).
@@ -3689,7 +3692,13 @@ mod tests {
             super::dsc_candidates(p, "en"),
             vec![std::path::PathBuf::from("/x/maps/Spandau/global_ENG.dsc")]
         );
-        assert_eq!(super::dsc_candidates(p, "FRA").len(), 2);
+        assert_eq!(
+            super::dsc_candidates(p, "fr"),
+            vec![
+                std::path::PathBuf::from("/x/maps/Spandau/global_FRA.dsc"),
+                std::path::PathBuf::from("/x/maps/Spandau/global_ENG.dsc")
+            ]
+        );
         assert_eq!(
             super::dsc_candidates(std::path::Path::new("/v/MAN_EN92_main.bus"), "de"),
             vec![std::path::PathBuf::from("/v/MAN_EN92_main_DEU.dsc")]
@@ -3878,11 +3887,14 @@ mod tests {
     }
 
     #[test]
-    fn only_english_and_german_are_supported() {
+    fn english_german_and_french_are_supported() {
         assert_eq!(language_code("English"), "en");
         assert_eq!(language_iso("en"), "");
         assert_eq!(language_code("Deutsch"), "de");
         assert_eq!(language_iso("de"), "de");
+        assert_eq!(language_code("FRA"), "fr");
+        assert_eq!(language_code("Français"), "fr");
+        assert_eq!(language_iso("fr"), "fr");
         assert_eq!(language_code("pt-BR"), "en");
     }
 
