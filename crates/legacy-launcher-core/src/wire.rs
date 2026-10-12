@@ -204,6 +204,64 @@ pub fn install_mode(m: InstallMode) -> &'static str {
     }
 }
 
+pub fn new_mods(placement: NewMods) -> ::mods::NewMods {
+    match placement {
+        NewMods::Bottom => ::mods::NewMods::Bottom,
+        NewMods::Unspecified | NewMods::Top => ::mods::NewMods::Top,
+    }
+}
+
+fn wire_new_mods(placement: ::mods::NewMods) -> NewMods {
+    match placement {
+        ::mods::NewMods::Top => NewMods::Top,
+        ::mods::NewMods::Bottom => NewMods::Bottom,
+    }
+}
+
+pub fn mod_conflict(conflict: ::mods::Conflict) -> ModConflict {
+    ModConflict {
+        name: conflict.id,
+        files: conflict.files as u32,
+        overrides: conflict.overrides as u32,
+        overridden: conflict.overridden as u32,
+        replaces_original: conflict.replaces_original as u32,
+        hidden_by: conflict.hidden_by,
+        overrides_mods: conflict.overrides_mods,
+        clashes: conflict
+            .clashes
+            .into_iter()
+            .map(|clash| VehicleClash {
+                folder: clash.folder,
+                name: clash.other,
+            })
+            .collect(),
+    }
+}
+
+pub fn diagnostic(finding: ::mods::diagnostics::Finding) -> Diagnostic {
+    use ::mods::diagnostics::{Class, Severity as Level};
+    Diagnostic {
+        key: finding.key(),
+        class: match finding.class {
+            Class::MissingFile => DiagnosticClass::MissingFile,
+            Class::IncompleteMod => DiagnosticClass::IncompleteMod,
+            Class::IncompletePack => DiagnosticClass::IncompletePack,
+            Class::InactiveDependency => DiagnosticClass::InactiveDependency,
+            Class::MissingDependency => DiagnosticClass::MissingDependency,
+        } as i32,
+        requester: finding.requester,
+        pack: finding.pack.unwrap_or_default(),
+        provider: finding.provider.unwrap_or_default(),
+        severity: match finding.severity {
+            Level::Optional => Severity::Optional,
+            Level::Degraded => Severity::Degraded,
+            Level::Required => Severity::Required,
+        } as i32,
+        count: finding.count as u32,
+        samples: finding.samples,
+    }
+}
+
 impl From<crate::install::Progress> for InstallProgress {
     fn from(p: crate::install::Progress) -> InstallProgress {
         let state = match p.state.as_str() {
@@ -276,15 +334,15 @@ impl From<crate::ModsStatus> for ModsStatus {
             installed: m
                 .installed
                 .into_iter()
-                .map(|i| InstalledMod {
-                    name: i.name,
-                    available: i.available,
-                    installed: i.installed,
-                    size: i.size,
-                    in_place: i.in_place,
-                    has_plugins: i.has_plugins,
-                    plugins_allowed: i.plugins_allowed,
-                    error: i.error,
+                .map(|entry| InstalledMod {
+                    name: entry.name,
+                    available: entry.available,
+                    installed: entry.installed,
+                    size: entry.size,
+                    in_place: entry.in_place,
+                    has_plugins: entry.has_plugins,
+                    plugins_allowed: entry.plugins_allowed,
+                    error: entry.error,
                 })
                 .collect(),
             archives: m
@@ -297,7 +355,8 @@ impl From<crate::ModsStatus> for ModsStatus {
             jobs: m.jobs.into_iter().map(Into::into).collect(),
             order_revision: m.order_revision,
             order_error: m.order_error,
-            new_mods: m.new_mods,
+            new_mods: wire_new_mods(m.new_mods) as i32,
+            shared_dir: m.shared_dir,
             ..Default::default()
         }
     }

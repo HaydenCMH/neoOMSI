@@ -1,6 +1,6 @@
-//! Which mounted entry wins which files (display only).
+//! Which mounted entry provides which files, for the launcher to show. The game doesn't use it.
 
-use legacy_config::vfs;
+use legacy_config::{name_key, resolve_existing, vfs};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -8,68 +8,87 @@ use std::path::Path;
 pub struct Conflict {
     pub id: String,
     pub files: usize,
-    /// Files that hide an entry below.
+    /// Files this entry provides that also exist in an entry below it.
     pub overrides: usize,
-    /// Files hidden by an entry above.
+    /// Files this entry provides that an entry above it provides too.
     pub overridden: usize,
-    /// Files that replace an original OMSI 2 file.
+    /// Files that take the place of an original OMSI 2 file.
     pub replaces_original: usize,
     pub hidden_by: Vec<String>,
     pub overrides_mods: Vec<String>,
-    /// `Vehicles/<name>` folders another entry fills with different vehicles.
-    pub clashes: Vec<String>,
+    /// `Vehicles` folders that another entry fills with different vehicles.
+    pub clashes: Vec<Clash>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Clash {
+    /// The folder name inside `Vehicles`, spelled as in this entry.
+    pub folder: String,
+    pub other: String,
 }
 
 pub fn conflicts() -> Vec<Conflict> {
     let (roots, legacy) = {
-        let st = crate::STATE.read().unwrap();
-        let Some(st) = st.as_ref() else {
+        let state = crate::STATE.read().unwrap();
+        let Some(state) = state.as_ref() else {
             return Vec::new();
         };
-        (st.roots.clone(), st.legacy.clone())
+        (state.roots.clone(), state.legacy.clone())
     };
-    let files: Vec<Vec<String>> = roots.iter().map(|(_, r)| files_of(r)).collect();
+    let files: Vec<Vec<String>> = roots.iter().map(|(_, root)| files_of(root)).collect();
     let mut out: Vec<Conflict> = roots
         .iter()
         .zip(&files)
-        .map(|((m, _), f)| Conflict {
-            id: m.id.clone(),
-            files: f.len(),
+        .map(|((entry, _), entry_files)| Conflict {
+            id: entry.id.clone(),
+            files: entry_files.len(),
             ..Default::default()
         })
         .collect();
     let mut winner: HashMap<&str, usize> = HashMap::new();
-    for (i, list) in files.iter().enumerate() {
-        for f in list {
-            match winner.get(f.as_str()) {
-                Some(&w) => {
-                    out[i].overridden += 1;
-                    let (above, below) = (out[w].id.clone(), out[i].id.clone());
-                    add(&mut out[i].hidden_by, above);
-                    out[w].overrides += 1;
-                    add(&mut out[w].overrides_mods, below);
+    for (index, list) in files.iter().enumerate() {
+        for file in list {
+            match winner.get(file.as_str()) {
+                Some(&above) => {
+                    out[index].overridden += 1;
+                    let (above_id, below_id) = (out[above].id.clone(), out[index].id.clone());
+                    add(&mut out[index].hidden_by, above_id);
+                    out[above].overrides += 1;
+                    add(&mut out[above].overrides_mods, below_id);
                 }
                 None => {
-                    winner.insert(f, i);
+                    winner.insert(file, index);
                 }
             }
         }
     }
-    if let Some(l) = &legacy {
-        for (f, &w) in &winner {
-            let comps: Vec<&str> = f.split('/').collect();
-            if legacy_config::resolve_existing(l, &comps).is_some() {
-                out[w].replaces_original += 1;
+    if let Some(legacy) = &legacy {
+        for (file, &index) in &winner {
+            let comps: Vec<&str> = file.split('/').collect();
+            if resolve_existing(legacy, &comps).is_some() {
+                out[index].replaces_original += 1;
             }
         }
     }
-    let vehicles: Vec<HashMap<&str, Vec<&str>>> = files.iter().map(|f| vehicle_definitions(f)).collect();
-    for i in 0..out.len() {
-        for j in 0..out.len() {
-            for (pack, defs) in &vehicles[i] {
-                if i != j && vehicles[j].get(pack).is_some_and(|other| other != defs) {
-                    let clash = format!("{pack} ({})", out[j].id);
-                    add(&mut out[i].clashes, clash);
+    let vehicles: Vec<HashMap<&str, Vec<&str>>> =
+        files.iter().map(|list| vehicle_definitions(list)).collect();
+    for index in 0..out.len() {
+        for (folder, definitions) in &vehicles[index] {
+            for other in (0..out.len()).filter(|&other| other != index) {
+                if vehicles[other]
+                    .get(folder)
+                    .is_some_and(|theirs| theirs != definitions)
+                {
+                    let spelt =
+                        resolve_existing(&roots[index].1, &["Vehicles", folder]).and_then(|path| {
+                            path.file_name()
+                                .map(|name| name.to_string_lossy().into_owned())
+                        });
+                    let clash = Clash {
+                        folder: spelt.unwrap_or_else(|| folder.to_string()),
+                        other: out[other].id.clone(),
+                    };
+                    add(&mut out[index].clashes, clash);
                 }
             }
         }
@@ -77,17 +96,22 @@ pub fn conflicts() -> Vec<Conflict> {
     out
 }
 
-fn add(list: &mut Vec<String>, item: String) {
+fn add<T: PartialEq>(list: &mut Vec<T>, item: T) {
     if !list.contains(&item) {
         list.push(item);
     }
 }
 
+/// Every file below `root`, as a `/`-separated path of [`name_key`]s.
 fn files_of(root: &Path) -> Vec<String> {
     fn walk(dir: &Path, rel: &str, out: &mut Vec<String>) {
         for (name, is_dir) in vfs::list_dir(dir).unwrap_or_default() {
-            let lower = name.to_string_lossy().to_lowercase();
-            let path = if rel.is_empty() { lower } else { format!("{rel}/{lower}") };
+            let key = name_key(&name.to_string_lossy());
+            let path = if rel.is_empty() {
+                key
+            } else {
+                format!("{rel}/{key}")
+            };
             if is_dir {
                 walk(&dir.join(&name), &path, out);
             } else {
@@ -100,23 +124,22 @@ fn files_of(root: &Path) -> Vec<String> {
     out
 }
 
-/// `vehicles/<folder>` -> its `.bus`/`.ovh`/`.zug` files.
+/// Maps each folder in `vehicles/` to the sorted `.bus`/`.ovh`/`.zug` files it contains.
 fn vehicle_definitions(files: &[String]) -> HashMap<&str, Vec<&str>> {
     let mut out: HashMap<&str, Vec<&str>> = HashMap::new();
-    for f in files {
-        let parts: Vec<&str> = f.splitn(3, '/').collect();
-        if let [first, _, file] = parts[..] {
-            if first == "vehicles"
-                && !file.contains('/')
-                && [".bus", ".ovh", ".zug"].iter().any(|x| file.ends_with(x))
-            {
-                let pack = &f[..f.len() - file.len() - 1];
-                out.entry(pack).or_default().push(file);
-            }
+    for path in files {
+        let parts: Vec<&str> = path.splitn(3, '/').collect();
+        if let ["vehicles", folder, file] = parts[..]
+            && !file.contains('/')
+            && [".bus", ".ovh", ".zug"]
+                .iter()
+                .any(|extension| file.ends_with(extension))
+        {
+            out.entry(folder).or_default().push(file);
         }
     }
-    for defs in out.values_mut() {
-        defs.sort_unstable();
+    for definitions in out.values_mut() {
+        definitions.sort_unstable();
     }
     out
 }
@@ -125,12 +148,16 @@ fn vehicle_definitions(files: &[String]) -> HashMap<&str, Vec<&str>> {
 mod tests {
     #[test]
     fn vehicle_folders_are_told_apart_by_their_vehicles() {
-        let files: Vec<String> = ["vehicles/lion/lion.bus", "vehicles/lion/model/m.cfg", "maps/x/global.cfg"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        let defs = super::vehicle_definitions(&files);
-        assert_eq!(defs.len(), 1);
-        assert_eq!(defs["vehicles/lion"], ["lion.bus"]);
+        let files: Vec<String> = [
+            "vehicles/lion/lion.bus",
+            "vehicles/lion/model/m.cfg",
+            "maps/x/global.cfg",
+        ]
+        .iter()
+        .map(|path| path.to_string())
+        .collect();
+        let definitions = super::vehicle_definitions(&files);
+        assert_eq!(definitions.len(), 1);
+        assert_eq!(definitions["lion"], ["lion.bus"]);
     }
 }

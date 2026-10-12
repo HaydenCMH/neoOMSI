@@ -233,7 +233,7 @@ pub fn run() -> Result<()> {
     });
     let mut app = app;
     let r = event_loop.run_app(&mut app);
-    // (with what was missed while driving, too)
+    // Write the diagnostics again, now including what was missed while driving.
     game_link::write_diagnostics();
     lan_mods::clean_up();
     r?;
@@ -337,8 +337,9 @@ pub(crate) fn prepare(
     }
     ::mods::mount_env_zips();
     let mods = match &content {
-        Some(c) => ::mods::init(c, Some(&args.root))
-            .map_err(|e| log::warn!("mods folder {}: {e}", c.join(::mods::MODS_DIR).display())),
+        Some(content) => ::mods::init(content, Some(&args.root)).map_err(|error| {
+            log::warn!("mods folder {}: {error}", content.join(::mods::MODS_DIR).display())
+        }),
         None => Err(()),
     };
     if mods.is_err() {

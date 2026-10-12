@@ -2,10 +2,12 @@ use std::path::{Path, PathBuf};
 
 pub const MODS_DIR: &str = "mods";
 pub const UNINSTALLED_DIR: &str = "uninstalled";
-/// Where earlier versions put a .zip used in place.
+/// Where older versions put the .zip files they used in place.
 pub const ARCHIVES_DIR: &str = "Archives";
+/// A library below every mod: its files are used only where no mod provides them.
+pub const SHARED_DIR: &str = "shared";
 
-const RESERVED: &[&str] = &["waiting", "installed", UNINSTALLED_DIR, "plugins-not-enabled"];
+const RESERVED: &[&str] = &[SHARED_DIR, "waiting", "installed", UNINSTALLED_DIR, "plugins-not-enabled"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModKind {
@@ -23,16 +25,16 @@ pub struct ModEntry {
 }
 
 pub fn is_reserved(name: &str) -> bool {
-    RESERVED.iter().any(|r| r.eq_ignore_ascii_case(name))
+    RESERVED.iter().any(|reserved| reserved.eq_ignore_ascii_case(name))
 }
 
-/// The content root of a folder mod, by the same rule as a ZIP mount.
+/// The folder inside a folder mod that holds its content, found the same way as for a .zip.
 pub fn folder_content_root(path: &Path) -> PathBuf {
     let mut dirs = Vec::new();
     collect_dirs(path, "", 0, &mut dirs);
     let prefix = legacy_config::vfs::content_prefix(dirs.iter().map(String::as_str));
     let mut root = path.to_path_buf();
-    root.extend(prefix.split('/').filter(|c| !c.is_empty()));
+    root.extend(prefix.split('/').filter(|component| !component.is_empty()));
     root
 }
 
@@ -82,7 +84,7 @@ pub fn discover(mods_dir: &Path) -> Vec<ModEntry> {
             .to_lowercase()
             .cmp(&b.name.to_lowercase())
             .then((a.kind == ModKind::Zip).cmp(&(b.kind == ModKind::Zip)))
-            // deterministic for names that differ only in case
+            // Keeps the order stable for names that differ only in case.
             .then_with(|| a.name.cmp(&b.name))
     });
     out.dedup_by(|b, a| a.name.eq_ignore_ascii_case(&b.name));
@@ -121,12 +123,12 @@ mod tests {
     #[test]
     fn folder_mod_root_follows_the_zip_rule() {
         let root = std::env::temp_dir().join(format!("neoomsi-folder-mod-rule-{}", std::process::id()));
-        // any wrapper name, documentation beside it
+        // A wrapper folder with any name, next to a documentation folder.
         let wrapped = root.join("wrapped");
         std::fs::create_dir_all(wrapped.join("Content/Vehicles/Bus/Texture")).unwrap();
         std::fs::create_dir_all(wrapped.join("Docs")).unwrap();
         assert_eq!(super::folder_content_root(&wrapped), wrapped.join("Content"));
-        // content folders at the top: the mod folder itself, never a folder inside them
+        // With content folders at the top, the mod folder itself is the root.
         let flat = root.join("flat");
         std::fs::create_dir_all(flat.join("Vehicles/Bus/Sound")).unwrap();
         assert_eq!(super::folder_content_root(&flat), flat);

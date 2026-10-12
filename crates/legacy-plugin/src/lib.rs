@@ -575,7 +575,7 @@ impl Plugin {
             return Err("no [dll]".into());
         }
         if opl.dll.contains(':') || opl.dll.starts_with(['\\', '/'])
-            || opl.dll.split(['\\', '/']).any(|c| c == "..")
+            || opl.dll.split(['\\', '/']).any(|part| part == "..")
         {
             return Err(format!("{}: the library must lie in the plugins folder", opl.dll));
         }
@@ -890,8 +890,8 @@ mod tests {
         for dll in ["..\\..\\evil.dll", "sub/../../evil.dll", "C:\\evil.dll", "/evil.dll"] {
             let opl = dir.join("x.opl");
             std::fs::write(&opl, format!("[dll]\r\n{dll}\r\n")).unwrap();
-            let e = Plugin::load(&opl, &dir, &HostConfig::default()).err().unwrap();
-            assert!(e.contains("must lie in the plugins folder"), "{dll}: {e}");
+            let error = Plugin::load(&opl, &dir, &HostConfig::default()).err().unwrap();
+            assert!(error.contains("must lie in the plugins folder"), "{dll}: {error}");
         }
         std::fs::remove_dir_all(&dir).ok();
     }

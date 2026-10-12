@@ -37,7 +37,7 @@ pub struct ZipArchive {
     /// The archive file, which is also the folder it is mounted as.
     path: PathBuf,
     file: std::fs::File,
-    /// Size and modification time when it was read (a file replaced since is read anew).
+    /// Size and modification time when it was read, to notice when the file is replaced.
     stamp: Stamp,
     #[cfg(not(unix))]
     lock: std::sync::Mutex<()>,
@@ -54,8 +54,8 @@ static MOUNTS: RwLock<Vec<Arc<ZipArchive>>> = RwLock::new(Vec::new());
 
 type Stamp = (u64, Option<std::time::SystemTime>);
 
-fn stamp_of(md: &std::fs::Metadata) -> Stamp {
-    (md.len(), md.modified().ok())
+fn stamp_of(meta: &std::fs::Metadata) -> Stamp {
+    (meta.len(), meta.modified().ok())
 }
 
 /// The largest entry that is read into memory (a corrupt size field must not allocate
@@ -244,7 +244,7 @@ impl ZipArchive {
             ));
         }
         let mut archive = archive;
-        archive.prefix = content_prefix(raw.iter().map(|(n, _, _)| n.as_str()));
+        archive.prefix = content_prefix(raw.iter().map(|(name, _, _)| name.as_str()));
         let prefix_lower = archive.prefix.to_lowercase();
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
         for (name, entry, is_dir) in raw {
@@ -323,7 +323,7 @@ impl ZipArchive {
         self.entries.values().map(|e| e.size).sum()
     }
 
-    /// Is there a file or folder `rel` (relative to the mount root, any case)?
+    /// Whether there is a file or folder at `rel` (relative to the mount root, any case).
     pub fn contains(&self, rel: &str) -> bool {
         let key = normalize(rel);
         self.is_file(&key) || self.is_dir(&key)
@@ -332,7 +332,11 @@ impl ZipArchive {
     pub fn has_content(&self) -> bool {
         self.dirs
             .get("")
-            .is_some_and(|l| l.iter().any(|(n, is_dir)| *is_dir && crate::is_content_folder(n)))
+            .is_some_and(|listing| {
+                listing
+                    .iter()
+                    .any(|(name, is_dir)| *is_dir && crate::is_content_folder(name))
+            })
     }
 
     /// Contents of the entry at `rel` (relative to the mount root, any case).
@@ -413,32 +417,32 @@ impl ZipArchive {
     }
 }
 
-/// The archive folder that holds OMSI's content folders ("" at the top): most top-level
-/// content folders wins, then most add-on ones (`Sound`, `Texture`, `Scripts`), then the
-/// shallowest. Never a folder inside a content folder.
+/// The folder that holds OMSI's content folders ("" for the top). It prefers the most top-level
+/// content folders, then the most add-on ones (`Sound`, `Texture`, `Scripts`), then the shallowest.
 pub fn content_prefix<'a>(names: impl Iterator<Item = &'a str>) -> String {
     const SHARED: [&str; 3] = ["Texture", "Sound", "Scripts"];
     let is_content = crate::is_content_folder;
     // folder (lower case) -> (spelling, lower-case names of its sub-folders)
     let mut children: HashMap<String, (String, Vec<String>)> = HashMap::new();
-    for n in names {
-        let parts: Vec<&str> = n.split('/').filter(|c| !c.is_empty()).collect();
-        let folders = if n.ends_with('/') {
+    for name in names {
+        let parts: Vec<&str> = name.split('/').filter(|part| !part.is_empty()).collect();
+        let folders = if name.ends_with('/') {
             parts.len()
         } else {
             parts.len().saturating_sub(1)
         };
-        for k in 0..folders.min(6) {
-            if k > 0 && is_content(parts[k - 1]) {
-                break; // below a content folder: an add-on's own folders
+        for depth in 0..folders.min(6) {
+            // Folders inside a content folder belong to an add-on, so they can't be the root.
+            if depth > 0 && is_content(parts[depth - 1]) {
+                break;
             }
-            let dir: String = parts[..k].iter().map(|c| format!("{c}/")).collect();
-            let e = children
+            let dir: String = parts[..depth].iter().map(|part| format!("{part}/")).collect();
+            let found = children
                 .entry(dir.to_lowercase())
                 .or_insert_with(|| (dir.clone(), Vec::new()));
-            let child = parts[k].to_lowercase();
-            if !e.1.contains(&child) {
-                e.1.push(child);
+            let child = parts[depth].to_lowercase();
+            if !found.1.contains(&child) {
+                found.1.push(child);
             }
         }
     }
@@ -448,14 +452,14 @@ pub fn content_prefix<'a>(names: impl Iterator<Item = &'a str>) -> String {
             let present: Vec<&str> = crate::CONTENT_FOLDERS
                 .iter()
                 .copied()
-                .filter(|f| kids.iter().any(|k| k.eq_ignore_ascii_case(f)))
+                .filter(|folder| kids.iter().any(|kid| kid.eq_ignore_ascii_case(folder)))
                 .collect();
             if present.is_empty() {
                 return None;
             }
             let shared = present
                 .iter()
-                .filter(|f| SHARED.iter().any(|s| s.eq_ignore_ascii_case(f)))
+                .filter(|folder| SHARED.iter().any(|addon| addon.eq_ignore_ascii_case(folder)))
                 .count();
             let depth = key.matches('/').count();
             Some((
@@ -468,19 +472,19 @@ pub fn content_prefix<'a>(names: impl Iterator<Item = &'a str>) -> String {
                 dir,
             ))
         })
-        .max_by(|a, b| a.0.cmp(&b.0))
+        .max_by(|left, right| left.0.cmp(&right.0))
         .map(|(_, dir)| dir.clone())
         .unwrap_or_default()
 }
 
-/// Mount the archive at `path` (as the folder `path`). Mounting the same archive twice is a
-/// no-op; an archive replaced since it was mounted is read anew. Returns the mount point.
+/// Mounts the archive at `path` as the folder `path` and returns the mount point. Mounting it
+/// again does nothing, unless the file was replaced since: then it is read again.
 pub fn mount_zip(path: &Path) -> io::Result<PathBuf> {
-    let now = std::fs::metadata(path).map(|m| stamp_of(&m)).ok();
-    if let Some(m) = MOUNTS.read().unwrap().iter().find(|m| m.path == path) {
-        if now == Some(m.stamp) {
-            return Ok(m.path.clone());
-        }
+    let now = std::fs::metadata(path).map(|meta| stamp_of(&meta)).ok();
+    if let Some(mounted) = MOUNTS.read().unwrap().iter().find(|mounted| mounted.path == path)
+        && now == Some(mounted.stamp)
+    {
+        return Ok(mounted.path.clone());
     }
     let t0 = std::time::Instant::now();
     let archive = ZipArchive::open(path)?;
@@ -500,13 +504,13 @@ pub fn mount_zip(path: &Path) -> io::Result<PathBuf> {
     }
     let mount = archive.path.clone();
     let mut mounts = MOUNTS.write().unwrap();
-    mounts.retain(|m| m.path != mount);
+    mounts.retain(|mounted| mounted.path != mount);
     mounts.push(Arc::new(archive));
     Ok(mount)
 }
 
 pub fn unmount_zip(path: &Path) {
-    MOUNTS.write().unwrap().retain(|m| m.path != path);
+    MOUNTS.write().unwrap().retain(|mounted| mounted.path != path);
 }
 
 /// The mounted archives.
@@ -758,7 +762,7 @@ mod tests {
         write_zip(&zip, &file(b"the new one"));
         mount_zip(&zip).unwrap();
         assert_eq!(read(&bus).unwrap(), b"the new one");
-        assert_eq!(mounts().iter().filter(|m| m.path() == zip).count(), 1);
+        assert_eq!(mounts().iter().filter(|mounted| mounted.path() == zip).count(), 1);
         unmount_zip(&zip);
         assert!(archive_of(&bus).is_none());
         std::fs::remove_dir_all(&dir).ok();

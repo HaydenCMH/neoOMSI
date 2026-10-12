@@ -210,12 +210,12 @@ pub(crate) fn own_bindings(root: &Path, modifier: i32) -> std::collections::Hash
         .collect()
 }
 
-/// neoOMSI's content folder (mods live here): beside the game binary if writable, else in
-/// the home folder.
+/// neoOMSI's content folder, where mods live: next to the game binary if that is writable,
+/// otherwise in the home folder.
 pub(crate) fn content_dir() -> Option<PathBuf> {
     if let Some(d) = ::legacy_config::env::var_os("OMSI_CONTENT") {
         match ::legacy_config::usable_content_folder(Path::new(&d)) {
-            Some(c) => return Some(c),
+            Some(usable) => return Some(usable),
             None => log::error!(
                 "OMSI_CONTENT {} lies inside the original OMSI 2 installation, which neoOMSI never writes to: the default content folder is used",
                 Path::new(&d).display()

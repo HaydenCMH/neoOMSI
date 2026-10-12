@@ -674,9 +674,9 @@ pub const CONTENT_FOLDERS: &[&str] = &[
     "Sound",
 ];
 
-/// Is `name` one of [`CONTENT_FOLDERS`] (any case)?
+/// Whether `name` is one of [`CONTENT_FOLDERS`], ignoring case.
 pub fn is_content_folder(name: &str) -> bool {
-    CONTENT_FOLDERS.iter().any(|f| f.eq_ignore_ascii_case(name))
+    CONTENT_FOLDERS.iter().any(|folder| folder.eq_ignore_ascii_case(name))
 }
 
 /// Marker file of an neoOMSI content folder (so it is never mistaken for the OMSI 2
@@ -720,16 +720,16 @@ pub fn content_folder_of(dir: &Path) -> PathBuf {
 /// `None` when `dir` lies inside an OMSI 2 installation, which neoOMSI never writes to.
 pub fn usable_content_folder(dir: &Path) -> Option<PathBuf> {
     let dir = content_folder_of(dir);
-    let is_omsi = |p: &Path| {
-        resolve_existing(p, &["Omsi.exe"]).is_some() && resolve_existing(p, &["maps"]).is_some()
+    let is_omsi = |path: &Path| {
+        resolve_existing(path, &["Omsi.exe"]).is_some() && resolve_existing(path, &["maps"]).is_some()
     };
-    let inside_original = dir.ancestors().skip(1).any(|a| {
-        is_omsi(a)
+    let inside_original = dir.ancestors().skip(1).any(|ancestor| {
+        is_omsi(ancestor)
             && dir
-                .strip_prefix(a)
+                .strip_prefix(ancestor)
                 .ok()
                 .and_then(|rel| rel.components().next())
-                .is_some_and(|c| !c.as_os_str().eq_ignore_ascii_case("neoOMSI"))
+                .is_some_and(|first| !first.as_os_str().eq_ignore_ascii_case("neoOMSI"))
     });
     (!inside_original).then_some(dir)
 }
@@ -745,7 +745,7 @@ pub fn is_writable(dir: &Path) -> bool {
 /// Create the content folder layout at `dir` (idempotent).
 pub fn ensure_content_layout(dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
-    // earlier versions named it `Mods`, which a case-sensitive disk keeps apart from `mods`
+    // Older versions called it `Mods`, which is a different folder on a case-sensitive disk.
     let old = dir.join("Mods");
     if old.is_dir() && !dir.join("mods").exists() {
         std::fs::rename(&old, dir.join("mods"))?;

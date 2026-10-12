@@ -15,30 +15,30 @@ static CONN: Mutex<Option<Conn>> = Mutex::new(None);
 
 const PROGRESS_EVERY: Duration = Duration::from_millis(250);
 
-/// `~/.neoomsi/<dir>/<instance or pid>.json`.
+/// This game's file `~/.neoomsi/<dir>/<instance id or pid>.json`.
 pub(crate) fn instance_file(dir: &str) -> Option<std::path::PathBuf> {
     let id = legacy_config::env::var("OMSI_INSTANCE")
         .ok()
-        .filter(|s| {
-            !s.is_empty()
-                && s.len() <= 64
-                && s.bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        .filter(|instance| {
+            !instance.is_empty()
+                && instance.len() <= 64
+                && instance
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
         })
         .unwrap_or_else(|| std::process::id().to_string());
     Some(crate::lan::data_dir()?.join(dir).join(format!("{id}.json")))
 }
 
-pub(crate) fn diagnostics_shown() -> Vec<::mods::diagnostics::Finding> {
-    omsi_launcher_lib::instances::undismissed(::mods::diagnostics::findings())
-}
-
-pub(crate) fn write_diagnostics() {
-    if let Some(p) = instance_file("diagnostics") {
-        if let Err(e) = ::mods::diagnostics::write(&p) {
-            log::warn!("{}: {e}", p.display());
-        }
+/// Writes what the game couldn't find so far, for the launcher to show, and returns it.
+pub(crate) fn write_diagnostics() -> Vec<::mods::diagnostics::Finding> {
+    let found = ::mods::diagnostics::findings();
+    if let Some(path) = instance_file("diagnostics")
+        && let Err(error) = ::mods::diagnostics::write(&path, &found)
+    {
+        log::warn!("{}: {error}", path.display());
     }
+    found
 }
 
 pub(crate) fn connect() {

@@ -116,8 +116,8 @@ impl Player {
                                 part.set_cabin_connected(connected_cabin);
                                 ss.add_part(i, part);
                             }
-                            Err(e) => {
-                                log::warn!("{e}");
+                            Err(error) => {
+                                log::warn!("{error}");
                                 ::mods::diagnostics::missing(t.ty.def.dir(), &path, ::mods::diagnostics::Kind::Sound);
                             }
                         }
@@ -125,8 +125,8 @@ impl Player {
                     self.vehicle.host.snapshot_triggers = ss.curve_triggers().into_iter().collect();
                     self.sounds = Some(ss);
                 }
-                Err(e) => {
-                    log::warn!("{e}");
+                Err(error) => {
+                    log::warn!("{error}");
                     ::mods::diagnostics::missing(def.dir(), &path, ::mods::diagnostics::Kind::Sound);
                 }
             }

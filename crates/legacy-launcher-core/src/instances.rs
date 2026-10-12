@@ -84,7 +84,10 @@ pub fn undismissed(
     findings: Vec<::mods::diagnostics::Finding>,
 ) -> Vec<::mods::diagnostics::Finding> {
     let dismissed = ::mods::diagnostics::dismissed(&dismissed_diagnostics_path());
-    findings.into_iter().filter(|f| !dismissed.contains(&f.key())).collect()
+    findings
+        .into_iter()
+        .filter(|finding| !dismissed.contains(&finding.key()))
+        .collect()
 }
 
 pub fn diagnostics_path(id: &str) -> PathBuf {

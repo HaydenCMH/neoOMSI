@@ -11,27 +11,30 @@ pub(crate) fn load() -> Plugins {
     if ::legacy_config::env::var_os("OMSI_NO_PLUGINS").is_some() {
         return Plugins::default();
     }
-    // never from a LAN host's content; from a mod only with the player's consent
-    let allowed = omsi_launcher_lib::plugin_mods_allowed();
+    // Plugins never load from a LAN host's content, and from a mod only with the player's consent.
     let mods_dir = ::mods::mods_dir();
     let consented = |root: &std::path::Path| {
-        let Some(entry) = mods_dir
-            .as_deref()
-            .and_then(|d| root.strip_prefix(d).ok())
-            .and_then(|rel| rel.components().next())
-        else {
+        let Some((mods, entry)) = mods_dir.as_deref().and_then(|mods| {
+            Some((mods, root.strip_prefix(mods).ok()?.components().next()?.as_os_str()))
+        }) else {
             return true;
         };
-        let entry = entry.as_os_str().to_string_lossy();
-        let ok = allowed.iter().any(|a| a.eq_ignore_ascii_case(&entry));
-        if !ok && ::legacy_plugin::resolve_path(root, "plugins").is_some_and(|d| d.is_dir()) {
-            log::warn!("plugins of the mod '{entry}' not loaded: allow them on the Mods page");
+        let allowed = omsi_launcher_lib::mod_plugins_allowed(&mods.join(entry));
+        let has_plugins =
+            ::legacy_plugin::resolve_path(root, "plugins").is_some_and(|plugins| plugins.is_dir());
+        if !allowed && has_plugins {
+            let entry = entry.to_string_lossy();
+            if ::mods::is_reserved(&entry) {
+                log::warn!("plugins in mods/{entry} never load: install them as a mod of their own");
+            } else {
+                log::warn!("plugins of the mod '{entry}' not loaded: allow them on the Mods page");
+            }
         }
-        ok
+        allowed
     };
     let dirs: Vec<std::path::PathBuf> = ::mods::content_roots()
         .iter()
-        .filter(|r| !::mods::is_sandbox(r) && consented(r))
+        .filter(|root| !::mods::is_sandbox(root) && consented(root))
         .filter_map(|r| ::legacy_plugin::resolve_path(r, "plugins"))
         .filter(|d| d.is_dir())
         .collect();

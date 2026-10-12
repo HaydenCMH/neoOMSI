@@ -293,14 +293,18 @@ pub fn content_dir() -> Option<PathBuf> {
     // the bundle when the binary sits inside a macOS .app)
     let env = std::env::var_os("OMSI_CONTENT").map(PathBuf::from);
     let usable = env.as_deref().and_then(::legacy_config::usable_content_folder);
-    if let (Some(d), None) = (&env, &usable) {
-        log_to_file(&format!(
-            "OMSI_CONTENT {} lies inside the original OMSI 2 installation, which neoOMSI never writes to: the default content folder is used",
-            d.display()
-        ));
+    if let (Some(requested), None) = (&env, &usable) {
+        // Log it only once: the lists call this for every entry they show.
+        static TOLD: std::sync::Once = std::sync::Once::new();
+        TOLD.call_once(|| {
+            log_to_file(&format!(
+                "OMSI_CONTENT {} lies inside the original OMSI 2 installation, which neoOMSI never writes to: the default content folder is used",
+                requested.display()
+            ))
+        });
     }
     let dir = match usable {
-        Some(d) => d,
+        Some(dir) => dir,
         None => {
             let c = load_config_raw();
             let game = find_game(&c.game)?;
@@ -324,7 +328,7 @@ pub fn content_dir() -> Option<PathBuf> {
     Some(dir)
 }
 
-/// The content folder, with its content registered anew (the game never calls this).
+/// The content folder, after registering its content roots again. Only the engine calls this.
 pub fn register_content() -> Option<PathBuf> {
     let dir = content_dir()?;
     register_roots(&dir);
@@ -334,10 +338,10 @@ pub fn register_content() -> Option<PathBuf> {
 fn register_roots(content: &Path) {
     static DONE: std::sync::Once = std::sync::Once::new();
     DONE.call_once(|| ::mods::add_content_root(content.to_path_buf()));
-    // looked up each time: Setup may change it while the launcher runs
+    // Looked up every time, because Setup can change it while the launcher runs.
     let legacy = find_root(&load_config_raw().root);
-    if let Err(e) = ::mods::init(content, legacy.as_deref()) {
-        log_to_file(&format!("mods folder: {e}"));
+    if let Err(error) = ::mods::init(content, legacy.as_deref()) {
+        log_to_file(&format!("mods folder: {error}"));
         if let Some(r) = legacy {
             ::mods::add_content_root(r);
         }
@@ -368,10 +372,10 @@ fn resolve_content(rel: &str) -> Result<PathBuf> {
 pub fn map_picture(map: &str) -> Result<Vec<u8>> {
     let dir = Path::new(&map.replace('\\', "/"))
         .parent()
-        .map(|d| d.to_string_lossy().to_string())
+        .map(|parent| parent.to_string_lossy().to_string())
         .unwrap_or_default();
-    let p = resolve_content(&format!("{dir}/picture.jpg"))?;
-    Ok(::legacy_config::vfs::read(&p).unwrap_or_default())
+    let picture = resolve_content(&format!("{dir}/picture.jpg"))?;
+    Ok(::legacy_config::vfs::read(&picture).unwrap_or_default())
 }
 
 /// The content roots, in the order the game resolves them.
@@ -381,11 +385,11 @@ fn bases() -> Vec<PathBuf> {
     if !registered.is_empty() {
         return registered;
     }
-    // setup incomplete: no content folder
+    // Setup isn't finished, so there is no content folder yet.
     root().into_iter().collect()
 }
 
-/// The folder `name` of `base` in any case, as Windows finds it.
+/// The folder `name` inside `base`, matched case-insensitively as Windows does.
 pub(crate) fn sub_dir(base: &Path, name: &str) -> PathBuf {
     let direct = base.join(name);
     if ::legacy_config::vfs::is_dir(&direct) {
@@ -394,11 +398,12 @@ pub(crate) fn sub_dir(base: &Path, name: &str) -> PathBuf {
     ::legacy_config::resolve_existing(base, &[name]).unwrap_or(direct)
 }
 
-/// Entries of `rel` across all content roots; an earlier root hides the same name below.
+/// The entries of `rel` across all content roots. An earlier root hides the same name in the
+/// roots after it.
 fn merged_entries(rel: &str) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let dirs: Vec<PathBuf> = bases().iter().map(|b| sub_dir(b, rel)).collect();
+    let dirs: Vec<PathBuf> = bases().iter().map(|base| sub_dir(base, rel)).collect();
     for d in dirs {
         for (name, _) in ::legacy_config::vfs::list_dir(&d).unwrap_or_default() {
             if seen.insert(name.to_string_lossy().to_ascii_lowercase()) {
@@ -410,7 +415,7 @@ fn merged_entries(rel: &str) -> Vec<PathBuf> {
     out
 }
 
-/// Folders of `rel` by name, each with its copies in every root, earlier root first.
+/// The folders of `rel` by name, each with its copies in every root, earlier roots first.
 fn merged_folders_in(
     bases: impl IntoIterator<Item = PathBuf>,
     rel: &str,
@@ -437,6 +442,7 @@ fn merged_folders_in(
             if name.starts_with('.') {
                 continue;
             }
+            // (by an index: thousands of folders compared each with all before took long)
             match at.get(&name.to_ascii_lowercase()) {
                 Some(&i) => out[i].1.push(p),
                 None => {
@@ -466,15 +472,16 @@ pub struct ModsStatus {
     pub content_dir: String,
     /// (folder, number of entries)
     pub folders: Vec<(String, usize)>,
-    /// The mods folder (`inbox` for wire compatibility).
+    /// The mods folder, called `inbox` for compatibility with older launchers.
     pub inbox: String,
     pub inbox_items: Vec<String>,
     /// The load order, highest priority first.
     pub installed: Vec<InstalledMod>,
     pub order_revision: u64,
     pub order_error: String,
-    /// "top" or "bottom".
-    pub new_mods: String,
+    pub new_mods: ::mods::NewMods,
+    /// `mods/shared`, below every mod and outside the load order.
+    pub shared_dir: String,
     /// (name, bytes) of the .zip files in `<content>/Archives`.
     pub archives: Vec<(String, u64)>,
     pub free_bytes: u64,
@@ -501,8 +508,6 @@ pub fn start_install(src: &Path, mode: &str, replace: bool) -> Result<install::P
     if !src.exists() {
         return Err(anyhow!("{} does not exist", src.display()));
     }
-    // grant the mods that predate consent before this one arrives
-    plugin_mods_allowed();
     let job = install::start(
         content,
         src.to_path_buf(),
@@ -542,60 +547,79 @@ pub fn uninstall_mod(name: &str) -> Result<PathBuf> {
     install::uninstall(&content, name)
 }
 
-/// Only a folder mod can: a plugin's library is loaded from disk.
+/// Whether the mod has plugins. Only a folder mod can, because a plugin's library is loaded
+/// from disk.
 pub fn mod_has_plugins(entry: &Path) -> bool {
     entry.is_dir()
         && ::legacy_config::resolve_existing(&::mods::folder_content_root(entry), &["plugins"])
-            .is_some_and(|d| d.is_dir())
+            .is_some_and(|plugins| plugins.is_dir())
 }
 
-/// The mods whose plugins may load. The first call allows the mods installed before consent
-/// existed, so nothing stops working.
-pub fn plugin_mods_allowed() -> Vec<String> {
-    if let Some(list) = ::config::get_setting("mods", "plugins_allowed") {
-        return list
-            .as_array()
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
-            .unwrap_or_default();
-    }
-    let Some(dir) = ::mods::mods_dir() else {
-        return Vec::new();
+/// When the mod folder was created, which tells apart another mod put under the same name later.
+/// `None` if the filesystem doesn't record it; the plugins of such a mod can't be allowed.
+fn mod_folder_stamp(entry: &Path) -> Option<i64> {
+    let made = std::fs::metadata(entry).ok()?.created().ok()?;
+    i64::try_from(made.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos()).ok()
+}
+
+/// Maps each mod folder whose plugins are allowed to its [`mod_folder_stamp`]. It isn't kept in
+/// the settings, because a running game saves those as it loaded them and would undo changes.
+const PLUGINS_ALLOWED: &str = ".plugins-allowed.json";
+
+fn plugin_consents(mods: &Path) -> std::collections::BTreeMap<String, i64> {
+    std::fs::read(mods.join(PLUGINS_ALLOWED))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+/// Whether the player allowed the plugins of this mod folder (`<content>/mods/<name>`).
+/// Never for a reserved folder such as the shared library.
+pub fn mod_plugins_allowed(entry: &Path) -> bool {
+    let (Some(name), Some(mods), Some(stamp)) =
+        (entry.file_name(), entry.parent(), mod_folder_stamp(entry))
+    else {
+        return false;
     };
-    let allowed: Vec<String> = ::mods::discover(&dir)
-        .into_iter()
-        .filter(|m| mod_has_plugins(&m.path))
-        .map(|m| m.name)
-        .collect();
-    if let Err(e) = store_plugin_mods(&allowed) {
-        log_to_file(&format!("plugin consent: {e}"));
-    }
-    allowed
+    let name = name.to_string_lossy();
+    !::mods::is_reserved(&name)
+        && plugin_consents(mods)
+            .iter()
+            .any(|(allowed_name, allowed_stamp)| {
+                allowed_name.eq_ignore_ascii_case(&name) && *allowed_stamp == stamp
+            })
 }
 
 pub fn allow_mod_plugins(name: &str, allowed: bool) -> Result<()> {
-    // the game may have saved settings since
-    let _ = ::config::load();
-    let mut list = plugin_mods_allowed();
-    list.retain(|n| !n.eq_ignore_ascii_case(name));
-    if allowed {
-        list.push(name.to_string());
-    }
-    store_plugin_mods(&list)
+    let content = content_dir().ok_or_else(|| anyhow!("no content folder"))?;
+    allow_plugins_of(&install::installed_entry(&content, name)?, allowed)
 }
 
-fn store_plugin_mods(list: &[String]) -> Result<()> {
-    let value = ::config::Value::Array(list.iter().cloned().map(::config::Value::String).collect());
-    ::config::set_setting("mods", "plugins_allowed", value);
-    Ok(::config::save()?)
+fn allow_plugins_of(entry: &Path, allowed: bool) -> Result<()> {
+    static WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one = WRITE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let name = entry.file_name().unwrap_or_default().to_string_lossy();
+    let mods = entry.parent().unwrap_or(entry);
+    let mut consents = plugin_consents(mods);
+    // Also drops the consents of mods that are gone or were replaced.
+    consents.retain(|allowed_name, allowed_stamp| {
+        !allowed_name.eq_ignore_ascii_case(&name)
+            && mod_folder_stamp(&mods.join(allowed_name)) == Some(*allowed_stamp)
+    });
+    if allowed {
+        let stamp = mod_folder_stamp(entry)
+            .ok_or_else(|| anyhow!("can't tell the mod folder {} apart", entry.display()))?;
+        consents.insert(name.into_owned(), stamp);
+    }
+    Ok(::mods::write_json(&mods.join(PLUGINS_ALLOWED), &consents)?)
 }
 
 fn installed_mods(order: &::mods::LoadOrder) -> Vec<InstalledMod> {
-    let allowed = plugin_mods_allowed();
     order
         .items
         .iter()
         .map(|item| {
-            let Some(m) = order.entry(&item.name).filter(|_| item.available) else {
+            let Some(entry) = order.entry(&item.name).filter(|_| item.available) else {
                 return InstalledMod {
                     name: item.name.clone(),
                     available: false,
@@ -607,79 +631,84 @@ fn installed_mods(order: &::mods::LoadOrder) -> Vec<InstalledMod> {
                     error: String::new(),
                 };
             };
-            let md = std::fs::metadata(&m.path).ok();
-            let zip = m.kind == ::mods::ModKind::Zip;
-            let has_plugins = mod_has_plugins(&m.path);
+            let meta = std::fs::metadata(&entry.path).ok();
+            let zip = entry.kind == ::mods::ModKind::Zip;
+            let has_plugins = mod_has_plugins(&entry.path);
             InstalledMod {
-                plugins_allowed: has_plugins
-                    && allowed.iter().any(|a| a.eq_ignore_ascii_case(&m.name)),
+                plugins_allowed: has_plugins && mod_plugins_allowed(&entry.path),
                 has_plugins,
-                error: ::mods::mount_error(&m.path).unwrap_or_default(),
-                name: m.id.clone(),
+                error: ::mods::mount_error(&entry.path).unwrap_or_default(),
+                name: entry.id.clone(),
                 available: true,
-                installed: md
+                installed: meta
                     .as_ref()
-                    .and_then(|m| m.modified().ok())
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs())
+                    .and_then(|meta| meta.modified().ok())
+                    .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|elapsed| elapsed.as_secs())
                     .unwrap_or(0),
-                size: md.filter(|_| zip).map(|m| m.len()).unwrap_or(0),
+                size: meta.filter(|_| zip).map(|meta| meta.len()).unwrap_or(0),
                 in_place: zip,
             }
         })
         .collect()
 }
 
-pub fn save_mod_order(order: &[String], new_mods: &str, revision: u64) -> Result<ModsStatus> {
+pub fn save_mod_order(
+    order: &[String],
+    new_mods: ::mods::NewMods,
+    revision: u64,
+) -> Result<ModsStatus> {
     let content = content_dir().ok_or_else(|| anyhow!("no content folder"))?;
-    let new_mods = match new_mods {
-        "bottom" => ::mods::NewMods::Bottom,
-        _ => ::mods::NewMods::Top,
-    };
-    ::mods::order::set(&content, order, new_mods, revision).map_err(|e| anyhow!(e))?;
+    ::mods::order::set(&content, order, new_mods, revision).map_err(|error| anyhow!(error))?;
     mods_status()
 }
 
 pub fn reset_mod_order(revision: u64) -> Result<ModsStatus> {
     let content = content_dir().ok_or_else(|| anyhow!("no content folder"))?;
-    ::mods::order::reset(&content, revision).map_err(|e| anyhow!(e))?;
+    ::mods::order::reset(&content, revision).map_err(|error| anyhow!(error))?;
     mods_status()
 }
 
 pub fn forget_mod(name: &str) -> Result<ModsStatus> {
     let content = content_dir().ok_or_else(|| anyhow!("no content folder"))?;
-    ::mods::order::forget(&content, name).map_err(|e| anyhow!(e))?;
+    ::mods::order::forget(&content, name).map_err(|error| anyhow!(error))?;
     mods_status()
 }
 
 pub fn game_diagnostics(instance: &str) -> Result<Vec<::mods::diagnostics::Finding>> {
     let valid = !instance.is_empty()
         && instance.len() <= 64
-        && instance.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+        && instance
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_');
     if !valid {
         return Err(anyhow!("'{instance}' is no instance"));
     }
     let findings: Vec<::mods::diagnostics::Finding> =
         match std::fs::read(instances::diagnostics_path(instance)) {
-            Ok(b) => serde_json::from_slice(&b)?,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-            Err(e) => return Err(e.into()),
+            Ok(bytes) => serde_json::from_slice(&bytes)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(error) => return Err(error.into()),
         };
     Ok(instances::undismissed(findings))
 }
 
-/// What the map `map` names that is not installed. Cached per content generation: a big map
-/// has thousands of tiles.
+/// The content that `map` refers to but isn't installed. Results are cached per map until the
+/// content changes, because a big map has thousands of tiles.
 pub fn map_preflight(map: &str) -> Result<Vec<::mods::diagnostics::Finding>> {
-    use ::mods::diagnostics::Kind;
+    use ::mods::diagnostics::{Finding, Kind};
     use rayon::prelude::*;
-    type Cached = (String, u64, Vec<::mods::diagnostics::Finding>);
-    static LAST: std::sync::Mutex<Option<Cached>> = std::sync::Mutex::new(None);
+    type Cache = (u64, std::collections::HashMap<String, Vec<Finding>>);
+    static CACHE: std::sync::Mutex<Option<Cache>> = std::sync::Mutex::new(None);
     let root = root()?;
     bases();
     let generation = ::legacy_config::content_generation();
-    if let Some((m, g, found)) = LAST.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
-        if m == map && *g == generation {
+    {
+        let mut cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if cache.as_ref().is_some_and(|(cached, _)| *cached != generation) {
+            *cache = None;
+        }
+        if let Some(found) = cache.as_ref().and_then(|(_, maps)| maps.get(map)) {
             return Ok(instances::undismissed(found.clone()));
         }
     }
@@ -688,34 +717,34 @@ pub fn map_preflight(map: &str) -> Result<Vec<::mods::diagnostics::Finding>> {
         .map(Path::to_path_buf)
         .ok_or_else(|| anyhow!("{map} is no map"))?;
     let mut names: Vec<String> = Vec::new();
-    for d in ::mods::mirrored_dirs(&map_dir) {
-        for (n, is_dir) in ::legacy_config::vfs::list_dir(&d).unwrap_or_default() {
-            let n = n.to_string_lossy().to_string();
-            let l = n.to_ascii_lowercase();
+    for dir in ::mods::mirrored_dirs(&map_dir) {
+        for (name, is_dir) in ::legacy_config::vfs::list_dir(&dir).unwrap_or_default() {
+            let name = name.to_string_lossy().to_string();
+            let lower = name.to_ascii_lowercase();
             if !is_dir
-                && (l.ends_with(".map") || l == "ailists.cfg")
-                && !names.iter().any(|x| x.eq_ignore_ascii_case(&n))
+                && (lower.ends_with(".map") || lower == "ailists.cfg")
+                && !names.iter().any(|known| known.eq_ignore_ascii_case(&name))
             {
-                names.push(n);
+                names.push(name);
             }
         }
     }
     let named: std::collections::HashSet<(String, Kind)> = names
         .par_iter()
-        .flat_map_iter(|n| {
-            let text = ::legacy_config::vfs::read_text(&::mods::resolve_path(&map_dir, n))
+        .flat_map_iter(|name| {
+            let text = ::legacy_config::vfs::read_text(&::mods::resolve_path(&map_dir, name))
                 .unwrap_or_default();
             text.lines()
-                .filter_map(|l| {
-                    let t = l.trim();
-                    let lower = t.to_ascii_lowercase();
-                    let kind = match lower.rsplit_once('.').map(|(_, x)| x) {
+                .filter_map(|line| {
+                    let trimmed = line.trim();
+                    let lower = trimmed.to_ascii_lowercase();
+                    let kind = match lower.rsplit_once('.').map(|(_, extension)| extension) {
                         Some("sco") => Kind::Object,
                         Some("sli") => Kind::Spline,
                         Some("bus" | "ovh" | "zug") => Kind::Vehicle,
                         _ => return None,
                     };
-                    Some((t.replace('\\', "/"), kind))
+                    Some((trimmed.replace('\\', "/"), kind))
                 })
                 .collect::<Vec<_>>()
         })
@@ -726,7 +755,11 @@ pub fn map_preflight(map: &str) -> Result<Vec<::mods::diagnostics::Finding>> {
         .map(|(rel, kind)| (root.join(rel), kind))
         .collect();
     let found = ::mods::diagnostics::check(&map_dir, &wanted);
-    *LAST.lock().unwrap_or_else(|e| e.into_inner()) = Some((map.to_string(), generation, found.clone()));
+    let mut cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let (cached, maps) = cache.get_or_insert_with(|| (generation, Default::default()));
+    if *cached == generation {
+        maps.insert(map.to_string(), found.clone());
+    }
     Ok(instances::undismissed(found))
 }
 
@@ -781,15 +814,12 @@ pub fn mods_status() -> Result<ModsStatus> {
         content_dir: content.to_string_lossy().to_string(),
         folders,
         inbox: mods_dir.to_string_lossy().to_string(),
-        inbox_items: ::mods::discover(&mods_dir).into_iter().map(|m| m.id).collect(),
+        inbox_items: ::mods::discover(&mods_dir).into_iter().map(|entry| entry.id).collect(),
         installed: installed_mods(&order),
         order_revision: ::mods::order::revision(&order),
         order_error: order.error.clone().unwrap_or_default(),
-        new_mods: match order.saved.as_ref().map(|s| s.new_mods).unwrap_or_default() {
-            ::mods::NewMods::Top => "top",
-            ::mods::NewMods::Bottom => "bottom",
-        }
-        .into(),
+        new_mods: order.saved.as_ref().map(|saved| saved.new_mods).unwrap_or_default(),
+        shared_dir: mods_dir.join(::mods::SHARED_DIR).to_string_lossy().to_string(),
         archives,
         free_bytes: install::free_space(&content).unwrap_or(0),
         cleaned,
@@ -3540,7 +3570,7 @@ pub fn cli(cmd: &str, arg: &str) -> Result<Value> {
                 } else {
                     mode.as_str()
                 },
-                a.get("replace").and_then(|v| v.as_bool()).unwrap_or(false),
+                a.get("replace").and_then(|value| value.as_bool()).unwrap_or(false),
                 cancel,
             )?;
             if p.state == "failed" {
@@ -3552,8 +3582,8 @@ pub fn cli(cmd: &str, arg: &str) -> Result<Value> {
         "modinfo" => serde_json::to_value(inspect_mod(Path::new(&s("path")))?)?,
         "stamp" => json!(poll()?.stamp),
         "poll" => {
-            // {"watch": seconds}: keep polling like the page does, then wait for the
-            // installs still running
+            // With {"watch": seconds}, keeps polling like the page does, then waits for the
+            // installs that are still running.
             let watch = a.get("watch").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let t0 = std::time::Instant::now();
             let mut stamps = vec![poll()?.stamp];
@@ -3636,8 +3666,8 @@ mod tests {
     fn content_folders_are_found_in_any_case() {
         let root = std::env::temp_dir().join(format!("neoomsi-sub-dir-{}", std::process::id()));
         std::fs::create_dir_all(root.join("vehicles/Bus")).unwrap();
-        let d = super::sub_dir(&root, "Vehicles");
-        assert!(d.join("Bus").is_dir(), "{}", d.display());
+        let vehicles = super::sub_dir(&root, "Vehicles");
+        assert!(vehicles.join("Bus").is_dir(), "{}", vehicles.display());
         std::fs::remove_dir_all(root).ok();
     }
 
@@ -3652,12 +3682,12 @@ mod tests {
         std::fs::create_dir_all(mods.join("waiting")).unwrap();
         std::fs::write(mods.join("vehicle-pack.zip"), b"not read here").unwrap();
         std::fs::write(mods.join("README.txt"), b"not a mod").unwrap();
-        // a folder hides the .zip of the same name, as the game mounts them
+        // A folder hides a .zip with the same name, just as when the game mounts them.
         std::fs::create_dir_all(mods.join("Bus")).unwrap();
         std::fs::write(mods.join("bus.zip"), b"hidden").unwrap();
 
         let installed = super::installed_mods(&::mods::load_order(&root));
-        let names: Vec<_> = installed.iter().map(|m| m.name.as_str()).collect();
+        let names: Vec<_> = installed.iter().map(|entry| entry.name.as_str()).collect();
         assert_eq!(names, ["Bus", "scenery-pack", "vehicle-pack.zip"]);
         assert!(installed[2].in_place && installed[2].size == 13);
 
@@ -3892,18 +3922,29 @@ mod tests {
 
     #[test]
     fn the_plugins_of_a_mod_load_only_when_allowed() {
-        let _g = settings_guard();
         let dir = std::env::temp_dir().join(format!("neoomsi-plugin-consent-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("mods/Ibis/OMSI 2/Plugins")).unwrap();
         std::fs::create_dir_all(dir.join("mods/Bus/Vehicles")).unwrap();
-        ::config::init(dir.join("settings.toml")).unwrap();
         assert!(super::mod_has_plugins(&dir.join("mods/Ibis")));
         assert!(!super::mod_has_plugins(&dir.join("mods/Bus")));
-        super::allow_mod_plugins("Ibis", true).unwrap();
-        assert_eq!(super::plugin_mods_allowed(), ["Ibis"]);
-        super::allow_mod_plugins("ibis", false).unwrap();
-        assert!(super::plugin_mods_allowed().is_empty());
+        let ibis = dir.join("mods/Ibis");
+        assert!(!super::mod_plugins_allowed(&ibis));
+        super::allow_plugins_of(&ibis, true).unwrap();
+        assert!(super::mod_plugins_allowed(&ibis));
+        assert!(!super::mod_plugins_allowed(&dir.join("mods/Bus")));
+        // Another mod in its place, after an uninstall or a manual delete, asks again.
+        std::fs::remove_dir_all(&ibis).unwrap();
+        std::fs::create_dir_all(ibis.join("OMSI 2/Plugins")).unwrap();
+        assert!(!super::mod_plugins_allowed(&ibis));
+        super::allow_plugins_of(&ibis, true).unwrap();
+        super::allow_plugins_of(&dir.join("mods/ibis"), false).unwrap();
+        assert!(!super::mod_plugins_allowed(&ibis));
+        // The shared library isn't a mod, so its plugins never load.
+        let shared = dir.join("mods/shared");
+        std::fs::create_dir_all(shared.join("Plugins")).unwrap();
+        super::allow_plugins_of(&shared, true).unwrap();
+        assert!(!super::mod_plugins_allowed(&shared));
         std::fs::remove_dir_all(&dir).ok();
     }
 

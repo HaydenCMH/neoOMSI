@@ -336,8 +336,8 @@ impl VehicleType {
         input.stringvarlists = def.scripts.stringvarlists.clone();
         input.constfiles = def.scripts.constfiles.clone();
         input.scripts = def.scripts.scripts.clone();
-        for p in input.varlists.iter().chain(&input.stringvarlists).chain(&input.constfiles).chain(&input.scripts) {
-            ::mods::diagnostics::missing(bus_file, p, ::mods::diagnostics::Kind::Script);
+        for script in input.varlists.iter().chain(&input.stringvarlists).chain(&input.constfiles).chain(&input.scripts) {
+            ::mods::diagnostics::missing(bus_file, script, ::mods::diagnostics::Kind::Script);
         }
         let program = compile(&input);
         for e in &program.errors {
@@ -406,7 +406,7 @@ impl VehicleType {
                             skin,
                         })
                     }
-                    Err(e) => {
+                    Err(error) => {
                         ::mods::diagnostics::missing(&model_path, &p, ::mods::diagnostics::Kind::Mesh);
                         match ::mods::missing_vehicle_pack(&p) {
                             Some(pack) => match missing_packs
@@ -416,7 +416,7 @@ impl VehicleType {
                                 Some(m) => m.1 += 1,
                                 None => missing_packs.push((pack, 1)),
                             },
-                            None => log::warn!("{}: {e}", p.display()),
+                            None => log::warn!("{}: {error}", p.display()),
                         }
                     }
                 }

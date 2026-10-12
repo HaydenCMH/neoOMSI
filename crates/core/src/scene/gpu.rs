@@ -289,7 +289,7 @@ impl GpuCache {
         let Some(path) = ::texture::find_texture(name, &dirs_ref) else {
             if !name.trim().is_empty() && self.misses.insert(name.to_string()) {
                 log::warn!("Did not find texture file \"{name}\"!");
-                // (looked for first in the model's own texture folder)
+                // Report it against the model's own texture folder, which is searched first.
                 if let Some(own) = dirs.first() {
                     ::mods::diagnostics::missing(own, &own.join(name.trim()), ::mods::diagnostics::Kind::Texture);
                 }

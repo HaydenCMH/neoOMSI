@@ -73,9 +73,9 @@ launcher shows that the engine went away.
 | `mods`, `modinfo` | `mods.installed` lists the entries of `<content>/mods` the game mounts; `error` says why a damaged `.zip` cannot be read |
 | `start_install` | returns at once; progress comes as `installs_changed`. A mod is installed as `mods/<name>` (unpacked, archive tree kept) or `mods/<name>.zip` (in place); with `replace`, an installed mod of that name moves to `mods/uninstalled` |
 | `uninstall_mod` | moves the entry to `mods/uninstalled/<time>-<name>`; nothing is deleted. Refused while an install runs |
-| `allow_mod_plugins` | a mod's plugins (`plugins/*.opl`, Lua) load only once allowed; the list is `[mods] plugins_allowed` in the settings |
+| `allow_mod_plugins` | a mod's plugins (`plugins/*.opl`, Lua) load only once allowed; `mods/.plugins-allowed.json` (written by the engine only) maps each allowed mod folder to its creation time, so another mod put under that name asks again |
 | `map_picture` | the bytes of a map's `picture.jpg` from whichever content root has it (empty when none) |
-| `save_mod_order`, `reset_mod_order`, `forget_mod` | the load order (`mods.installed`, highest priority first, kept in `mods/.load-order.json`): a change names the `order_revision` it read and is refused when the order changed since; each answers the new `mods` |
+| `save_mod_order`, `reset_mod_order`, `forget_mod` | the load order (`mods.installed`, highest priority first, kept in `mods/.load-order.json`): a change names the `order_revision` it read and is refused when the order changed since; each answers the new `mods`. `mods.shared_dir` (`mods/shared`) is never in the order: it ranks below every mod and above OMSI 2 |
 | `mod_conflicts` | per mounted entry: its files, how many it overrides and in which entries, how many are hidden and by which, how many original OMSI 2 files it replaces, and vehicle folders another entry uses for other vehicles |
 | `diagnostics` | what the game `instance` could not find (`~/.neoomsi/diagnostics/<id>.json`, written after loading and when it ends), grouped by the asking entry and pack |
 | `preflight` | before a start: what the map's tiles and AI lists name that is not installed, classified like `diagnostics`; kept until the content changes |

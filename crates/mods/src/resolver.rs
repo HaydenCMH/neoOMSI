@@ -118,7 +118,7 @@ pub(crate) fn owner_root<'a>(path: &Path, roots: &'a [PathBuf]) -> Option<&'a Pa
         .max_by_key(|r| r.components().count())
 }
 
-/// The `Vehicles/<pack>` of `path`, when no content root has it.
+/// The `Vehicles` pack that `path` points into, if no content root has that pack.
 pub fn missing_vehicle_pack(path: &Path) -> Option<String> {
     let roots = content_roots();
     let owner = owner_root(path, &roots)?.clone();
@@ -162,7 +162,8 @@ pub fn read_dir_merged(rel: &str) -> Vec<PathBuf> {
     out
 }
 
-/// The roots that have `path`'s pack, so lookups skip the rest; `None` when unknown.
+/// The roots containing the pack that `path` points into, so lookups can skip the others.
+/// `None` when the path has no pack, or one with a non-ASCII name.
 fn roots_with_pack(path: &[&str]) -> Option<Vec<PathBuf>> {
     type Index = (u64, HashMap<String, Vec<PathBuf>>);
     static INDEX: Mutex<Option<Index>> = Mutex::new(None);
@@ -173,22 +174,22 @@ fn roots_with_pack(path: &[&str]) -> Option<Vec<PathBuf>> {
         return None;
     }
     let key = format!("{}/{}", name_key(top), name_key(pack));
-    let mut index = INDEX.lock().unwrap_or_else(|e| e.into_inner());
+    let mut index = INDEX.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let generation = legacy_config::content_generation();
-    if index.as_ref().is_none_or(|(g, _)| *g != generation) {
+    if index.as_ref().is_none_or(|(built, _)| *built != generation) {
         let mut packs: HashMap<String, Vec<PathBuf>> = HashMap::new();
-        for r in content_roots() {
-            for (top, is_dir) in vfs::list_dir(&r).unwrap_or_default() {
+        for root in content_roots() {
+            for (top, is_dir) in vfs::list_dir(&root).unwrap_or_default() {
                 if !is_dir {
                     continue;
                 }
                 let top_key = name_key(&top.to_string_lossy());
-                for (pack, is_dir) in vfs::list_dir(&r.join(&top)).unwrap_or_default() {
+                for (pack, is_dir) in vfs::list_dir(&root.join(&top)).unwrap_or_default() {
                     if is_dir {
                         let key = format!("{top_key}/{}", name_key(&pack.to_string_lossy()));
                         let roots = packs.entry(key).or_default();
-                        if !roots.contains(&r) {
-                            roots.push(r.clone());
+                        if !roots.contains(&root) {
+                            roots.push(root.clone());
                         }
                     }
                 }
@@ -199,8 +200,8 @@ fn roots_with_pack(path: &[&str]) -> Option<Vec<PathBuf>> {
     Some(index.as_ref()?.1.get(&key).cloned().unwrap_or_default())
 }
 
-/// The file the game uses for `rel` relative to `base`: a higher root wins, and a `..`
-/// never leaves a root.
+/// The file the game uses for `rel`, relative to `base`. Higher roots win, and `..` never
+/// climbs out of a root.
 pub fn resolve_path(base: &Path, rel: &str) -> PathBuf {
     let rel = windows_components(rel);
     let rel = rel.as_slice();
@@ -208,25 +209,30 @@ pub fn resolve_path(base: &Path, rel: &str) -> PathBuf {
     let owner = owner_root(base, &roots).cloned();
     let from_top: Vec<String> = owner
         .as_ref()
-        .and_then(|o| base.strip_prefix(o).ok())
-        .map(|s| s.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect())
+        .and_then(|owner| base.strip_prefix(owner).ok())
+        .map(|suffix| {
+            suffix
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy().into_owned())
+                .collect()
+        })
         .unwrap_or_default();
     let mut path: Vec<&str> = Vec::new();
-    for c in from_top.iter().map(String::as_str).chain(rel.iter().copied()) {
-        // a `..` above the top stays at the top
-        if c == ".." {
+    for component in from_top.iter().map(String::as_str).chain(rel.iter().copied()) {
+        // A `..` at the top of a root stays at the top.
+        if component == ".." {
             path.pop();
         } else {
-            path.push(c);
+            path.push(component);
         }
     }
     let from_top = path;
     let candidates = roots_with_pack(&from_top);
-    let has_pack = |r: &PathBuf| candidates.as_ref().is_none_or(|c| c.contains(r));
+    let has_pack = |root: &PathBuf| candidates.as_ref().is_none_or(|with_pack| with_pack.contains(root));
     if let Some(owner) = &owner {
-        for r in roots.iter().take_while(|r| *r != owner).filter(|r| has_pack(r)) {
-            if let Some(p) = resolve_existing(r, &from_top) {
-                return p;
+        for root in roots.iter().take_while(|root| *root != owner).filter(|root| has_pack(root)) {
+            if let Some(found) = resolve_existing(root, &from_top) {
+                return found;
             }
         }
     }
@@ -245,9 +251,9 @@ pub fn resolve_path(base: &Path, rel: &str) -> PathBuf {
         cur = found.unwrap_or(direct);
     }
     if let (Some(owner), false) = (&owner, vfs::exists(&cur)) {
-        for r in roots.iter().skip_while(|r| *r != owner).skip(1).filter(|r| has_pack(r)) {
-            if let Some(p) = resolve_existing(r, &from_top) {
-                return p;
+        for root in roots.iter().skip_while(|root| *root != owner).skip(1).filter(|root| has_pack(root)) {
+            if let Some(found) = resolve_existing(root, &from_top) {
+                return found;
             }
         }
     }
@@ -328,6 +334,7 @@ mod tests {
 
     #[test]
     fn never_leaves_the_roots() {
+        let _roots = crate::roots_guard();
         let dir = std::env::temp_dir().join(format!("mods-escape-{}", std::process::id()));
         let root = dir.join("root");
         std::fs::create_dir_all(root.join("Vehicles")).unwrap();
@@ -340,76 +347,80 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    fn layers(test: &str, names: &[&str]) -> (PathBuf, Vec<PathBuf>) {
+    type Guard = std::sync::MutexGuard<'static, ()>;
+
+    fn layers(test: &str, names: &[&str]) -> (Guard, PathBuf, Vec<PathBuf>) {
+        let guard = crate::roots_guard();
         let dir = std::env::temp_dir().join(format!("mods-{test}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let roots: Vec<PathBuf> = names.iter().map(|n| dir.join(n)).collect();
-        for r in &roots {
-            std::fs::create_dir_all(r).unwrap();
-            add_content_root(r.clone());
+        let roots: Vec<PathBuf> = names.iter().map(|name| dir.join(name)).collect();
+        for root in &roots {
+            std::fs::create_dir_all(root).unwrap();
+            add_content_root(root.clone());
         }
-        (dir, roots)
+        (guard, dir, roots)
     }
 
     fn put(root: &Path, rel: &str, data: &str) {
-        let p = root.join(rel);
-        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        std::fs::write(p, data).unwrap();
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, data).unwrap();
     }
 
     fn done(dir: &Path, roots: &[PathBuf]) {
-        for r in roots {
-            remove_content_root(r);
+        for root in roots {
+            remove_content_root(root);
         }
         std::fs::remove_dir_all(dir).ok();
     }
 
-    fn read(p: PathBuf) -> String {
-        String::from_utf8(vfs::read(&p).unwrap()).unwrap()
+    fn read(path: PathBuf) -> String {
+        String::from_utf8(vfs::read(&path).unwrap()).unwrap()
     }
 
     #[test]
     fn the_higher_root_wins_for_every_file_that_asks() {
-        let (dir, r) = layers("order", &["addon", "base", "omsi"]);
-        let (addon, base, omsi) = (&r[0], &r[1], &r[2]);
+        let (_roots, dir, roots) = layers("order", &["addon", "base", "omsi"]);
+        let (addon, base, omsi) = (&roots[0], &roots[1], &roots[2]);
         put(base, "Vehicles/Bus/model/model.cfg", "base");
         put(base, "Vehicles/Bus/Texture/body.dds", "base");
         put(base, "Vehicles/Bus/Texture/seat.dds", "base");
         put(addon, "Vehicles/Bus/Texture/body.dds", "addon");
         put(omsi, "Vehicles/SD200/Texture/body.dds", "stock");
         put(addon, "Vehicles/SD200/Texture/body.dds", "addon");
-        // the base mod's own reference takes the addon's file; what the addon lacks stays
+        // The base mod's own references get the addon's files where the addon has them.
         let model = base.join("Vehicles/Bus/model");
         assert_eq!(read(resolve_path(&model, "../Texture/body.dds")), "addon");
         assert_eq!(read(resolve_path(&model, "../Texture/seat.dds")), "base");
-        // a stock file asks: a mod's copy replaces the original (which stays untouched)
+        // A stock file's reference gets the mod's copy, and the original stays untouched.
         let stock = omsi.join("Vehicles/SD200/model");
         assert_eq!(read(resolve_path(&stock, "../Texture/body.dds")), "addon");
         assert_eq!(read(omsi.join("Vehicles/SD200/Texture/body.dds")), "stock");
-        // from the top of the OMSI folder: the same
+        // The same applies to paths from the top of the OMSI folder.
         assert_eq!(read(resolve_path(omsi, "Vehicles/Bus/Texture/body.dds")), "addon");
-        done(&dir, &r);
+        done(&dir, &roots);
     }
 
     #[test]
     fn a_mod_uses_parts_of_another_mod() {
-        let (dir, r) = layers("cross", &["citaro", "urbino", "omsi"]);
-        put(&r[1], "Vehicles/Urbino/model/dash.o3d", "urbino");
-        std::fs::create_dir_all(r[0].join("Vehicles/Citaro/model")).unwrap();
-        let p = resolve_path(&r[0].join("Vehicles/Citaro/model"), "../../Urbino/model/dash.o3d");
-        assert_eq!(read(p.clone()), "urbino");
-        assert_eq!(missing_vehicle_pack(&r[0].join("Vehicles/Missing/a.o3d")).as_deref(), Some("Missing"));
-        assert_eq!(missing_vehicle_pack(&p), None);
-        done(&dir, &r);
+        let (_roots, dir, roots) = layers("cross", &["citaro", "urbino", "omsi"]);
+        let (citaro, urbino) = (&roots[0], &roots[1]);
+        put(urbino, "Vehicles/Urbino/model/dash.o3d", "urbino");
+        std::fs::create_dir_all(citaro.join("Vehicles/Citaro/model")).unwrap();
+        let dash = resolve_path(&citaro.join("Vehicles/Citaro/model"), "../../Urbino/model/dash.o3d");
+        assert_eq!(read(dash.clone()), "urbino");
+        assert_eq!(missing_vehicle_pack(&citaro.join("Vehicles/Missing/a.o3d")).as_deref(), Some("Missing"));
+        assert_eq!(missing_vehicle_pack(&dash), None);
+        done(&dir, &roots);
     }
 
     #[test]
     fn a_dot_dot_never_climbs_out_of_a_root() {
-        let (dir, r) = layers("clamp", &["a", "b"]);
+        let (_roots, dir, roots) = layers("clamp", &["a", "b"]);
         put(&dir, "secret.txt", "x");
-        put(&r[1], "Vehicles/Bus/bus.bus", "b");
-        let p = resolve_path(&r[0].join("Vehicles"), "../../../secret.txt");
-        assert!(r.iter().any(|root| p.starts_with(root)), "{}", p.display());
-        done(&dir, &r);
+        put(&roots[1], "Vehicles/Bus/bus.bus", "b");
+        let found = resolve_path(&roots[0].join("Vehicles"), "../../../secret.txt");
+        assert!(roots.iter().any(|root| found.starts_with(root)), "{}", found.display());
+        done(&dir, &roots);
     }
 }

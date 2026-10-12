@@ -39,29 +39,8 @@ fn cached(name: &'static str, read: impl FnOnce() -> Result<Answer>) -> Result<A
 }
 
 fn diagnostics(findings: Vec<::mods::diagnostics::Finding>) -> api::DiagnosticList {
-    use ::mods::diagnostics::Severity;
     api::DiagnosticList {
-        findings: findings
-            .into_iter()
-            .map(|f| api::Diagnostic {
-                key: f.key(),
-                class: serde_json::to_value(&f.class)
-                    .ok()
-                    .and_then(|v| v.as_str().map(str::to_string))
-                    .unwrap_or_default(),
-                requester: f.requester,
-                pack: f.pack.unwrap_or_default(),
-                provider: f.provider.unwrap_or_default(),
-                severity: match f.severity {
-                    Severity::Required => "required",
-                    Severity::Degraded => "degraded",
-                    Severity::Optional => "optional",
-                }
-                .into(),
-                count: f.count as u32,
-                samples: f.samples,
-            })
-            .collect(),
+        findings: findings.into_iter().map(lib::wire::diagnostic).collect(),
     }
 }
 
@@ -165,15 +144,15 @@ pub(super) fn call(command: Command) -> Result<Answer> {
         }
         Command::Mods(_) => Answer::Mods(lib::mods_status()?.into()),
         Command::Modinfo(a) => Answer::Modinfo(lib::inspect_mod(Path::new(&a.path))?.into()),
-        Command::StartInstall(a) => Answer::StartInstall(
-            lib::start_install(Path::new(&a.path), lib::wire::install_mode(a.mode()), a.replace)?.into(),
+        Command::StartInstall(args) => Answer::StartInstall(
+            lib::start_install(Path::new(&args.path), lib::wire::install_mode(args.mode()), args.replace)?.into(),
         ),
-        Command::UninstallMod(a) => {
-            lib::uninstall_mod(&a.name)?;
+        Command::UninstallMod(args) => {
+            lib::uninstall_mod(&args.name)?;
             Answer::UninstallMod(Empty {})
         }
-        Command::AllowModPlugins(a) => {
-            lib::allow_mod_plugins(&a.name, a.allowed)?;
+        Command::AllowModPlugins(args) => {
+            lib::allow_mod_plugins(&args.name, args.allowed)?;
             Answer::AllowModPlugins(Empty {})
         }
         Command::CancelInstall(a) => Answer::CancelInstall(api::Cancelled {
@@ -277,32 +256,21 @@ pub(super) fn call(command: Command) -> Result<Answer> {
             Answer::SaveControllers(controllers_now())
         }
         Command::Preview(a) => Answer::Preview(lib::bus_preview(&a.bus, &a.paint)?),
-        Command::MapPicture(a) => Answer::MapPicture(lib::map_picture(&a.map)?),
-        Command::SaveModOrder(a) => {
-            Answer::SaveModOrder(lib::save_mod_order(&a.order, &a.new_mods, a.revision)?.into())
+        Command::MapPicture(args) => Answer::MapPicture(lib::map_picture(&args.map)?),
+        Command::SaveModOrder(args) => {
+            let new_mods = lib::wire::new_mods(args.new_mods());
+            Answer::SaveModOrder(lib::save_mod_order(&args.order, new_mods, args.revision)?.into())
         }
-        Command::ResetModOrder(a) => Answer::ResetModOrder(lib::reset_mod_order(a.revision)?.into()),
-        Command::ForgetMod(a) => Answer::ForgetMod(lib::forget_mod(&a.name)?.into()),
-        Command::Diagnostics(a) => Answer::Diagnostics(diagnostics(lib::game_diagnostics(&a.instance)?)),
-        Command::Preflight(a) => Answer::Preflight(diagnostics(lib::map_preflight(&a.map)?)),
-        Command::DismissDiagnostic(a) => {
-            lib::dismiss_diagnostic(&a.key)?;
+        Command::ResetModOrder(args) => Answer::ResetModOrder(lib::reset_mod_order(args.revision)?.into()),
+        Command::ForgetMod(args) => Answer::ForgetMod(lib::forget_mod(&args.name)?.into()),
+        Command::Diagnostics(args) => Answer::Diagnostics(diagnostics(lib::game_diagnostics(&args.instance)?)),
+        Command::Preflight(args) => Answer::Preflight(diagnostics(lib::map_preflight(&args.map)?)),
+        Command::DismissDiagnostic(args) => {
+            lib::dismiss_diagnostic(&args.key)?;
             Answer::DismissDiagnostic(Empty {})
         }
         Command::ModConflicts(_) => Answer::ModConflicts(api::ModConflictList {
-            mods: lib::mod_conflicts()?
-                .into_iter()
-                .map(|c| api::ModConflict {
-                    name: c.id,
-                    files: c.files as u32,
-                    overrides: c.overrides as u32,
-                    overridden: c.overridden as u32,
-                    replaces_original: c.replaces_original as u32,
-                    hidden_by: c.hidden_by,
-                    overrides_mods: c.overrides_mods,
-                    clashes: c.clashes,
-                })
-                .collect(),
+            mods: lib::mod_conflicts()?.into_iter().map(lib::wire::mod_conflict).collect(),
         }),
         Command::Situations(a) => Answer::Situations(api::SituationList {
             situations: lib::saved_situations(&a.map)

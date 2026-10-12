@@ -8,10 +8,10 @@ pub mod diagnostics;
 mod layout;
 pub mod order;
 mod resolver;
-pub use conflicts::{Conflict, conflicts};
+pub use conflicts::{Clash, Conflict, conflicts};
 pub use layout::{
-    ARCHIVES_DIR, MODS_DIR, ModEntry, ModKind, UNINSTALLED_DIR, discover, folder_content_root,
-    is_reserved,
+    ARCHIVES_DIR, MODS_DIR, ModEntry, ModKind, SHARED_DIR, UNINSTALLED_DIR, discover,
+    folder_content_root, is_reserved,
 };
 pub use order::{NewMods, OrderFile};
 pub use resolver::*;
@@ -20,8 +20,7 @@ struct State {
     content: PathBuf,
     legacy: Option<PathBuf>,
     mods: Vec<ModEntry>,
-    /// To mount a replaced .zip anew.
-    stamps: Vec<Option<(u64, SystemTime)>>,
+    stamps: Vec<Stamp>,
     failed: Vec<(PathBuf, String)>,
     roots: Vec<(ModEntry, PathBuf)>,
 }
@@ -29,9 +28,25 @@ struct State {
 static STATE: RwLock<Option<State>> = RwLock::new(None);
 static REGISTERED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
-fn stamp(path: &Path) -> Option<(u64, SystemTime)> {
-    let md = std::fs::metadata(path).ok().filter(|m| m.is_file())?;
-    Some((md.len(), md.modified().ok()?))
+/// What an entry is mounted from; when it changes, the entry is mounted again.
+#[derive(Debug, Clone, PartialEq)]
+enum Stamp {
+    /// A folder's content root, which moves when a mod copied in by hand gains a wrapper folder.
+    Root(PathBuf),
+    /// A .zip's size and modification time.
+    File(Option<(u64, SystemTime)>),
+}
+
+fn stamp(entry: &ModEntry) -> Stamp {
+    match entry.kind {
+        ModKind::Folder => Stamp::Root(folder_content_root(&entry.path)),
+        ModKind::Zip => Stamp::File(
+            std::fs::metadata(&entry.path)
+                .ok()
+                .filter(|meta| meta.is_file())
+                .and_then(|meta| Some((meta.len(), meta.modified().ok()?))),
+        ),
+    }
 }
 
 fn is_current(
@@ -39,7 +54,7 @@ fn is_current(
     content: &Path,
     legacy: &Option<PathBuf>,
     mods: &[ModEntry],
-    stamps: &[Option<(u64, SystemTime)>],
+    stamps: &[Stamp],
 ) -> bool {
     state.content == content && state.legacy == *legacy && state.mods == mods && state.stamps == stamps
 }
@@ -49,8 +64,10 @@ fn archives(content: &Path) -> Vec<ModEntry> {
         .into_iter()
         .flatten()
         .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.is_file() && p.extension().is_some_and(|x| x.eq_ignore_ascii_case("zip")))
+        .map(|dir_entry| dir_entry.path())
+        .filter(|path| {
+            path.is_file() && path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("zip"))
+        })
         .map(|path| {
             let file = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
             ModEntry {
@@ -61,11 +78,11 @@ fn archives(content: &Path) -> Vec<ModEntry> {
             }
         })
         .collect();
-    out.sort_by(|a, b| a.path.cmp(&b.path));
+    out.sort_by(|left, right| left.path.cmp(&right.path));
     out
 }
 
-/// Every orderable entry, in the default order.
+/// Every entry the player can order, in the default order.
 pub fn entries(content: &Path) -> Vec<ModEntry> {
     let mut out = archives(content);
     out.extend(discover(&content.join(MODS_DIR)));
@@ -82,14 +99,14 @@ pub struct LoadOrder {
 
 impl LoadOrder {
     pub fn entry(&self, id: &str) -> Option<&ModEntry> {
-        self.entries.iter().find(|e| e.id == id)
+        self.entries.iter().find(|entry| entry.id == id)
     }
 
     pub fn active(&self) -> Vec<ModEntry> {
         self.items
             .iter()
-            .filter(|i| i.available)
-            .filter_map(|i| self.entry(&i.name).cloned())
+            .filter(|item| item.available)
+            .filter_map(|item| self.entry(&item.name).cloned())
             .collect()
     }
 }
@@ -98,67 +115,77 @@ pub fn load_order(content: &Path) -> LoadOrder {
     let entries = entries(content);
     let (saved, error) = match order::load(&content.join(MODS_DIR)) {
         Ok(saved) => (saved, None),
-        Err(e) => (None, Some(e)),
+        Err(error) => (None, Some(error)),
     };
-    let ids: Vec<String> = entries.iter().map(|e| e.id.clone()).collect();
+    let ids: Vec<String> = entries.iter().map(|entry| entry.id.clone()).collect();
     let items = order::effective(&ids, saved.as_ref());
     LoadOrder { items, entries, saved, error }
 }
 
-/// Register the mods of `content` in load order, before the OMSI folder `legacy`.
+/// Registers the mods of `content` in load order, ahead of the OMSI folder `legacy`.
 pub fn init(content: &Path, legacy: Option<&Path>) -> std::io::Result<()> {
-    // the launcher's requests and its content poll call this concurrently
+    // The launcher's requests and its content poll can call this at the same time.
     static ONE: Mutex<()> = Mutex::new(());
-    let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
-    std::fs::create_dir_all(content.join(MODS_DIR))?;
+    let _one = ONE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let shared = content.join(MODS_DIR).join(SHARED_DIR);
+    std::fs::create_dir_all(&shared)?;
     let legacy = legacy.map(Path::to_path_buf);
     let order = load_order(content);
-    let all = order.active();
-    let stamps: Vec<_> = all.iter().map(|m| stamp(&m.path)).collect();
+    // The shared library goes last: every mod overrides it, and it overrides OMSI 2.
+    let mut all = order.active();
+    all.push(ModEntry {
+        id: SHARED_DIR.into(),
+        name: SHARED_DIR.into(),
+        path: shared,
+        kind: ModKind::Folder,
+    });
+    let stamps: Vec<Stamp> = all.iter().map(stamp).collect();
 
-    // re-registering clears every cache
-    if STATE.read().unwrap().as_ref().is_some_and(|st| {
-        is_current(st, content, &legacy, &all, &stamps)
-            && !st.failed.iter().any(|(p, _)| vfs::mount_zip(p).is_ok())
-    }) {
+    // Registering again clears every cache, so skip it when nothing changed.
+    if STATE
+        .read()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|state| is_current(state, content, &legacy, &all, &stamps))
+    {
         return Ok(());
     }
-    if let Some(e) = &order.error {
-        log::warn!("load order of {}: {e} - the default order is used", content.display());
+    if let Some(error) = &order.error {
+        log::warn!("load order of {}: {error} - the default order is used", content.display());
     }
 
-    for r in REGISTERED.lock().unwrap().drain(..) {
-        remove_content_root(&r);
-        if !all.iter().any(|m| m.path == r) {
-            vfs::unmount_zip(&r);
+    for root in REGISTERED.lock().unwrap().drain(..) {
+        remove_content_root(&root);
+        if !all.iter().any(|entry| entry.path == root) {
+            vfs::unmount_zip(&root);
         }
     }
 
     let mut registered = Vec::new();
     let mut roots = Vec::new();
     let mut failed = Vec::new();
-    for m in &all {
-        let root = match m.kind {
-            ModKind::Folder => folder_content_root(&m.path),
-            ModKind::Zip => match vfs::mount_zip(&m.path) {
+    for (entry, stamp) in all.iter().zip(&stamps) {
+        let root = match stamp {
+            Stamp::Root(root) => root.clone(),
+            Stamp::File(_) => match vfs::mount_zip(&entry.path) {
                 Ok(mount) => mount,
-                Err(e) => {
-                    log::warn!("mod {}: {e}", m.path.display());
-                    failed.push((m.path.clone(), e.to_string()));
+                Err(error) => {
+                    log::warn!("mod {}: {error}", entry.path.display());
+                    failed.push((entry.path.clone(), error.to_string()));
                     continue;
                 }
             },
         };
         match &legacy {
-            Some(l) => add_content_root_before(root.clone(), l),
+            Some(legacy) => add_content_root_before(root.clone(), legacy),
             None => add_content_root(root.clone()),
         }
-        log::info!("mod '{}' ({:?}): {}", m.id, m.kind, m.path.display());
+        log::info!("mod '{}' ({:?}): {}", entry.id, entry.kind, entry.path.display());
         registered.push(root.clone());
-        roots.push((m.clone(), root));
+        roots.push((entry.clone(), root));
     }
-    if let Some(l) = &legacy {
-        add_content_root(l.clone());
+    if let Some(legacy) = &legacy {
+        add_content_root(legacy.clone());
     }
     *REGISTERED.lock().unwrap() = registered;
     *STATE.write().unwrap() = Some(State {
@@ -173,13 +200,31 @@ pub fn init(content: &Path, legacy: Option<&Path>) -> std::io::Result<()> {
 }
 
 pub fn mount_error(path: &Path) -> Option<String> {
-    let st = STATE.read().unwrap();
-    let (_, e) = st.as_ref()?.failed.iter().find(|(p, _)| p == path)?;
-    Some(e.clone())
+    let state = STATE.read().unwrap();
+    let (_, error) = state.as_ref()?.failed.iter().find(|(failed, _)| failed == path)?;
+    Some(error.clone())
 }
 
 pub fn mods_dir() -> Option<PathBuf> {
-    STATE.read().unwrap().as_ref().map(|s| s.content.join(MODS_DIR))
+    STATE.read().unwrap().as_ref().map(|state| state.content.join(MODS_DIR))
+}
+
+/// Writes `value` as JSON to a temporary file first, so a reader never sees half a file.
+pub fn write_json(path: &Path, value: &impl serde::Serialize) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(value)?)?;
+    std::fs::rename(&tmp, path)
+}
+
+/// The content roots are global, so tests that change them must take turns.
+#[cfg(test)]
+pub(crate) fn roots_guard() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 #[cfg(test)]
@@ -195,32 +240,50 @@ mod tests {
             path: content.join("mods/Bus.zip"),
             kind: ModKind::Zip,
         }];
-        let then = Some((10, SystemTime::UNIX_EPOCH));
+        let then = Stamp::File(Some((10, SystemTime::UNIX_EPOCH)));
         let state = State {
             content: content.clone(),
             legacy: None,
             mods: mods.clone(),
-            stamps: vec![then],
+            stamps: vec![then.clone()],
             failed: Vec::new(),
             roots: Vec::new(),
         };
         assert!(is_current(&state, &content, &None, &mods, &[then]));
-        // the .zip was replaced: it is mounted anew
-        let now = Some((11, SystemTime::UNIX_EPOCH));
+        // The .zip was replaced, so it has to be mounted again.
+        let now = Stamp::File(Some((11, SystemTime::UNIX_EPOCH)));
         assert!(!is_current(&state, &content, &None, &mods, &[now]));
         assert!(!is_current(&state, &content, &None, &[], &[]));
     }
 
-    /// The example of the improvement plan (§5.8): three sign packs, four orders.
+    #[test]
+    fn a_folder_mod_is_mounted_anew_when_its_content_folder_moves() {
+        let _roots = roots_guard();
+        let content = std::env::temp_dir().join(format!("mods-wrapper-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&content);
+        std::fs::create_dir_all(content.join("mods/Bus")).unwrap();
+        init(&content, None).unwrap();
+        assert!(content_roots().contains(&content.join("mods/Bus")));
+        // The rest of a mod being copied in by hand arrives after the first poll.
+        std::fs::create_dir_all(content.join("mods/Bus/OMSI 2/Vehicles/Bus")).unwrap();
+        init(&content, None).unwrap();
+        let roots = content_roots();
+        assert!(roots.contains(&content.join("mods/Bus/OMSI 2")), "{roots:?}");
+        assert!(!roots.contains(&content.join("mods/Bus")), "{roots:?}");
+        std::fs::remove_dir_all(&content).ok();
+    }
+
+    /// Three sign packs in four orders: an addon above its base replaces only the files it has.
     #[test]
     fn the_load_order_decides_which_file_the_game_uses() {
+        let _roots = roots_guard();
         let content = std::env::temp_dir().join(format!("mods-signs-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&content);
         let mods = content.join(MODS_DIR);
         let put = |entry: &str, rel: &str, data: &str| {
-            let p = mods.join(entry).join("Sceneryobjects/BVG").join(rel);
-            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-            std::fs::write(p, data).unwrap();
+            let path = mods.join(entry).join("Sceneryobjects/BVG").join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, data).unwrap();
         };
         for (pack, year) in [("BVG_Signs_2015", "2015"), ("BVG_Signs_2023", "2023")] {
             put(pack, "Haltestelle.sco", year);
@@ -230,7 +293,7 @@ mod tests {
         put("HD_Signs_Patch", "texture/schild.dds", "HD");
         let omsi = content.join("omsi");
         std::fs::create_dir_all(&omsi).unwrap();
-        let read = |p: PathBuf| String::from_utf8(vfs::read(&p).unwrap()).unwrap();
+        let read = |path: PathBuf| String::from_utf8(vfs::read(&path).unwrap()).unwrap();
         for (order, expected) in [
             (["BVG_Signs_2015", "BVG_Signs_2023", "HD_Signs_Patch"], ["2015", "2015", "2015"]),
             (["HD_Signs_Patch", "BVG_Signs_2023", "BVG_Signs_2015"], ["2023", "2023", "HD"]),
@@ -239,20 +302,12 @@ mod tests {
         ] {
             let file = OrderFile {
                 version: 1,
-                order: order.iter().map(|s| s.to_string()).collect(),
+                order: order.iter().map(|name| name.to_string()).collect(),
                 ..Default::default()
             };
             order::save(&mods, &file).unwrap();
-            let roots: Vec<PathBuf> = load_order(&content)
-                .active()
-                .iter()
-                .map(|m| folder_content_root(&m.path))
-                .chain([omsi.clone()])
-                .collect();
-            for r in &roots {
-                add_content_root(r.clone());
-            }
-            // the map names the object from the top of the OMSI folder; the object names its parts
+            init(&content, Some(&omsi)).unwrap();
+            // A map names objects from the top of the OMSI folder; an object names its parts.
             let sco = resolve_path(&omsi, "Sceneryobjects\\BVG\\Haltestelle.sco");
             let dir = sco.parent().unwrap().to_path_buf();
             let used = [
@@ -261,15 +316,13 @@ mod tests {
                 read(resolve_path(&dir, "texture\\schild.dds")),
             ];
             assert_eq!(used, expected, "order {order:?}");
-            for r in &roots {
-                remove_content_root(r);
-            }
         }
         std::fs::remove_dir_all(&content).ok();
     }
 
     #[test]
     fn a_broken_archive_is_remembered_not_mounted() {
+        let _roots = roots_guard();
         let content = std::env::temp_dir().join(format!("mods-init-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&content);
         std::fs::create_dir_all(content.join("mods/Bus/Vehicles")).unwrap();
@@ -277,14 +330,45 @@ mod tests {
         std::fs::write(content.join(ARCHIVES_DIR).join("old.zip"), b"not a zip").unwrap();
         init(&content, None).unwrap();
         {
-            let st = STATE.read().unwrap();
-            let st = st.as_ref().unwrap();
-            assert_eq!(st.failed.len(), 1);
-            assert_eq!(st.failed[0].0, content.join(ARCHIVES_DIR).join("old.zip"));
-            assert_eq!(st.mods.len(), 2, "the archive (in the order, not mounted) and Bus");
-            assert_eq!(st.roots.len(), 1);
+            let state = STATE.read().unwrap();
+            let state = state.as_ref().unwrap();
+            assert_eq!(state.failed.len(), 1);
+            assert_eq!(state.failed[0].0, content.join(ARCHIVES_DIR).join("old.zip"));
+            assert_eq!(state.mods.len(), 3, "the archive (in the order, not mounted), Bus and shared");
+            assert_eq!(state.roots.len(), 2);
         }
         assert!(content_roots().contains(&content.join("mods/Bus")));
+        std::fs::remove_dir_all(&content).ok();
+    }
+
+    #[test]
+    fn the_shared_library_ranks_below_every_mod_and_above_omsi() {
+        let _roots = roots_guard();
+        let content = std::env::temp_dir().join(format!("mods-shared-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&content);
+        let put = |rel: &str, data: &str| {
+            let path = content.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, data).unwrap();
+        };
+        put("mods/Bus/Texture/a.dds", "Bus");
+        put("mods/shared/Texture/a.dds", "shared");
+        put("mods/shared/Texture/b.dds", "shared");
+        put("omsi/Texture/b.dds", "OMSI");
+        put("omsi/Texture/c.dds", "OMSI");
+        let omsi = content.join("omsi");
+        init(&content, Some(&omsi)).unwrap();
+        let read = |rel: &str| String::from_utf8(vfs::read(&resolve_path(&omsi, rel)).unwrap()).unwrap();
+        let used = [read("Texture/a.dds"), read("Texture/b.dds"), read("Texture/c.dds")];
+        assert_eq!(used, ["Bus", "shared", "OMSI"]);
+        // It is not part of the load order.
+        assert_eq!(load_order(&content).items.len(), 1);
+        let shared = conflicts().into_iter().find(|conflict| conflict.id == SHARED_DIR).unwrap();
+        assert_eq!((shared.overridden, shared.hidden_by), (1, vec!["Bus".to_string()]));
+        // It is created when a content folder doesn't have one yet.
+        std::fs::remove_dir_all(content.join("mods/shared")).unwrap();
+        init(&content, Some(&omsi)).unwrap();
+        assert!(content.join("mods/shared").is_dir());
         std::fs::remove_dir_all(&content).ok();
     }
 }
