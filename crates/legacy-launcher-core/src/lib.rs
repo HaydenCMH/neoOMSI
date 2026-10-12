@@ -2458,6 +2458,7 @@ pub const LANGUAGES: &[(&str, &str, &str, &[&str])] = &[
     ("en", "English", "en", &["en", "english"]),
     ("de", "Deutsch", "de", &["de", "ger", "german", "deutsch"]),
     ("fr", "Français", "fr", &["fr", "fra", "french", "français", "francais"]),
+    ("cs", "Čeština", "cs", &["cs", "ces", "cze", "czech", "čeština", "cestina"]),
 ];
 
 /// The settings' language code from any spelling the game accepts (English when unknown).
