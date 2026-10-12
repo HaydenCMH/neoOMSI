@@ -1,5 +1,6 @@
 use legacy_config::{content_changed, find_in_dir, name_key, resolve_existing_with, vfs, windows_components};
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -162,15 +163,32 @@ pub fn read_dir_merged(rel: &str) -> Vec<PathBuf> {
     out
 }
 
+/// The packs of a root, such as `Vehicles/Bus`, sorted. Only pack folders are listed: a folder
+/// such as `Texture` can hold thousands of files, and this runs on every engine poll.
+pub(crate) fn pack_dirs(root: &Path) -> Vec<(OsString, OsString)> {
+    let mut out = Vec::new();
+    for (top, is_dir) in vfs::list_dir(root).unwrap_or_default() {
+        if is_dir && crate::layout::is_pack_folder(&top.to_string_lossy()) {
+            for (pack, is_dir) in vfs::list_dir(&root.join(&top)).unwrap_or_default() {
+                if is_dir {
+                    out.push((top.clone(), pack));
+                }
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
 /// The roots containing the pack that `path` points into, so lookups can skip the others.
-/// `None` when the path has no pack, or one with a non-ASCII name.
+/// `None` when the path isn't in a pack folder, or its names aren't ASCII.
 fn roots_with_pack(path: &[&str]) -> Option<Vec<PathBuf>> {
     type Index = (u64, HashMap<String, Vec<PathBuf>>);
     static INDEX: Mutex<Option<Index>> = Mutex::new(None);
     let ([top, pack], true) = (path.first_chunk::<2>()?, path.len() > 2) else {
         return None;
     };
-    if !top.is_ascii() || !pack.is_ascii() {
+    if !top.is_ascii() || !pack.is_ascii() || !crate::layout::is_pack_folder(top) {
         return None;
     }
     let key = format!("{}/{}", name_key(top), name_key(pack));
@@ -179,19 +197,15 @@ fn roots_with_pack(path: &[&str]) -> Option<Vec<PathBuf>> {
     if index.as_ref().is_none_or(|(built, _)| *built != generation) {
         let mut packs: HashMap<String, Vec<PathBuf>> = HashMap::new();
         for root in content_roots() {
-            for (top, is_dir) in vfs::list_dir(&root).unwrap_or_default() {
-                if !is_dir {
-                    continue;
-                }
-                let top_key = name_key(&top.to_string_lossy());
-                for (pack, is_dir) in vfs::list_dir(&root.join(&top)).unwrap_or_default() {
-                    if is_dir {
-                        let key = format!("{top_key}/{}", name_key(&pack.to_string_lossy()));
-                        let roots = packs.entry(key).or_default();
-                        if !roots.contains(&root) {
-                            roots.push(root.clone());
-                        }
-                    }
+            for (top, pack) in pack_dirs(&root) {
+                let key = format!(
+                    "{}/{}",
+                    name_key(&top.to_string_lossy()),
+                    name_key(&pack.to_string_lossy())
+                );
+                let roots = packs.entry(key).or_default();
+                if !roots.contains(&root) {
+                    roots.push(root.clone());
                 }
             }
         }

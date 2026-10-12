@@ -134,13 +134,44 @@ fn normalize(rel: &str) -> String {
     parts.join("/")
 }
 
+#[derive(Debug, Default)]
+pub struct ZipSummary {
+    pub files: u64,
+    pub unpacked_bytes: u64,
+    /// Why the game can't read the archive in place, if it can't.
+    pub unreadable: Option<String>,
+}
+
+/// Reads only the central directory, never the entries' local headers: a seek per entry made
+/// inspecting a large archive take minutes while an install kept the disk busy.
+pub fn zip_summary(path: &Path) -> io::Result<ZipSummary> {
+    let mut summary = ZipSummary::default();
+    for (name, entry, is_dir) in ZipArchive::unindexed(path)?.central_directory()? {
+        if !is_dir {
+            summary.files += 1;
+            summary.unpacked_bytes = summary.unpacked_bytes.saturating_add(entry.size);
+        }
+        if summary.unreadable.is_none() {
+            summary.unreadable = if entry.flags & 1 != 0 {
+                Some(format!("{name} is encrypted"))
+            } else if !matches!(entry.method, 0 | 8) {
+                Some(format!(
+                    "{name} is compressed with method {} (only stored and deflated entries can be read in place)",
+                    entry.method
+                ))
+            } else {
+                None
+            };
+        }
+    }
+    Ok(summary)
+}
+
 impl ZipArchive {
-    /// Read the central directory of `path`.
-    pub fn open(path: &Path) -> io::Result<ZipArchive> {
+    fn unindexed(path: &Path) -> io::Result<ZipArchive> {
         let file = std::fs::File::open(path)?;
         let stamp = stamp_of(&file.metadata()?);
-        let len = stamp.0;
-        let archive = ZipArchive {
+        Ok(ZipArchive {
             path: path.to_path_buf(),
             file,
             stamp,
@@ -149,14 +180,65 @@ impl ZipArchive {
             prefix: String::new(),
             entries: HashMap::new(),
             dirs: HashMap::new(),
-        };
+        })
+    }
+
+    /// Read the central directory of `path`.
+    pub fn open(path: &Path) -> io::Result<ZipArchive> {
+        let mut archive = ZipArchive::unindexed(path)?;
+        let raw = archive.central_directory()?;
+        archive.prefix = content_prefix(raw.iter().map(|(name, _, _)| name.as_str()));
+        let prefix_lower = archive.prefix.to_lowercase();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (name, entry, is_dir) in raw {
+            let lower = name.to_lowercase();
+            let Some(rel_lower) = lower.strip_prefix(&prefix_lower) else {
+                continue;
+            };
+            let rel_lower = normalize(rel_lower);
+            if rel_lower.is_empty() {
+                continue;
+            }
+            // The original spelling of every component, for listings.
+            let rel: Vec<&str> = name[archive.prefix.len()..]
+                .split('/')
+                .filter(|part| !part.is_empty() && *part != ".")
+                .collect();
+            let lower_parts: Vec<&str> = rel_lower.split('/').collect();
+            if rel.len() != lower_parts.len() {
+                continue;
+            }
+            for depth in 0..rel.len() {
+                let parent = lower_parts[..depth].join("/");
+                let child_is_dir = depth + 1 < rel.len() || is_dir;
+                if seen.insert(lower_parts[..=depth].join("/")) {
+                    archive
+                        .dirs
+                        .entry(parent)
+                        .or_default()
+                        .push((rel[depth].to_string(), child_is_dir));
+                }
+            }
+            if is_dir {
+                archive.dirs.entry(rel_lower).or_default();
+            } else {
+                archive.entries.insert(rel_lower, entry);
+            }
+        }
+        Ok(archive)
+    }
+
+    /// Every record of the central directory: the name with `/` separators, the entry, and
+    /// whether it is a folder.
+    fn central_directory(&self) -> io::Result<Vec<(String, ZipEntry, bool)>> {
+        let len = self.stamp.0;
         // end of central directory: the last 22 bytes plus a comment of up to 65 535
         let tail_len = len.min(22 + 65_535);
-        let tail = archive.read_at(len - tail_len, tail_len as usize)?;
+        let tail = self.read_at(len - tail_len, tail_len as usize)?;
         let eocd = (0..tail.len().saturating_sub(21))
             .rev()
             .find(|&i| le32(&tail, i) == 0x0605_4b50)
-            .ok_or_else(|| bad(format!("{}: not a zip archive", path.display())))?;
+            .ok_or_else(|| bad(format!("{}: not a zip archive", self.path.display())))?;
         let e = &tail[eocd..];
         let mut count = le16(e, 10) as u64;
         let mut cd_size = le32(e, 12) as u64;
@@ -164,9 +246,12 @@ impl ZipArchive {
         // ZIP64: a locator right before the classic record points at the 64-bit one
         if eocd >= 20 && le32(&tail, eocd - 20) == 0x0706_4b50 {
             let at = le64(&tail, eocd - 20 + 8);
-            let z = archive.read_at(at, 56)?;
+            let z = self.read_at(at, 56)?;
             if le32(&z, 0) != 0x0606_4b50 {
-                return Err(bad(format!("{}: broken ZIP64 end record", path.display())));
+                return Err(bad(format!(
+                    "{}: broken ZIP64 end record",
+                    self.path.display()
+                )));
             }
             count = le64(&z, 32);
             cd_size = le64(&z, 40);
@@ -180,10 +265,10 @@ impl ZipArchive {
         {
             return Err(bad(format!(
                 "{}: central directory out of range",
-                path.display()
+                self.path.display()
             )));
         }
-        let cd = archive.read_at(cd_offset, cd_size as usize)?;
+        let cd = self.read_at(cd_offset, cd_size as usize)?;
         let mut raw: Vec<(String, ZipEntry, bool)> = Vec::with_capacity(count as usize);
         let mut p = 0usize;
         while p + 46 <= cd.len() && le32(&cd, p) == 0x0201_4b50 {
@@ -243,46 +328,16 @@ impl ZipArchive {
                 is_dir,
             ));
         }
-        let mut archive = archive;
-        archive.prefix = content_prefix(raw.iter().map(|(name, _, _)| name.as_str()));
-        let prefix_lower = archive.prefix.to_lowercase();
-        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for (name, entry, is_dir) in raw {
-            let lower = name.to_lowercase();
-            let Some(rel_lower) = lower.strip_prefix(&prefix_lower) else {
-                continue;
-            };
-            let rel_lower = normalize(rel_lower);
-            if rel_lower.is_empty() {
-                continue;
-            }
-            // the original spelling of every component, for listings
-            let rel: Vec<&str> = name[archive.prefix.len()..]
-                .split('/')
-                .filter(|c| !c.is_empty() && *c != ".")
-                .collect();
-            let lower_parts: Vec<&str> = rel_lower.split('/').collect();
-            if rel.len() != lower_parts.len() {
-                continue;
-            }
-            for k in 0..rel.len() {
-                let parent = lower_parts[..k].join("/");
-                let child_is_dir = k + 1 < rel.len() || is_dir;
-                if seen.insert(lower_parts[..=k].join("/")) {
-                    archive
-                        .dirs
-                        .entry(parent)
-                        .or_default()
-                        .push((rel[k].to_string(), child_is_dir));
-                }
-            }
-            if is_dir {
-                archive.dirs.entry(rel_lower).or_default();
-            } else {
-                archive.entries.insert(rel_lower, entry);
-            }
+        // Fewer records than declared means a damaged directory. More are fine: some old tools
+        // write the count modulo 65 536.
+        if (raw.len() as u64) < count {
+            return Err(bad(format!(
+                "{}: damaged central directory ({} of {count} entries readable)",
+                self.path.display(),
+                raw.len()
+            )));
         }
-        Ok(archive)
+        Ok(raw)
     }
 
     #[cfg(unix)]
@@ -704,6 +759,52 @@ mod tests {
         out.extend_from_slice(&cd_offset.to_le_bytes());
         out.extend_from_slice(&0u16.to_le_bytes());
         std::fs::write(path, out).unwrap();
+    }
+
+    #[test]
+    fn zip_summary_reads_the_central_directory() {
+        let dir =
+            std::env::temp_dir().join(format!("legacy-config-summary-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let zip = dir.join("pack.zip");
+        build_zip(&zip);
+        let summary = zip_summary(&zip).unwrap();
+        // Every file counts, including the ones outside the content folder, but folders don't.
+        assert_eq!(summary.files, 3);
+        assert_eq!(summary.unpacked_bytes, 5 + 14 * 20 + 20);
+        assert_eq!(summary.unreadable, None);
+        // The first central record is Docs/readme.txt; its flags are at +8 and its method at +10.
+        let bytes = std::fs::read(&zip).unwrap();
+        let records: Vec<usize> = bytes
+            .windows(4)
+            .enumerate()
+            .filter(|(_, window)| *window == 0x0201_4b50u32.to_le_bytes())
+            .map(|(offset, _)| offset)
+            .collect();
+        for (at, value, expected) in [
+            (
+                records[0] + 10,
+                12u16,
+                "Docs/readme.txt is compressed with method 12",
+            ),
+            (records[0] + 8, 1, "Docs/readme.txt is encrypted"),
+        ] {
+            let mut patched = bytes.clone();
+            patched[at..at + 2].copy_from_slice(&value.to_le_bytes());
+            std::fs::write(&zip, &patched).unwrap();
+            let problem = zip_summary(&zip).unwrap().unreadable.unwrap();
+            assert!(problem.starts_with(expected), "{problem}");
+        }
+        // A broken second record leaves fewer records than the archive declares.
+        let mut damaged = bytes.clone();
+        damaged[records[1]] = 0;
+        std::fs::write(&zip, &damaged).unwrap();
+        let error = zip_summary(&zip).unwrap_err().to_string();
+        assert!(
+            error.contains("damaged central directory (1 of 4"),
+            "{error}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

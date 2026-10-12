@@ -1,5 +1,5 @@
-//! Measures how file lookups scale with the number of mods, since every lookup tries the roots
-//! in priority order. Run with `cargo run --release -p mods --example resolve_bench`.
+//! Measures how file lookups and an engine poll's registration scale with the number of mods.
+//! Run with `cargo run --release -p mods --example resolve_bench`.
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -50,5 +50,31 @@ fn main() {
             mods::remove_content_root(root);
         }
     }
+    unchanged_init(&base);
     std::fs::remove_dir_all(&base).ok();
+}
+
+/// Every engine poll calls `init`, which stamps each folder mod even when nothing changed.
+fn unchanged_init(base: &Path) {
+    let content = base.join("content");
+    let (mod_count, textures) = (100, 500);
+    for index in 0..mod_count {
+        let entry = content.join(format!("mods/Mod{index}"));
+        put(&entry.join(format!("Vehicles/Bus{index}/bus.bus")));
+        put(&entry.join(format!("Sceneryobjects/Pack{index}/obj.sco")));
+        for texture in 0..textures {
+            put(&entry.join(format!("Texture/t{texture}.dds")));
+        }
+    }
+    let omsi = base.join("omsi");
+    mods::init(&content, Some(&omsi)).unwrap();
+    let runs = 20;
+    let started = Instant::now();
+    for _ in 0..runs {
+        mods::init(&content, Some(&omsi)).unwrap();
+    }
+    let per_init = started.elapsed().as_secs_f64() * 1000.0 / runs as f64;
+    println!(
+        "init with nothing changed, {mod_count} folder mods of {textures} textures: {per_init:.1} ms"
+    );
 }

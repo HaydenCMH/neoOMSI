@@ -9,6 +9,22 @@ pub const SHARED_DIR: &str = "shared";
 
 const RESERVED: &[&str] = &[SHARED_DIR, "waiting", "installed", UNINSTALLED_DIR, "plugins-not-enabled"];
 
+/// The content folders whose sub-folders are packs, such as `Vehicles/<bus>` or `maps/<map>`.
+pub(crate) const PACK_FOLDERS: [&str; 6] = [
+    "Vehicles",
+    "Sceneryobjects",
+    "Splines",
+    "Humans",
+    "Trains",
+    "maps",
+];
+
+pub(crate) fn is_pack_folder(name: &str) -> bool {
+    PACK_FOLDERS
+        .iter()
+        .any(|folder| folder.eq_ignore_ascii_case(name))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModKind {
     Folder,

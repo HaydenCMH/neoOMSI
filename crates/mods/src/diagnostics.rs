@@ -294,18 +294,10 @@ fn entry_name(root: Option<&Path>) -> String {
 }
 
 fn pack_of(path: &str) -> Option<String> {
-    const PACKS: [&str; 6] = [
-        "Vehicles",
-        "Sceneryobjects",
-        "Splines",
-        "Humans",
-        "Trains",
-        "maps",
-    ];
     let mut parts = path.split('/');
     let (first, pack) = (parts.next()?, parts.next()?);
     parts.next()?;
-    let folder = PACKS
+    let folder = crate::layout::PACK_FOLDERS
         .iter()
         .find(|known| known.eq_ignore_ascii_case(first))?;
     Some(format!("{folder}/{pack}"))

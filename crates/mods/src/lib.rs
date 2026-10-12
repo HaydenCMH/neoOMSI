@@ -1,4 +1,5 @@
 use legacy_config::vfs;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, RwLock};
 use std::time::SystemTime;
@@ -21,6 +22,8 @@ struct State {
     legacy: Option<PathBuf>,
     mods: Vec<ModEntry>,
     stamps: Vec<Stamp>,
+    /// The content folder's own packs, which the resolver's pack index lists too.
+    content_packs: Vec<(OsString, OsString)>,
     failed: Vec<(PathBuf, String)>,
     roots: Vec<(ModEntry, PathBuf)>,
 }
@@ -31,15 +34,20 @@ static REGISTERED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 /// What an entry is mounted from; when it changes, the entry is mounted again.
 #[derive(Debug, Clone, PartialEq)]
 enum Stamp {
-    /// A folder's content root, which moves when a mod copied in by hand gains a wrapper folder.
-    Root(PathBuf),
+    /// A folder's content root, which moves when a mod copied in by hand gains a wrapper folder,
+    /// and its packs, so that a pack added later reaches the resolver's pack index.
+    Root(PathBuf, Vec<(OsString, OsString)>),
     /// A .zip's size and modification time.
     File(Option<(u64, SystemTime)>),
 }
 
 fn stamp(entry: &ModEntry) -> Stamp {
     match entry.kind {
-        ModKind::Folder => Stamp::Root(folder_content_root(&entry.path)),
+        ModKind::Folder => {
+            let root = folder_content_root(&entry.path);
+            let packs = resolver::pack_dirs(&root);
+            Stamp::Root(root, packs)
+        }
         ModKind::Zip => Stamp::File(
             std::fs::metadata(&entry.path)
                 .ok()
@@ -55,8 +63,13 @@ fn is_current(
     legacy: &Option<PathBuf>,
     mods: &[ModEntry],
     stamps: &[Stamp],
+    content_packs: &[(OsString, OsString)],
 ) -> bool {
-    state.content == content && state.legacy == *legacy && state.mods == mods && state.stamps == stamps
+    state.content == content
+        && state.legacy == *legacy
+        && state.mods == mods
+        && state.stamps == stamps
+        && state.content_packs == content_packs
 }
 
 fn archives(content: &Path) -> Vec<ModEntry> {
@@ -140,13 +153,14 @@ pub fn init(content: &Path, legacy: Option<&Path>) -> std::io::Result<()> {
         kind: ModKind::Folder,
     });
     let stamps: Vec<Stamp> = all.iter().map(stamp).collect();
+    let content_packs = resolver::pack_dirs(content);
 
     // Registering again clears every cache, so skip it when nothing changed.
     if STATE
         .read()
         .unwrap()
         .as_ref()
-        .is_some_and(|state| is_current(state, content, &legacy, &all, &stamps))
+        .is_some_and(|state| is_current(state, content, &legacy, &all, &stamps, &content_packs))
     {
         return Ok(());
     }
@@ -166,7 +180,7 @@ pub fn init(content: &Path, legacy: Option<&Path>) -> std::io::Result<()> {
     let mut failed = Vec::new();
     for (entry, stamp) in all.iter().zip(&stamps) {
         let root = match stamp {
-            Stamp::Root(root) => root.clone(),
+            Stamp::Root(root, _) => root.clone(),
             Stamp::File(_) => match vfs::mount_zip(&entry.path) {
                 Ok(mount) => mount,
                 Err(error) => {
@@ -193,6 +207,7 @@ pub fn init(content: &Path, legacy: Option<&Path>) -> std::io::Result<()> {
         legacy,
         mods: all,
         stamps,
+        content_packs,
         failed,
         roots,
     });
@@ -246,14 +261,25 @@ mod tests {
             legacy: None,
             mods: mods.clone(),
             stamps: vec![then.clone()],
+            content_packs: Vec::new(),
             failed: Vec::new(),
             roots: Vec::new(),
         };
-        assert!(is_current(&state, &content, &None, &mods, &[then]));
+        assert!(is_current(
+            &state,
+            &content,
+            &None,
+            &mods,
+            std::slice::from_ref(&then),
+            &[]
+        ));
         // The .zip was replaced, so it has to be mounted again.
         let now = Stamp::File(Some((11, SystemTime::UNIX_EPOCH)));
-        assert!(!is_current(&state, &content, &None, &mods, &[now]));
-        assert!(!is_current(&state, &content, &None, &[], &[]));
+        assert!(!is_current(&state, &content, &None, &mods, &[now], &[]));
+        assert!(!is_current(&state, &content, &None, &[], &[], &[]));
+        // A pack was added to the content folder itself.
+        let pack = [(OsString::from("Vehicles"), OsString::from("Bus"))];
+        assert!(!is_current(&state, &content, &None, &mods, &[then], &pack));
     }
 
     #[test]
@@ -270,6 +296,79 @@ mod tests {
         let roots = content_roots();
         assert!(roots.contains(&content.join("mods/Bus/OMSI 2")), "{roots:?}");
         assert!(!roots.contains(&content.join("mods/Bus")), "{roots:?}");
+        std::fs::remove_dir_all(&content).ok();
+    }
+
+    #[test]
+    fn a_folder_mod_is_registered_anew_when_it_gains_a_pack() {
+        let _roots = roots_guard();
+        let content = std::env::temp_dir().join(format!("mods-new-pack-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&content);
+        std::fs::create_dir_all(content.join("mods/Bus/Vehicles/Bus")).unwrap();
+        let omsi = content.join("omsi");
+        std::fs::create_dir_all(&omsi).unwrap();
+        let stamps = || STATE.read().unwrap().as_ref().unwrap().stamps.clone();
+        init(&content, Some(&omsi)).unwrap();
+        let (generation, before) = (legacy_config::content_generation(), stamps());
+        init(&content, Some(&omsi)).unwrap();
+        assert_eq!(
+            legacy_config::content_generation(),
+            generation,
+            "nothing changed"
+        );
+        // The lookup builds the pack index before the new folder arrives.
+        let rel = "Sceneryobjects\\BVG\\Haltestelle.sco";
+        assert!(!vfs::exists(&resolve_path(&omsi, rel)));
+        let sco = content.join("mods/Bus/Sceneryobjects/BVG/Haltestelle.sco");
+        std::fs::create_dir_all(sco.parent().unwrap()).unwrap();
+        std::fs::write(&sco, "Bus").unwrap();
+        init(&content, Some(&omsi)).unwrap();
+        assert_ne!(stamps(), before);
+        assert_ne!(legacy_config::content_generation(), generation);
+        assert_eq!(resolve_path(&omsi, rel), sco);
+        std::fs::remove_dir_all(&content).ok();
+    }
+
+    #[test]
+    fn a_folder_mod_is_registered_anew_when_a_pack_folder_gains_a_pack() {
+        let _roots = roots_guard();
+        let content =
+            std::env::temp_dir().join(format!("mods-pack-in-folder-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&content);
+        std::fs::create_dir_all(content.join("mods/Bus/Vehicles/Bus")).unwrap();
+        let omsi = content.join("omsi");
+        std::fs::create_dir_all(&omsi).unwrap();
+        init(&content, Some(&omsi)).unwrap();
+        // The lookup builds the pack index before the new pack arrives.
+        let rel = "Vehicles\\Second\\second.bus";
+        assert!(!vfs::exists(&resolve_path(&omsi, rel)));
+        let bus = content.join("mods/Bus/Vehicles/Second/second.bus");
+        std::fs::create_dir_all(bus.parent().unwrap()).unwrap();
+        std::fs::write(&bus, "Bus").unwrap();
+        init(&content, Some(&omsi)).unwrap();
+        assert_eq!(resolve_path(&omsi, rel), bus);
+        std::fs::remove_dir_all(&content).ok();
+    }
+
+    #[test]
+    fn a_pack_added_to_the_content_folder_is_found() {
+        let _roots = roots_guard();
+        let content =
+            std::env::temp_dir().join(format!("mods-content-pack-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&content);
+        let omsi = content.join("omsi");
+        std::fs::create_dir_all(&omsi).unwrap();
+        // The engine registers the content folder itself as a root, as `register_roots` does.
+        add_content_root(content.clone());
+        init(&content, Some(&omsi)).unwrap();
+        let rel = "Vehicles\\ByHand\\byhand.bus";
+        assert!(!vfs::exists(&resolve_path(&omsi, rel)));
+        let bus = content.join("Vehicles/ByHand/byhand.bus");
+        std::fs::create_dir_all(bus.parent().unwrap()).unwrap();
+        std::fs::write(&bus, "by hand").unwrap();
+        init(&content, Some(&omsi)).unwrap();
+        assert_eq!(resolve_path(&omsi, rel), bus);
+        remove_content_root(&content);
         std::fs::remove_dir_all(&content).ok();
     }
 

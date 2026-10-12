@@ -450,53 +450,83 @@ fn archive_kind(path: &Path) -> Option<ArchiveKind> {
     }
 }
 
-fn archive_stats(src: &Path, kind: ArchiveKind) -> Result<(u64, u64)> {
-    match kind {
+/// The archive's file count and unpacked size, and why it can't be used in place (empty when
+/// it can).
+fn archive_facts(src: &Path, kind: ArchiveKind) -> Result<(u64, u64, String)> {
+    let walk = match kind {
         ArchiveKind::Zip => {
-            let f = std::fs::File::open(src)
-                .with_context(|| format!("opening {}", src.display()))?;
-            let mut z = zip::ZipArchive::new(std::io::BufReader::with_capacity(1 << 13, f))
-                .with_context(|| format!("{} is not a readable zip archive", src.display()))?;
-            let (mut files, mut bytes) = (0u64, 0u64);
-            for i in 0..z.len() {
-                let e = z.by_index_raw(i)?;
-                if !e.is_dir() {
-                    files += 1;
-                    bytes = bytes.saturating_add(e.size());
-                }
-            }
-            Ok((files, bytes))
+            let summary = zip_summary(src)?;
+            let in_place = summary.unreadable.unwrap_or_default();
+            return Ok((summary.files, summary.unpacked_bytes, in_place));
         }
-        ArchiveKind::SevenZip => {
-            let r = sevenz_rust2::ArchiveReader::open(src, sevenz_rust2::Password::empty())
-                .with_context(|| format!("{} is not a readable 7z archive", src.display()))?;
-            let it = r.archive().files.iter().filter(|e| e.has_stream && !e.is_directory);
-            Ok((
-                it.clone().count() as u64,
-                it.fold(0u64, |n, e| n.saturating_add(e.size)),
-            ))
-        }
-        ArchiveKind::Rar => {
-            let a = unrar_rs::RarArchive::open(std::fs::File::open(src)?)
-                .with_context(|| format!("{} is not a readable RAR archive", src.display()))?;
-            let members: Vec<_> = a
-                .entries()
-                .filter(|m| !m.is_directory && !m.is_symlink && !m.is_hardlink)
-                .collect();
-            if members.iter().any(|m| m.unpacked_size.is_none()) {
-                return Err(anyhow!(
-                    "{} is a multi-volume RAR archive; add all parts and start with the first .rar file",
-                    src.display()
-                ));
-            }
-            Ok((
-                members.len() as u64,
-                members
-                    .iter()
-                    .fold(0u64, |n, m| n.saturating_add(m.unpacked_size.unwrap_or(0))),
-            ))
-        }
+        ArchiveKind::SevenZip => sevenz_stats,
+        ArchiveKind::Rar => rar_stats,
+    };
+    let (files, unpacked) = remembered(src, walk)?;
+    Ok((
+        files,
+        unpacked,
+        "7z and RAR archives must be unpacked".into(),
+    ))
+}
+
+/// Keeps the last walk, so the install that follows `inspect` doesn't walk the archive again:
+/// without a RAR5 QuickOpen record, that walk seeks once per member.
+fn remembered(src: &Path, walk: fn(&Path) -> Result<(u64, u64)>) -> Result<(u64, u64)> {
+    type Walked = (PathBuf, (u64, Option<std::time::SystemTime>), (u64, u64));
+    static LAST: Mutex<Option<Walked>> = Mutex::new(None);
+    let meta = std::fs::metadata(src).with_context(|| format!("opening {}", src.display()))?;
+    let stamp = (meta.len(), meta.modified().ok());
+    if let Some((path, seen, stats)) = LAST
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .as_ref()
+        && path == src
+        && *seen == stamp
+    {
+        return Ok(*stats);
     }
+    // The lock isn't held during the walk, which can take minutes for a large RAR archive.
+    let stats = walk(src)?;
+    *LAST.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) =
+        Some((src.to_path_buf(), stamp, stats));
+    Ok(stats)
+}
+
+fn sevenz_stats(src: &Path) -> Result<(u64, u64)> {
+    let archive = sevenz_rust2::Archive::open(src)
+        .with_context(|| format!("{} is not a readable 7z archive", src.display()))?;
+    let files = archive
+        .files
+        .iter()
+        .filter(|file| file.has_stream && !file.is_directory);
+    Ok((
+        files.clone().count() as u64,
+        files.fold(0u64, |total, file| total.saturating_add(file.size)),
+    ))
+}
+
+fn rar_stats(src: &Path) -> Result<(u64, u64)> {
+    // unrar-rs reads headers in small pieces, a QuickOpen record even byte by byte.
+    let file = std::io::BufReader::new(std::fs::File::open(src)?);
+    let archive = unrar_rs::RarArchive::open(file)
+        .with_context(|| format!("{} is not a readable RAR archive", src.display()))?;
+    let members: Vec<_> = archive
+        .entries()
+        .filter(|member| !member.is_directory && !member.is_symlink && !member.is_hardlink)
+        .collect();
+    if members.iter().any(|member| member.unpacked_size.is_none()) {
+        return Err(anyhow!(
+            "{} is a multi-volume RAR archive; add all parts and start with the first .rar file",
+            src.display()
+        ));
+    }
+    Ok((
+        members.len() as u64,
+        members.iter().fold(0u64, |total, member| {
+            total.saturating_add(member.unpacked_size.unwrap_or(0))
+        }),
+    ))
 }
 
 fn run(job: &Job, content: &Path) -> Result<()> {
@@ -527,8 +557,8 @@ fn run(job: &Job, content: &Path) -> Result<()> {
 
     let free = free_space(content).unwrap_or(u64::MAX);
     let mut keep_zip = archive == Some(ArchiveKind::Zip) && job.mode == InstallMode::InPlace;
-    if let Some(kind) = archive {
-        let (files, bytes) = archive_stats(&src, kind)?;
+    let facts = archive.map(|kind| archive_facts(&src, kind)).transpose()?;
+    if let (Some(kind), Some(&(files, bytes, _))) = (archive, facts.as_ref()) {
         let needed = bytes.saturating_add(MIN_MARGIN);
         job.set(|p| {
             p.files_total = files;
@@ -550,7 +580,9 @@ fn run(job: &Job, content: &Path) -> Result<()> {
         }
     }
     if keep_zip {
-        if let Some(problem) = zip_in_place_problem(&src)? {
+        if let Some((_, _, problem)) = &facts
+            && !problem.is_empty()
+        {
             return Err(anyhow!("{name} cannot be used in place: {problem}"));
         }
         let size = std::fs::metadata(&src)?.len();
@@ -754,29 +786,9 @@ fn exposes_content(staged: &Path, zip: bool) -> bool {
     })
 }
 
-/// Why the archive can't be used in place, if it can't: the game reads only unencrypted
-/// entries that are stored or deflated.
-fn zip_in_place_problem(src: &Path) -> Result<Option<String>> {
-    let file = std::fs::File::open(src).with_context(|| format!("opening {}", src.display()))?;
-    let mut archive = zip::ZipArchive::new(std::io::BufReader::with_capacity(1 << 13, file))
-        .with_context(|| format!("{} is not a readable zip archive", src.display()))?;
-    for index in 0..archive.len() {
-        let entry = archive.by_index_raw(index)?;
-        if entry.encrypted() {
-            return Ok(Some(format!("{} is encrypted", entry.name())));
-        }
-        if !matches!(
-            entry.compression(),
-            zip::CompressionMethod::Stored | zip::CompressionMethod::Deflated
-        ) {
-            return Ok(Some(format!(
-                "{} is compressed with {} (only stored and deflated entries can be read in place)",
-                entry.name(),
-                entry.compression()
-            )));
-        }
-    }
-    Ok(None)
+fn zip_summary(src: &Path) -> Result<::legacy_config::vfs::ZipSummary> {
+    ::legacy_config::vfs::zip_summary(src)
+        .with_context(|| format!("{} is not a readable zip archive", src.display()))
 }
 
 /// Copies one file in chunks, reporting progress and stopping when cancelled or when the disk
@@ -897,7 +909,8 @@ fn unpack_other(
             })?;
         }
         ArchiveKind::Rar => {
-            let mut archive = unrar_rs::RarArchive::open(std::fs::File::open(src)?)
+            let file = std::io::BufReader::new(std::fs::File::open(src)?);
+            let mut archive = unrar_rs::RarArchive::open(file)
                 .with_context(|| format!("opening {}", src.display()))?;
             let members: Vec<_> = archive.entries().collect();
             for (index, member) in members.iter().enumerate() {
@@ -960,15 +973,10 @@ pub fn inspect(content: &Path, src: &Path) -> Result<SourceInfo> {
             ..Default::default()
         });
     };
-    let (files, unpacked) = archive_stats(src, kind)?;
+    let is_zip = kind == ArchiveKind::Zip;
+    let (files, unpacked, in_place) = archive_facts(src, kind)?;
     let needed = unpacked.saturating_add(MIN_MARGIN);
     let fits = needed <= free;
-    let is_zip = kind == ArchiveKind::Zip;
-    let in_place = if is_zip {
-        zip_in_place_problem(src)?.unwrap_or_default()
-    } else {
-        "7z and RAR archives must be unpacked".into()
-    };
     let in_place_ok = in_place.is_empty();
     Ok(SourceInfo {
         is_archive: true,
@@ -1025,6 +1033,33 @@ mod tests {
         assert!(!content.join(STAGING).exists());
         let p = run_blocking(content.clone(), zip, InstallMode::InPlace, false, None, false);
         assert_eq!(p.state, "failed", "{p:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_archive_is_walked_once_until_it_is_replaced() {
+        static WALKS: AtomicU64 = AtomicU64::new(0);
+        fn walk(_: &Path) -> Result<(u64, u64)> {
+            WALKS.fetch_add(1, Ordering::Relaxed);
+            Ok((1, 10))
+        }
+        let dir = tmp("walks");
+        let rar = dir.join("Mod.rar");
+        std::fs::write(&rar, b"first").unwrap();
+        assert_eq!(remembered(&rar, walk).unwrap(), (1, 10));
+        assert_eq!(remembered(&rar, walk).unwrap(), (1, 10));
+        assert_eq!(
+            WALKS.load(Ordering::Relaxed),
+            1,
+            "the install after inspect reuses the walk"
+        );
+        std::fs::write(&rar, b"a replaced archive").unwrap();
+        remembered(&rar, walk).unwrap();
+        assert_eq!(
+            WALKS.load(Ordering::Relaxed),
+            2,
+            "a replaced archive is walked again"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
