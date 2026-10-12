@@ -286,15 +286,40 @@ impl App {
             }
         }
         let mut actions = actions;
+        // door buttons are let go even with the menu open: their `_off` must reach the bus
+        let mut doors: Vec<(String, bool)> = Vec::new();
+        actions.retain(|(name, down)| {
+            let n = name.to_ascii_lowercase();
+            let door = n == "doors_release" || n.starts_with("doorkey_");
+            if door {
+                doors.push((n, *down));
+            }
+            !door
+        });
+        for (n, down) in doors {
+            if !down {
+                if let Some(held) = self.pad_doors.get_mut(&n) {
+                    held.0 = held.0.saturating_sub(1);
+                    if held.0 == 0 {
+                        let fired = self.pad_doors.remove(&n).map(|h| h.1).unwrap_or_default();
+                        self.door_triggers_off(&fired);
+                    }
+                }
+            } else if let Some(held) = self.pad_doors.get_mut(&n) {
+                // (another button on the same action: held until the last is let go)
+                held.0 += 1;
+            } else if self.game_menu.is_none() && self.view != "free" {
+                let fired = match n.strip_prefix("doorkey_").and_then(|k| k.parse().ok()) {
+                    Some(k) => self.door_key_fire(k),
+                    None => self.door_release(),
+                };
+                self.pad_doors.insert(n, (1, fired));
+            }
+        }
         if self.game_menu.is_none() {
             let mut game: Vec<String> = Vec::new();
-            let mut doors: Vec<(String, bool)> = Vec::new();
             actions.retain(|(name, down)| {
                 let n = name.to_ascii_lowercase();
-                if n == "doors_release" || n.starts_with("doorkey_") {
-                    doors.push((n, *down));
-                    return false;
-                }
                 if let Some(k) = [
                     "view_look_left",
                     "view_look_right",
@@ -321,18 +346,6 @@ impl App {
                 }
                 true
             });
-            for (n, down) in doors {
-                if !down {
-                    let fired = self.pad_doors.remove(&n).unwrap_or_default();
-                    self.door_triggers_off(&fired);
-                } else if self.view != "free" {
-                    let fired = match n.strip_prefix("doorkey_").and_then(|k| k.parse().ok()) {
-                        Some(k) => self.door_key_fire(k),
-                        None => self.door_release(),
-                    };
-                    self.pad_doors.insert(n, fired);
-                }
-            }
             for n in game {
                 match n.as_str() {
                     "gear_up" => {
