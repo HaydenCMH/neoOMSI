@@ -542,6 +542,7 @@ pub(crate) fn make_app(
         window_focused: false,
         keys: Default::default(),
         door_key_triggers: Default::default(),
+        pad_door_release: Vec::new(),
         last: Instant::now(),
         speed: 30.0,
         mouse_look: false,

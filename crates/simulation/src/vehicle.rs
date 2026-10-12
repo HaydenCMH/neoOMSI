@@ -2175,6 +2175,14 @@ impl VehicleInstance {
             .map(|(n, _)| n.as_str())
     }
 
+    /// The trigger the `doors_release` action fires now (see [`door_release_trigger`]).
+    pub fn door_release_trigger(&self) -> Option<&'static str> {
+        door_release_trigger(
+            |t| self.ty.program.trigger(t).is_some(),
+            self.var("C2_CP_Tuerfreigabe").is_some_and(|x| x > 0.5),
+        )
+    }
+
     pub fn set_var(&mut self, name: &str, v: f32) -> bool {
         match lookup_var_index(&self.var_index, name) {
             Some(&i) => {
@@ -4476,9 +4484,57 @@ pub fn skin_vertices(
     Some((pos, nrm))
 }
 
+/// The door release of a bus, whatever its script calls it: its own release trigger
+/// (`bus_doorall`, the Iveco's `CG_active`, the C2's `C2_CP_doorall_1`), the C2's release
+/// switch turned over (`C2_CP_Tuerfreigabe_1` / `_0`, by `switch_on`), else `bus_dooraft`.
+pub fn door_release_trigger(has: impl Fn(&str) -> bool, switch_on: bool) -> Option<&'static str> {
+    if let Some(t) = ["bus_doorall", "CG_active", "C2_CP_doorall_1"]
+        .into_iter()
+        .find(|t| has(t))
+    {
+        return Some(t);
+    }
+    if has("C2_CP_Tuerfreigabe_1") && has("C2_CP_Tuerfreigabe_0") {
+        return Some(if switch_on {
+            "C2_CP_Tuerfreigabe_0"
+        } else {
+            "C2_CP_Tuerfreigabe_1"
+        });
+    }
+    has("bus_dooraft").then_some("bus_dooraft")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_door_release_is_the_bus_own_trigger() {
+        let with = |names: &'static [&'static str]| move |t: &str| names.contains(&t);
+        assert_eq!(
+            door_release_trigger(with(&["bus_doorall", "bus_dooraft"]), false),
+            Some("bus_doorall")
+        );
+        assert_eq!(
+            door_release_trigger(with(&["CG_active"]), false),
+            Some("CG_active")
+        );
+        let c2 = with(&[
+            "C2_CP_Tuerfreigabe_1",
+            "C2_CP_Tuerfreigabe_0",
+            "bus_dooraft",
+        ]);
+        assert_eq!(
+            door_release_trigger(c2, false),
+            Some("C2_CP_Tuerfreigabe_1")
+        );
+        assert_eq!(door_release_trigger(c2, true), Some("C2_CP_Tuerfreigabe_0"));
+        assert_eq!(
+            door_release_trigger(with(&["bus_dooraft"]), false),
+            Some("bus_dooraft")
+        );
+        assert_eq!(door_release_trigger(with(&[]), false), None);
+    }
 
     #[test]
     fn script_speed_reports_tiny_resting_motion_as_stopped() {

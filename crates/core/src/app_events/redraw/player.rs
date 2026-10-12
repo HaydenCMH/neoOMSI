@@ -288,8 +288,13 @@ impl App {
         let mut actions = actions;
         if self.game_menu.is_none() {
             let mut game: Vec<String> = Vec::new();
+            let mut release: Vec<bool> = Vec::new();
             actions.retain(|(name, down)| {
                 let n = name.to_ascii_lowercase();
+                if n == "doors_release" {
+                    release.push(*down);
+                    return false;
+                }
                 if let Some(k) = [
                     "view_look_left",
                     "view_look_right",
@@ -316,6 +321,14 @@ impl App {
                 }
                 true
             });
+            for down in release {
+                if down {
+                    self.pad_door_release = self.door_release();
+                } else {
+                    let fired = std::mem::take(&mut self.pad_door_release);
+                    self.door_triggers_off(&fired);
+                }
+            }
             for n in game {
                 match n.as_str() {
                     "gear_up" => {

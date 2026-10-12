@@ -102,6 +102,39 @@ impl App {
         self.door_key_triggers.insert(code, fire);
     }
 
+    /// `doors_release`: the bus's own door release, whatever its script calls it; the triggers fired.
+    pub(crate) fn door_release(&mut self) -> Vec<String> {
+        let Some(p) = self.player.as_mut() else {
+            return Vec::new();
+        };
+        let fired: Vec<String> = p
+            .vehicle
+            .door_release_trigger()
+            .map(str::to_string)
+            .into_iter()
+            .collect();
+        log::info!(
+            "door release: {}",
+            fired.first().map_or("none on this bus", |s| s.as_str())
+        );
+        for name in &fired {
+            p.vehicle.trigger(name);
+        }
+        fired
+    }
+
+    /// The `_off` of door triggers fired by a key or button now let go.
+    pub(crate) fn door_triggers_off(&mut self, fired: &[String]) {
+        if let Some(p) = self.player.as_mut() {
+            for name in fired {
+                let off = format!("{name}_off");
+                if p.vehicle.ty.program.trigger(&off).is_some() {
+                    p.vehicle.trigger(&off);
+                }
+            }
+        }
+    }
+
     pub(crate) fn bus_startup(&mut self) {
         if let Some(p) = self.player.as_mut() {
             let msg = p.start_up();
@@ -508,6 +541,11 @@ impl App {
                             .and_then(|n| n.parse::<usize>().ok())
                         {
                             self.door_key(n, code);
+                        } else if a == "doors_release" {
+                            if self.view != "free" {
+                                let fired = self.door_release();
+                                self.door_key_triggers.insert(code, fired);
+                            }
                         } else if self.game_action(&a) && !vehicle_too {
                             return;
                         }
