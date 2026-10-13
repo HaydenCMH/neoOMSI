@@ -13,7 +13,7 @@ fn state_ink(state: u8) -> [u8; 4] {
 }
 
 impl Ui {
-    pub(super) fn draw_start_join(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, m: Metrics, v: &StartView) {
+    pub(in super::super) fn draw_start_join(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, m: Metrics, v: &StartView) {
         let Metrics { w, h, u, .. } = m;
         self.text.rounded(r, scene, [0.0, 0.0, w, h], 0.0, BG);
         let bar_h = self.draw_start_bar(r, scene, f, m, 1);

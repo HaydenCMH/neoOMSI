@@ -4,7 +4,6 @@ use super::pause_menu::{Metrics, inside, out};
 use super::*;
 
 mod bar;
-mod join;
 mod pages;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -137,7 +136,7 @@ pub struct StartUi {
     pub details: [f32; 4],
     pub pic_size: (u32, u32),
     pub pic_rect: [f32; 4],
-    pub picture: Option<::render::TextureId>,
+    pub picture: Option<TextureId>,
     pub status: String,
     pub seasons: Vec<[f32; 4]>,
     pub time_field: [f32; 4],
@@ -163,7 +162,7 @@ pub struct StartUi {
     pub entry_box: [f32; 4],
     pub line_filter: [f32; 4],
     pub tour_filter: [f32; 4],
-    pub route_pic: Option<::render::TextureId>,
+    pub route_pic: Option<TextureId>,
     pub route_size: (u32, u32),
     pub route_rect: [f32; 4],
     pub route_status: String,
@@ -291,10 +290,6 @@ impl Ui {
         self.text.flat = false;
         self.text.end_frame(r, scene);
     }
-}
-
-pub(super) fn head_alpha(pt: f32) -> f32 {
-    out(pt / 0.6)
 }
 
 pub(super) const BG: [u8; 4] = [10, 12, 16, 255];
