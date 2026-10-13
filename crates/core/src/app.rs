@@ -447,6 +447,7 @@ impl App {
         } else {
             let mut menu = menu::Menu::new(&self.args.root, &self.args.map);
             menu.refresh_continue();
+            menu.apply_last_situation();
             self.menu = Some(menu);
         }
     }

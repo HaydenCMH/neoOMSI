@@ -597,6 +597,53 @@ impl Menu {
             .map(|s| s.file.to_string_lossy().into_owned());
     }
 
+    pub fn apply_last_situation(&mut self) {
+        let Some(file) = self.continue_sit.clone() else {
+            return;
+        };
+        let Ok(sit) = ::content::Situation::load(Path::new(&file)) else {
+            return;
+        };
+        let tail = |path: &str, folder: &str| -> String {
+            let p = path.replace('\\', "/").to_ascii_lowercase();
+            match p.rfind(&format!("{folder}/")) {
+                Some(i) => p[i..].to_string(),
+                None => p,
+            }
+        };
+        let want = tail(&sit.map, "maps");
+        if let Some(i) = self.maps.iter().position(|m| tail(&m.1, "maps") == want) {
+            self.map = i;
+        }
+        let mine = sit
+            .vehicles
+            .iter()
+            .find(|v| v.is_my_vehicle)
+            .or_else(|| sit.vehicles.get(sit.my_vehicle.max(0) as usize));
+        if let Some(v) = mine {
+            let want = tail(&v.file, "vehicles");
+            if let Some(i) = self.vehicles.iter().position(|x| tail(&x.1, "vehicles") == want) {
+                self.vehicle = i;
+            }
+        }
+        let (y, doy, h, m, _) = sit.time;
+        self.year = y.clamp(1970, 2100);
+        self.day = doy.clamp(1, days_in_year(self.year));
+        self.hour = h.clamp(0, 23);
+        self.minute = m.clamp(0, 59);
+        self.cal_year = self.year;
+        self.cal_month = self.ymd().1 - 1;
+        self.season_mode = 0;
+        self.weather = match &sit.weather {
+            Some(w) => self
+                .weathers
+                .iter()
+                .position(|x| !x.1.is_empty() && x.1.eq_ignore_ascii_case(w))
+                .unwrap_or(0),
+            None => 0,
+        };
+    }
+
     pub fn map_names(&self) -> Vec<String> {
         self.maps.iter().map(|m| m.0.clone()).collect()
     }
