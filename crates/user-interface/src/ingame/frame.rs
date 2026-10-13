@@ -44,6 +44,7 @@ impl Ui {
             dialog_under: None,
             place_rects: Vec::new(),
             place_preview_size: (0, 0),
+            place_preview_rect: [0.0; 4],
             place_picture: None,
             map_rect: [0.0; 4],
             map_picture: None,

@@ -6,7 +6,7 @@ impl Ui {
         let th = (54.0 * u).round();
         let g = 6.0 * u;
         let mut y = a[1];
-        // the livery
+
         let lab = tr("start.maps.livery");
         self.start_dropdown(r, scene, f, [a[0], y, a[2], y + th], 0, &lab, v.livery, v.drop == 8, u);
         y += th + g;
@@ -14,7 +14,6 @@ impl Ui {
             y = self.start_drop_list(r, scene, f, a, y, v, u) + g;
         }
 
-        // the vehicle details: depot file, fleet number, number plate
         let dh = (32.0 * u).round();
         let dr = [a[0], y, a[2], y + dh];
         let hv = self.ease((225, "details", 0), if inside(dr, f.cursor) { 1.0 } else { 0.0 }, 10.0);
@@ -44,11 +43,9 @@ impl Ui {
             y += th + g;
         }
 
-        // all vehicles
         let ch = self.start_caption(r, scene, "start.maps.buses", a[0] + 4.0 * u, y + 6.0 * u, u);
         y += ch + 14.0 * u;
 
-        // the search
         let sh = (42.0 * u).round();
         let rc = [a[0], y, a[2], y + sh];
         let ph = tr("start.maps.search");
@@ -61,8 +58,6 @@ impl Ui {
         self.start.veh_vis = vis;
     }
 
-    /// A choice that opens a list (livery, depot file, fleet number): label and value with
-    /// an arrow; `k` is its place among the dropdowns.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn start_dropdown(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, rc: [f32; 4], k: usize, label: &str, value: &str, open: bool, u: f32) {
         let h = rc[3] - rc[1];
@@ -93,7 +88,6 @@ impl Ui {
         self.start.drops.push(rc);
     }
 
-    /// The choices of the open dropdown, under its field; returns where it ends.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn start_drop_list(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, a: [f32; 4], y: f32, v: &StartView, u: f32) -> f32 {
         let row_h = (ROW_H * u).round();
@@ -132,7 +126,6 @@ impl Ui {
         bx[3]
     }
 
-    /// A text field (the search, the number plate); `label` puts a small caption above the text.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn start_field(
         &mut self,
@@ -167,7 +160,7 @@ impl Ui {
         let vpx = (16.0 * u) as u32;
         let room = rc[2] - tx - TEXT_IN * u;
         let shown = if value.is_empty() { placeholder.to_string() } else { value.to_string() };
-        // the end of what is typed stays in view
+
         let mut text = shown.clone();
         while !value.is_empty() && self.text.width(&text, vpx as f32) > room && text.chars().count() > 1 {
             text.remove(0);
@@ -192,7 +185,6 @@ impl Ui {
         }
     }
 
-    /// The list of the buses: manufacturers that open, their models below.
     pub(super) fn start_veh_list(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, a: [f32; 4], v: &StartView, u: f32) -> usize {
         let row_h = (ROW_H * u).round();
         let vis = (((a[3] - a[1]) / row_h).floor() as usize).max(1);
@@ -222,7 +214,6 @@ impl Ui {
                 self.accent_bar(r, scene, rc, ov, false, u);
             }
             if header {
-                // the manufacturer: its name, how many models, and the way to open it
                 let isz = (22.0 * u).round();
                 let ix = rc[2] - TEXT_IN * u * 0.5 - isz;
                 if let Some(ic) = self.text.icon(r, scene, if row.open { "expand_less" } else { "expand_more" }, isz as u32, mix(MUTED, WHITE, hv)) {
@@ -240,7 +231,6 @@ impl Ui {
                 let l = self.text.label(r, scene, &name, px, if row.on || hot { WHITE } else { SOFT });
                 l.place(scene, ix, y + (row_h - l.h as f32) * 0.5);
             }
-            // thin line under the manufacturers
             if header && k > 0 {
                 self.text.rounded(r, scene, [rc[0] + 4.0 * u, y, rc[2] - 4.0 * u, y + 1.0], 0.0, [255, 255, 255, 14]);
             }
@@ -256,13 +246,13 @@ impl Ui {
         vis
     }
 
-    /// The picture the game drew of the chosen bus; before it is there, the status and an icon.
     pub(super) fn start_bus_picture(&mut self, r: &Renderer, scene: &mut Scene, a: [f32; 4], v: &StartView, u: f32) {
         let (w, h) = ((a[2] - a[0]).round(), (a[3] - a[1]).round());
         if w < 40.0 || h < 40.0 {
             return;
         }
         self.start.pic_size = (w as u32, h as u32);
+        self.start.pic_rect = a;
         if let Some(tex) = self.start.picture {
             if self.start.enter > 0.7 {
                 scene.overlays.push((tex, a));

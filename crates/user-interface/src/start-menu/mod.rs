@@ -19,26 +19,21 @@ pub enum StartPage {
     Options,
 }
 
-/// A line of the vehicle list: a manufacturer (`vehicle` is None) or one of its models.
 #[derive(Clone, Debug, Default)]
 pub struct VehRow {
     pub label: String,
-    /// Header: how many models the manufacturer has.
     pub count: usize,
-    /// Header: the models are shown.
     pub open: bool,
     pub vehicle: Option<usize>,
     pub on: bool,
 }
 
-/// A line of the timetable in the list: its number and where it goes.
 #[derive(Clone, Debug, Default)]
 pub struct LineRow {
     pub badge: String,
     pub label: String,
 }
 
-/// A tour of the chosen line: its name and when it drives.
 #[derive(Clone, Debug, Default)]
 pub struct TourRow {
     pub label: String,
@@ -57,7 +52,6 @@ pub struct StartView<'a> {
     pub zone: usize,
     pub address: &'a str,
     pub caret: bool,
-    /// The chosen vehicle's maker, its place in the list and how many there are.
     pub maker: &'a str,
     pub vehicle: usize,
     pub vehicles: usize,
@@ -65,41 +59,28 @@ pub struct StartView<'a> {
     pub veh_rows: &'a [VehRow],
     pub veh_top: usize,
     pub query: &'a str,
-    /// The dropdown open (8 livery, 9 depot file, 10 fleet number; 0 none), its choices,
-    /// the chosen one and the scroll.
     pub drop: usize,
     pub drop_items: &'a [String],
     pub drop_sel: usize,
     pub drop_top: usize,
-    /// 0 = nothing typed into, 1 = the search, 2 = the number plate.
     pub edit: u8,
     pub details: bool,
     pub livery: &'a str,
     pub depot: &'a str,
     pub fleet: &'a str,
     pub plate: &'a str,
-    /// 0 = the overview, 1 to 4 = the tab of the editor.
     pub sect: usize,
-    /// The line of the overview in focus.
     pub focus: usize,
-    /// 0 = by date, 1 to 4 = spring, summer, autumn, winter.
     pub season: usize,
-    /// The time typed (HH:MM), the calendar under the date: open, its title and its 42 days
-    /// (number, in the month shown, the chosen one).
     pub time_text: &'a str,
     pub cal_open: bool,
     pub cal_title: &'a str,
     pub cal_cells: &'a [(i32, bool, bool)],
-    /// The weather choices (icon, label), the chosen one, the scroll and the settings of
-    /// the custom weather (label, value).
     pub weathers: &'a [(String, String)],
     pub weather: usize,
     pub weather_top: usize,
     pub custom: &'a [(String, String)],
-    /// No tour chosen: drive freely instead of starting on a route.
     pub free: bool,
-    /// The lines and tours the filters let through, the chosen one among them, the scroll,
-    /// the filters' text, and the sentence under the title of the map page.
     pub lines: &'a [LineRow],
     pub line_sel: Option<usize>,
     pub line_top: usize,
@@ -109,9 +90,7 @@ pub struct StartView<'a> {
     pub tour_top: usize,
     pub tour_query: &'a str,
     pub route_sub: &'a str,
-    /// The start points of the map (free drive), the chosen one and the scroll.
     pub entries: &'a [String],
-    /// The start point as text ("automatic" when none is chosen).
     pub entry_text: &'a str,
     pub entry_sel: Option<usize>,
     pub entry_top: usize,
@@ -127,13 +106,10 @@ pub struct StartUi {
     pub map_vis: usize,
     pub rows: Vec<[f32; 4]>,
     pub arrows: Vec<[f32; 4]>,
-    /// Free drive and route buttons.
     pub mode: Vec<[f32; 4]>,
-    /// The lines of the overview, the tabs and the close button of the editor.
     pub summary: Vec<[f32; 4]>,
     pub sect_tabs: Vec<[f32; 4]>,
     pub close: [f32; 4],
-    /// The quit button on the left of the bar.
     pub quit: [f32; 4],
     pub next: [f32; 4],
     pub cont: [f32; 4],
@@ -141,42 +117,36 @@ pub struct StartUi {
     pub veh_vis: usize,
     pub search: [f32; 4],
     pub plate: [f32; 4],
-    /// The fields of the dropdowns, the lines of the open one, its frame and its first line.
     pub drops: Vec<[f32; 4]>,
     pub drop_items: Vec<[f32; 4]>,
     pub drop_box: [f32; 4],
     pub drop_first: usize,
     pub details: [f32; 4],
-    /// The size of the picture of the bus, and the texture the game drew it into.
     pub pic_size: (u32, u32),
+    pub pic_rect: [f32; 4],
     pub picture: Option<::render::TextureId>,
     pub status: String,
     pub seasons: Vec<[f32; 4]>,
     pub time_field: [f32; 4],
     pub date_field: [f32; 4],
     pub now: [f32; 4],
-    /// The calendar: its 42 days and its buttons (previous, next, close, today).
     pub cal_days: Vec<[f32; 4]>,
     pub cal_btn: Vec<[f32; 4]>,
     pub weathers: Vec<[f32; 4]>,
     pub weather_vis: usize,
     pub go: [f32; 4],
     pub field: [f32; 4],
-    /// The rows of the line and tour lists, how many fit, their frames and filter fields.
     pub lines: Vec<[f32; 4]>,
     pub tours: Vec<[f32; 4]>,
     pub line_vis: usize,
     pub tour_vis: usize,
     pub line_box: [f32; 4],
     pub tour_box: [f32; 4],
-    /// The start points' rows, how many fit and their frame.
     pub entries: Vec<[f32; 4]>,
     pub entry_vis: usize,
     pub entry_box: [f32; 4],
     pub line_filter: [f32; 4],
     pub tour_filter: [f32; 4],
-    /// The picture of the map and route (the game draws it), the size wanted, what to say
-    /// when it is not there, and the stops to name (place in the picture, 0 to 1).
     pub route_pic: Option<::render::TextureId>,
     pub route_size: (u32, u32),
     pub route_rect: [f32; 4],
@@ -315,5 +285,4 @@ pub(super) fn head_alpha(pt: f32) -> f32 {
 }
 
 pub(super) const BG: [u8; 4] = [10, 12, 16, 255];
-/// The accent for text: alpha 0 is plain text (255 would draw it with an outline that glows).
 pub(super) const ACCENT_TEXT: [u8; 4] = [232, 160, 48, 0];

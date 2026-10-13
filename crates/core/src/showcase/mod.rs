@@ -1,3 +1,4 @@
+mod input;
 mod light;
 mod load;
 mod look;
@@ -17,6 +18,7 @@ pub struct Showcase {
     loading: Option<(Look, load::Job)>,
     pub error: Option<String>,
     view: view::View,
+    grab: Option<(f32, f32, bool)>,
     pub auto_turn: bool,
     pub focus_x: f32,
     focus_now: f32,
@@ -36,6 +38,7 @@ impl Showcase {
             loading: None,
             error: None,
             view: view::View::new(),
+            grab: None,
             auto_turn: false,
             focus_x: 0.5,
             focus_now: 0.5,
@@ -60,6 +63,27 @@ impl Showcase {
     pub fn pan(&mut self, dx: f32, dy: f32) {
         let r = self.model.as_ref().map_or(6.0, |m| m.radius);
         self.view.pan(dx, dy, r);
+    }
+
+    pub fn begin_grab(&mut self, x: f32, y: f32, pan: bool) {
+        self.grab = Some((x, y, pan));
+    }
+
+    pub fn drag_to(&mut self, x: f32, y: f32) -> bool {
+        let Some((lx, ly, pan)) = self.grab else {
+            return false;
+        };
+        self.grab = Some((x, y, pan));
+        if pan {
+            self.pan(x - lx, y - ly);
+        } else {
+            self.orbit(x - lx, y - ly);
+        }
+        true
+    }
+
+    pub fn end_grab(&mut self) -> bool {
+        self.grab.take().is_some()
     }
 
     pub fn zoom_by(&mut self, k: f32) {

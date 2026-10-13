@@ -99,6 +99,7 @@ pub struct Ui {
     pub dialog_under: Option<Dialog>,
     pub place_rects: Vec<[f32; 4]>,
     pub place_preview_size: (u32, u32),
+    pub place_preview_rect: [f32; 4],
     pub place_picture: Option<TextureId>,
     pub map_rect: [f32; 4],
     pub map_picture: Option<TextureId>,
