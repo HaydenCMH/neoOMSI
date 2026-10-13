@@ -809,6 +809,7 @@ fn act(l: &mut Launcher, a: Act) {
                         crate::pax_pack::PaxPack::start,
                     );
                 }
+                "mods_install" => crate::lab_options::mods_install(),
                 "mods_open" => {
                     if let Some(d) = ::mods::mods_dir() {
                         let _ = std::fs::create_dir_all(&d);

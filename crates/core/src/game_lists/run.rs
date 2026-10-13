@@ -61,6 +61,7 @@ pub(crate) fn run_move(app: &mut App, kind: &ListKind, action: &str, mv: Move) -
                     }
                 }
                 "keysearch" => {}
+                "mods_install" if step => crate::lab_options::mods_install(),
                 "mods_open" if step => {
                     if let Some(d) = ::mods::mods_dir() {
                         let _ = std::fs::create_dir_all(&d);

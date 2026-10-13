@@ -918,6 +918,12 @@ pub const OPTION_GROUPS: &[OptGroup] = &[
                 OptKind::Button("pause.options.mods.open.button"),
             ),
             row(
+                "mods_install",
+                "pause.options.mods.install.name",
+                "pause.options.mods.install.desc",
+                OptKind::Button("pause.options.mods.install.button"),
+            ),
+            row(
                 "mods_list",
                 "pause.options.mods.list.name",
                 "pause.options.mods.list.desc",

@@ -529,6 +529,12 @@
       },
       "mods": {
         "folder": "Folder",
+        "install": {
+          "button": "Choose",
+          "desc": "Pick ZIP files and install them into the mods folder",
+          "name": "Install ZIP",
+          "title": "Choose ZIP files for mods"
+        },
         "list": {
           "desc": "All loaded mods and whether data is missing",
           "name": "Active mods"

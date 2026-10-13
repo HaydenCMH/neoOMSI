@@ -263,3 +263,26 @@ fn mod_rows() -> Vec<(String, String)> {
         })
         .collect()
 }
+
+pub(crate) fn mods_install() {
+    let Some(dir) = ::mods::mods_dir() else { return };
+    let Some(files) = rfd::FileDialog::new()
+        .set_title(::i18n::translate("pause.options.mods.install.title", &[]))
+        .add_filter("ZIP", &["zip"])
+        .pick_files()
+    else {
+        return;
+    };
+    let _ = std::fs::create_dir_all(&dir);
+    for f in files {
+        let Some(name) = f.file_name() else { continue };
+        let to = dir.join(name);
+        if to != f {
+            if let Err(e) = std::fs::copy(&f, &to) {
+                log::warn!("mod install {}: {e}", f.display());
+            }
+        }
+    }
+    let _ = ::mods::init(&dir, ::mods::legacy_dir().as_deref());
+    *MOD_SCAN.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
