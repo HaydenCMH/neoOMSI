@@ -1019,8 +1019,17 @@ mod tests {
         z.finish().unwrap();
     }
 
+    /// Runs the tests that install one at a time: uninstall refuses while another install runs.
+    fn installing() -> std::sync::MutexGuard<'static, ()> {
+        static INSTALLS: Mutex<()> = Mutex::new(());
+        INSTALLS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     #[test]
     fn zip_goes_into_mods() {
+        let _installing = installing();
         let dir = tmp("zip");
         let content = dir.join("content");
         std::fs::create_dir_all(&content).unwrap();
@@ -1066,6 +1075,7 @@ mod tests {
     /// An archive unpacked and the same archive used in place show the game the same files.
     #[test]
     fn extracted_and_in_place_mods_match() {
+        let _installing = installing();
         let layouts: [&[&str]; 4] = [
             &["Vehicles/Bus/bus.bus", "Vehicles/Bus/Texture/a.dds"],
             &["Pack/Vehicles/Bus/bus.bus", "Pack/Vehicles/Bus/Texture/a.dds"],
@@ -1096,6 +1106,7 @@ mod tests {
 
     #[test]
     fn a_mod_without_content_folders_is_reported() {
+        let _installing = installing();
         let dir = tmp("nocontent");
         let zip = dir.join("Docs.zip");
         write_zip(&zip, &[("readme.txt", 4)]);
@@ -1141,6 +1152,7 @@ mod tests {
 
     #[test]
     fn replace_and_uninstall_keep_the_old_version() {
+        let _installing = installing();
         let dir = tmp("replace");
         let content = dir.join("content");
         let zip = dir.join("Bus.zip");

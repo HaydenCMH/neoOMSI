@@ -712,7 +712,8 @@ pub fn map_preflight(map: &str) -> Result<Vec<::mods::diagnostics::Finding>> {
             return Ok(instances::undismissed(found.clone()));
         }
     }
-    let map_dir = resolve_content(map)?
+    let global_cfg = resolve_content(map)?;
+    let map_dir = global_cfg
         .parent()
         .map(Path::to_path_buf)
         .ok_or_else(|| anyhow!("{map} is no map"))?;
@@ -749,11 +750,20 @@ pub fn map_preflight(map: &str) -> Result<Vec<::mods::diagnostics::Finding>> {
                 .collect::<Vec<_>>()
         })
         .collect();
-    let wanted: Vec<(PathBuf, Kind)> = named
+    let mut wanted: Vec<(PathBuf, Kind)> = named
         .into_iter()
         .filter(|(rel, _)| ::mods::find_in_roots(rel).is_none())
         .map(|(rel, kind)| (root.join(rel), kind))
         .collect();
+    // The tiles global.cfg lists, found as the game finds them; the scan above only sees the
+    // tile files that exist.
+    let global = ::map::GlobalCfg::load(&global_cfg)?;
+    wanted.extend(
+        global
+            .tiles
+            .iter()
+            .map(|tile| (::mods::resolve_path(&map_dir, &tile.file), Kind::Tile)),
+    );
     let found = ::mods::diagnostics::check(&map_dir, &wanted);
     let mut cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let (cached, maps) = cache.get_or_insert_with(|| (generation, Default::default()));

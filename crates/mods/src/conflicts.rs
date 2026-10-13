@@ -160,4 +160,32 @@ mod tests {
         assert_eq!(definitions.len(), 1);
         assert_eq!(definitions["lion"], ["lion.bus"]);
     }
+
+    #[test]
+    fn originals_are_looked_up_again_when_the_content_changes() {
+        let _roots = crate::roots_guard();
+        let content = std::env::temp_dir().join(format!("mods-originals-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&content);
+        let put = |rel: &str| {
+            let path = content.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, rel).unwrap();
+        };
+        put("mods/Bus/Texture/a.dds");
+        put("mods/Bus/Texture/b.dds");
+        put("omsi/Texture/a.dds");
+        let omsi = content.join("omsi");
+        crate::init(&content, Some(&omsi)).unwrap();
+        let replaced = || {
+            let bus = super::conflicts()
+                .into_iter()
+                .find(|conflict| conflict.id == "Bus");
+            bus.unwrap().replaces_original
+        };
+        assert_eq!(replaced(), 1);
+        put("omsi/Texture/b.dds");
+        legacy_config::content_changed();
+        assert_eq!(replaced(), 2);
+        std::fs::remove_dir_all(&content).ok();
+    }
 }

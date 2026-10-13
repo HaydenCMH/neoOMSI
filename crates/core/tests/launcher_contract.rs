@@ -315,9 +315,13 @@ fn the_launcher_installs_orders_and_removes_mods() {
     std::fs::rename(kept.path(), dir.join("content/mods/Ibis")).unwrap();
     assert_eq!(plugins(&engine.mods()), (true, false));
 
-    // A map inside a mod: its picture, and the content it names that isn't installed.
+    // A map inside a mod: its picture, the content it names that isn't installed, and a tile
+    // global.cfg lists that is missing.
     let town = dir.join("src/Town/maps/Town");
-    put(&town.join("global.cfg"), "[name]\r\nTown\r\n");
+    put(
+        &town.join("global.cfg"),
+        "[name]\r\nTown\r\n\r\n[map]\r\n0\r\n0\r\ntile_0_0.map\r\n\r\n[map]\r\n1\r\n0\r\ntile_1_0.map\r\n",
+    );
     put(
         &town.join("tile_0_0.map"),
         "[object]\r\n0\r\nSceneryobjects\\Absent\\a.sco\r\n",
@@ -343,11 +347,19 @@ fn the_launcher_installs_orders_and_removes_mods() {
     let found: Vec<_> = preflight
         .findings
         .iter()
-        .map(|finding| (finding.class(), finding.pack.as_str()))
+        .map(|finding| (finding.class(), finding.pack.as_str(), finding.count))
         .collect();
+    // One file each: tile_0_0.map exists, so only tile_1_0.map is missing.
     assert_eq!(
         found,
-        [(DiagnosticClass::MissingDependency, "Sceneryobjects/Absent")]
+        [
+            (
+                DiagnosticClass::MissingDependency,
+                "Sceneryobjects/Absent",
+                1
+            ),
+            (DiagnosticClass::IncompleteMod, "maps/Town", 1),
+        ]
     );
 
     // Uninstalling takes a mod out of the order and keeps it in mods/uninstalled, next to the
