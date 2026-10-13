@@ -1182,6 +1182,56 @@ fn procedural_waiting_points_start_on_the_floor_and_keep_it_when_walking() {
 }
 
 #[test]
+fn a_waiting_passenger_stays_on_a_raised_platform_above_a_sloped_kerb() {
+    let f = Fixture::new();
+    f.world
+        .terrains
+        .write()
+        .insert((0, 0), Arc::new(::map::Terrain::flat()));
+    let mut h = Humans::new(&f.root);
+    let floor = 0.25;
+    let mut platform = stop(DVec3::new(2.0, 2.0, 0.0), 0.0, "Platform");
+    platform.spots[0].pos.z = floor;
+    h.stops.insert(1, platform);
+    let mut pax = Pax::new(1.1);
+    pax.task = Task::WaitingForBus;
+    pax.stop = Some(1);
+    pax.spot = Some(0);
+    pax.pos = DVec3::new(2.0, 2.0, floor);
+    pax.movement = Movement::Standing;
+    let mut person = f.person(7, State::Pax(Box::new(pax)), false);
+    person.position = DVec3::new(2.0, 2.0, floor);
+    h.people.push(person);
+
+    h.pax_move(0, 0.05, 50.0, &f.world, &[], &HashMap::new());
+
+    assert_eq!(h.pax(0).unwrap().pos.z, floor);
+
+    // Returning to the place must keep the same floor while walking, not merely once the
+    // passenger is standing there again.
+    {
+        let p = h.pax_mut(0).unwrap();
+        p.task = Task::WalkingToBusstop;
+        p.movement = Movement::ToTarget;
+        p.target = DVec3::new(3.0, 2.0, floor);
+    }
+    h.pax_move(0, 0.05, 50.0, &f.world, &[], &HashMap::new());
+    assert_eq!(h.pax(0).unwrap().pos.z, floor);
+
+    // The task transition itself samples the nearby road too; it must retain the waiting
+    // point's floor rather than snapping down for one frame before the next movement tick.
+    h.pax_mut(0).unwrap().pos.z = 0.0;
+    h.set_task(
+        0,
+        Task::WaitingForBus,
+        &[],
+        &HashMap::new(),
+        &f.world,
+    );
+    assert_eq!(h.pax(0).unwrap().pos.z, floor);
+}
+
+#[test]
 fn streamed_floor_correction_changes_the_passenger_authority() {
     let f = Fixture::new();
     let mut p = Pax::new(1.1);
@@ -1613,7 +1663,25 @@ fn stop(pos: DVec3, heading: f64, name: &str) -> PaxStop {
         buses: vec![],
         dests: vec![],
         lines: vec![],
+        line_deadlines: vec![],
     }
+}
+
+#[test]
+fn timetable_gate_applies_to_stops_missing_from_busstops_cfg() {
+    let f = Fixture::new();
+    let renderer = noop_renderer();
+    let mut scene = renderer.new_scene();
+    let mut h = Humans::new(&f.root);
+    h.stops.insert(1, stop(DVec3::ZERO, 0.0, "Unlisted stop"));
+    // Timetable targets are deliberately empty and there is no Busstops.cfg name for
+    // this stop. It must still be treated as having no due service.
+    h.passenger_targets = Some(HashMap::new());
+
+    h.stops_tick(0.05, &f.world, &renderer, &mut scene);
+
+    assert_eq!(h.stops[&1].want, 0);
+    assert!(h.people.is_empty());
 }
 
 #[test]
@@ -1875,9 +1943,10 @@ fn complete_journey(fare: TicketAction) {
     regs.get_mut(&b.id).unwrap().at = None;
     tick(&mut h, &b, &regs);
     assert!(h.stop_request);
-    assert_eq!(h.pax(0).unwrap().task, Task::InBusToExit);
-    assert_eq!(h.buses.seats[&b.id][reserved], b.cabin.seats[reserved].seated);
+    assert_eq!(h.pax(0).unwrap().task, Task::SittingInBus);
     regs.get_mut(&b.id).unwrap().at = Some(2);
+    tick(&mut h, &b, &regs);
+    assert_eq!(h.pax(0).unwrap().task, Task::InBusToExit);
     for _ in 0..600 {
         tick(&mut h, &b, &regs);
         if h.pax(0).is_none() {
@@ -3188,7 +3257,7 @@ fn bus_aisle_jam_squeeze_unblocks_frozen_passengers() {
     let ix = [(b.id, 0)].into_iter().collect();
 
     // Verify p2 blocks p1 (same direction, within 0.6m -> block = 3)
-    let (block, _, _) = h.pax_blockers(0, &[b.clone()], &ix);
+    let (block, _, _, _) = h.pax_blockers(0, &[b.clone()], &ix);
     assert!(
         block >= Obstruction::Facing,
         "expected block >= 2, got {}",
@@ -3203,6 +3272,167 @@ fn bus_aisle_jam_squeeze_unblocks_frozen_passengers() {
     assert_eq!(p.jam, 0.0);
     assert_eq!(p.squeeze, 1.5);
     assert_eq!(p.obstruction, Obstruction::Clear);
+}
+
+/// #138: somebody stamping beside the door kept the next boarder out on the pavement.
+#[test]
+fn natural_boarders_wait_for_the_threshold_not_for_somebody_stamping_beside_it() {
+    let f = Fixture::new();
+    let b = bus(cabin());
+    let ix: HashMap<BusId, usize> = [(b.id, 0)].into_iter().collect();
+    // door 0's threshold is the bus's origin; the boarder faces it from 0.15 m
+    let boarder = || {
+        let mut p = Pax::new(1.1);
+        p.bus = Some(b.id);
+        p.door = Some(0);
+        p.task = Task::WalkingToBus;
+        p.movement = Movement::ToTarget;
+        p.pos = DVec3::new(0.15, 0.0, 0.0);
+        p.yaw = -std::f64::consts::FRAC_PI_2;
+        p
+    };
+    let stamping = |x: f64| {
+        let mut p = Pax::new(1.1);
+        p.bus = Some(b.id);
+        p.inside = Some(b.id);
+        p.task = Task::InBusToPlace;
+        p.movement = Movement::Turning;
+        p.fare_phase = FarePhase::Validating;
+        p.pos = DVec3::new(x, 0.0, 0.0);
+        p
+    };
+    let blocked = |natural: bool, x: f64| {
+        let mut h = Humans::new(&f.root);
+        h.set_natural(natural);
+        h.people
+            .push(f.person(1, State::Pax(Box::new(boarder())), false));
+        h.people
+            .push(f.person(2, State::Pax(Box::new(stamping(x))), false));
+        let (w, _) = h
+            .pax_world(h.pax(1).unwrap(), std::slice::from_ref(&b), &ix)
+            .unwrap();
+        h.people[1].position = w;
+        h.pax_blockers(0, std::slice::from_ref(&b), &ix).0
+    };
+    assert_eq!(blocked(true, -0.4), Obstruction::Clear);
+    assert_eq!(blocked(true, -0.05), Obstruction::Busy);
+    // the OMSI mode keeps the plain 0.6 m
+    assert_eq!(blocked(false, -0.4), Obstruction::Busy);
+}
+
+/// #138: the queue outside eased up behind the one in front only by stopping dead at 0.6 m.
+#[test]
+fn natural_boarders_slow_down_behind_the_one_in_front() {
+    let f = Fixture::new();
+    let b = bus(cabin());
+    let ix: HashMap<BusId, usize> = [(b.id, 0)].into_iter().collect();
+    let walker = |y: f64, yaw: f64| {
+        let mut p = Pax::new(1.1);
+        p.bus = Some(b.id);
+        p.door = Some(0);
+        p.task = Task::WalkingToBus;
+        p.movement = Movement::ToTarget;
+        p.pos = DVec3::new(5.0, y, 0.0);
+        p.target = DVec3::new(5.0, -40.0, 0.0);
+        p.yaw = yaw;
+        p
+    };
+    let south = std::f64::consts::PI;
+    // (gap to the other, the other's heading)
+    let wanted = |other: Option<(f64, f64)>| {
+        let mut h = Humans::new(&f.root);
+        h.set_natural(true);
+        h.people
+            .push(f.person(1, State::Pax(Box::new(walker(-20.0, south))), false));
+        if let Some((gap, yaw)) = other {
+            h.people
+                .push(f.person(2, State::Pax(Box::new(walker(-20.0 - gap, yaw))), false));
+        }
+        for k in 0..h.people.len() {
+            h.people[k].position = h.pax(k).unwrap().pos;
+            h.people[k].heading = h.pax(k).unwrap().yaw.to_degrees();
+        }
+        h.pax_move(0, 0.05, 50.0, &f.world, std::slice::from_ref(&b), &ix);
+        h.pax(0).unwrap().speed_des
+    };
+    let free = wanted(None);
+    assert!(free > 1.0, "{free}");
+    let behind = wanted(Some((0.9, south)));
+    assert!((behind - 0.6).abs() < 1e-3, "{behind}");
+    assert!(wanted(Some((0.62, south))) < 0.05);
+    // somebody coming the other way is no one to follow: they meet the 0.6 m and step aside
+    assert_eq!(wanted(Some((0.9, 0.0))), free);
+}
+
+/// #138: next to somebody standing beside the way, a boarder swung to and fro every frame.
+#[test]
+fn a_boarder_walks_past_somebody_beside_the_way_instead_of_swinging_to_and_fro() {
+    let f = Fixture::new();
+    let b = bus(cabin());
+    let ix: HashMap<BusId, usize> = [(b.id, 0)].into_iter().collect();
+    for natural in [false, true] {
+        let mut h = Humans::new(&f.root);
+        h.set_natural(natural);
+        // heading for a point 6 m away bearing 85 degrees, facing 67
+        let mut me = Pax::new(1.1);
+        me.bus = Some(b.id);
+        me.task = Task::WalkingToBus;
+        me.movement = Movement::ToTarget;
+        me.pos = DVec3::new(20.0, 20.0, 0.0);
+        let to = 85f64.to_radians();
+        me.target = me.pos + DVec3::new(to.sin(), to.cos(), 0.0) * 6.0;
+        me.yaw = 67f64.to_radians();
+        h.people.push(f.person(1, State::Pax(Box::new(me)), false));
+        // held up 0.52 m away bearing 154 degrees, turned towards them
+        let mut other = Pax::new(1.1);
+        other.bus = Some(b.id);
+        other.task = Task::WalkingToBus;
+        other.movement = Movement::ShortOfTarget;
+        let at = 154f64.to_radians();
+        other.pos = DVec3::new(20.0, 20.0, 0.0) + DVec3::new(at.sin(), at.cos(), 0.0) * 0.52;
+        other.yaw = (154f64 + 180.0 + 30.0).to_radians();
+        h.people
+            .push(f.person(2, State::Pax(Box::new(other)), false));
+        for k in 0..2 {
+            h.people[k].position = h.pax(k).unwrap().pos;
+            h.people[k].heading = h.pax(k).unwrap().yaw.to_degrees();
+        }
+        let start = h.pax(0).unwrap().pos;
+        let (mut swings, mut last) = (0, 0.0f64);
+        let mut yaw = h.pax(0).unwrap().yaw;
+        for _ in 0..60 {
+            h.pax_move(
+                0,
+                1.0 / 30.0,
+                1000.0 / 30.0,
+                &f.world,
+                std::slice::from_ref(&b),
+                &ix,
+            );
+            let p = h.pax(0).unwrap();
+            let step = wrap_angle(p.yaw - yaw);
+            if step.abs() > 0.05 {
+                if step * last < 0.0 {
+                    swings += 1;
+                }
+                last = step;
+            }
+            yaw = p.yaw;
+            let (pos, heading) = (p.pos, p.yaw.to_degrees());
+            h.people[0].position = pos;
+            h.people[0].heading = heading;
+        }
+        let gone = (h.pax(0).unwrap().pos - start).truncate().length();
+        assert!(
+            swings <= 4,
+            "natural {natural}: swung to and fro {swings} times"
+        );
+        assert!(gone > 1.0, "natural {natural}: only {gone:.2} m in 2 s");
+    }
+}
+
+fn wrap_angle(a: f64) -> f64 {
+    (a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
 }
 
 #[test]

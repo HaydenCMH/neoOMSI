@@ -3,6 +3,106 @@
 use super::*;
 
 impl Schedule {
+    /// The destinations for timetable calls due within `ahead` seconds of the traffic
+    /// clock. Unlike a time of day, that clock counts through midnight.
+    ///
+    /// Passenger demand is keyed by a destination and the compatible terminus, not a
+    /// specific departure. This lets either bus on the same service carry the passengers.
+    pub fn stop_targets_within(
+        &self,
+        now: f64,
+        ahead: f64,
+    ) -> HashMap<i64, Vec<PassengerTarget>> {
+        let names = self.stop_names();
+        let name_of = |id: i64| names.get(&id).cloned().unwrap_or_else(|| id.to_string());
+        // Index calls once by stop and service. Looking up the next call below is then a
+        // binary search, rather than scanning every call for every eligible departure stop.
+        // An empty line uses the trip as its service identity, matching the old comparison.
+        let mut calls: HashMap<(i64, Option<&str>, usize), Vec<f64>> = HashMap::new();
+        for (departure, entry) in self.departures.iter().enumerate() {
+            if !self.runs(departure) {
+                continue;
+            }
+            let (line, trip) = if entry.line.trim().is_empty() {
+                (None, entry.trip)
+            } else {
+                (Some(entry.line.as_str()), 0)
+            };
+            let times = self.times_of(departure);
+            for (index, stop) in trip_stations(&self.data.trips[entry.trip])
+                .into_iter()
+                .enumerate()
+            {
+                if times.stops.get(index).copied().unwrap_or(true) {
+                    if let Some((_, offset)) = times.stations.get(index) {
+                        calls
+                            .entry((stop, line, trip))
+                            .or_default()
+                            .push(self.dep_time(departure) + offset);
+                    }
+                }
+            }
+        }
+        for times in calls.values_mut() {
+            times.sort_by(|a, b| a.total_cmp(b));
+        }
+        let mut targets: HashMap<i64, Vec<PassengerTarget>> = HashMap::new();
+        for (departure, entry) in self.departures.iter().enumerate() {
+            if !self.runs(departure) {
+                continue;
+            }
+            let times = self.times_of(departure);
+            let stations = trip_stations(&self.data.trips[entry.trip]);
+            let terminus = self.data.trips[entry.trip].terminus.trim().to_string();
+            for from in 0..stations.len() {
+                let Some((_, offset)) = times.stations.get(from) else { continue };
+                let call = self.dep_time(departure) + offset;
+                if !times.stops.get(from).copied().unwrap_or(true)
+                    || !(now..=now + ahead).contains(&call)
+                {
+                    continue;
+                }
+                let here = name_of(stations[from]);
+                let list = targets.entry(stations[from]).or_default();
+                let (line, trip) = if entry.line.trim().is_empty() {
+                    (None, entry.trip)
+                } else {
+                    (Some(entry.line.as_str()), 0)
+                };
+                let deadline = calls
+                    .get(&(stations[from], line, trip))
+                    .and_then(|times| {
+                        times
+                            .get(times.partition_point(|candidate| *candidate <= call))
+                            .copied()
+                    })
+                    .map(|next| call + (next - call) * 1.25)
+                    .unwrap_or(call + 60.0 * 60.0);
+                for (to, stop) in stations.iter().enumerate().skip(from + 1) {
+                    if !times.stops.get(to).copied().unwrap_or(true) {
+                        continue;
+                    }
+                    let destination = name_of(*stop);
+                    if destination == here {
+                        continue;
+                    }
+                    match list.iter_mut().find(|target| target.destination == destination) {
+                        Some(target) => {
+                            target.termini.insert(terminus.clone());
+                            target.deadline = target.deadline.max(deadline);
+                        }
+                        None => list.push(PassengerTarget {
+                            destination,
+                            termini: HashSet::from_iter([terminus.clone()]),
+                            deadline,
+                        }),
+                    }
+                }
+            }
+        }
+        targets
+    }
+
     /// How many due departures are still waiting to be put on the road.
     /// Omsi.exe's station targets (0x61cb18): per bus stop, the stops the timetable's trips
     /// go on to from there, each with the termini of the trips that do. A passenger waiting

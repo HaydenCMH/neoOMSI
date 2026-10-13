@@ -1691,7 +1691,7 @@ impl Traffic {
     /// The street traffic density now, 1 = the map's normal level, times the options' share
     /// of random traffic.
     fn street_density(&self) -> f32 {
-        self.street_density_map() * self.unsched_factor
+        self.street_density_map() * unsched_share(self.unsched_factor)
     }
 
     fn street_density_map(&self) -> f32 {
@@ -2028,17 +2028,14 @@ impl Traffic {
                 .lan_centers
                 .iter()
                 .fold((p - center).length(), |d, o| d.min((p - *o).length()));
-            // every car on the road or the rails whose ground has been unloaded goes: the
-            // lanes stay in the network when their tile goes, but nothing may drive over
-            // ground that is not there (tiles only go well beyond the view, timetable buses
-            // included; their trips come back with the tiles)
-            let flying = self
+            // Lanes stay in the network after unloading. Test their source tile: a loaded
+            // spline can cross a tile boundary where the map has no terrain at all.
+            let unloaded = !self
                 .net
                 .lanes
                 .get(c.state.lane)
-                .map(|l| l.kind == LaneKind::Air)
+                .map(|l| world.traffic_path_loaded(l, p))
                 .unwrap_or(false);
-            let unloaded = !flying && !world.has_ground(p.x, p.y);
             off_ground += unloaded as usize;
             let random = !c.is_bus() || c.gone;
             let r = (c.state.length as f64 * 0.5).max(2.0);
@@ -2593,8 +2590,8 @@ impl Traffic {
             {
                 continue;
             }
-            // only on loaded ground (a lane's tile may have gone again)
-            if kind != LaneKind::Air && !world.has_ground(p.x, p.y) {
+            // A lane's source tile may have gone again.
+            if !world.traffic_path_loaded(&self.net.lanes[lane], p) {
                 continue;
             }
             let heading = self.net.lanes[lane].at(s).1 as f64;
@@ -2756,7 +2753,7 @@ impl Traffic {
             // it - woken out of the picture 30-60 m from the bus, a car came into being in
             // the mirror or just round the corner)
             let ok = near
-                && world.has_ground(p.x, p.y)
+                && world.traffic_path_loaded(&self.net.lanes[self.dormant[i].lane], p)
                 && self.may_appear(world, p)
                 && !self
                 .cars
@@ -8334,6 +8331,28 @@ fn in_player_box(
     let rel = p.truncate() - centre.truncate();
     let (x, y) = (rel.dot(right), rel.dot(fwd));
     x.abs() <= wide && y <= ahead && y >= -behind && (p.z - centre.z).abs() < 4.0
+}
+
+/// The options' share of random traffic, kept to the 0-300 % the options offer.
+fn unsched_share(factor: f32) -> f32 {
+    if factor.is_finite() {
+        factor.clamp(0.0, 3.0)
+    } else {
+        1.0
+    }
+}
+
+#[cfg(test)]
+mod unsched_share_tests {
+    use super::unsched_share;
+
+    #[test]
+    fn the_share_stays_within_the_options_range() {
+        assert_eq!(unsched_share(1.5), 1.5);
+        assert_eq!(unsched_share(100.0), 3.0);
+        assert_eq!(unsched_share(-1.0), 0.0);
+        assert_eq!(unsched_share(f32::NAN), 1.0);
+    }
 }
 
 #[cfg(test)]
