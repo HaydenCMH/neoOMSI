@@ -24,7 +24,7 @@ impl App {
             }
             return;
         };
-        let look = crate::launcher::showroom::Look {
+        let look = crate::showcase::Look {
             root: self.args.root.clone(),
             map,
             bus,
@@ -34,8 +34,7 @@ impl App {
             date: String::new(),
         };
         let room = self.lab_room.get_or_insert_with(|| {
-            let mut room = crate::launcher::showroom::Showroom::new();
-            room.bare = true;
+            let mut room = crate::showcase::Showcase::new();
             room.zoom_by(1.15);
             room
         });

@@ -54,6 +54,7 @@ mod sampler;
 mod scene;
 mod schedule;
 mod schedule_paper;
+mod showcase;
 mod sound_events;
 mod threads;
 mod tiles;

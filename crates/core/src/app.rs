@@ -126,7 +126,7 @@ pub(crate) struct App {
     pub(crate) lab_place: Option<crate::lab_menu::PlaceSel>,
     /// The showroom that draws the vehicle the place dialog shows, and the interface texture
     /// its picture is in (texture, width, height).
-    pub(crate) lab_room: Option<crate::launcher::showroom::Showroom>,
+    pub(crate) lab_room: Option<crate::showcase::Showcase>,
     pub(crate) lab_pic: Option<(usize, u32, u32)>,
     /// The vehicle list being read on a thread since start-up.
     pub(crate) vehicle_scan: Option<std::sync::mpsc::Receiver<VehicleScan>>,
