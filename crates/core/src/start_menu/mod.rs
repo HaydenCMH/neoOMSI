@@ -13,6 +13,12 @@ fn clipboard_text() -> Option<String> {
     arboard::Clipboard::new().ok()?.get_text().ok()
 }
 
+fn clipboard_set(text: &str) {
+    if let Ok(mut c) = arboard::Clipboard::new() {
+        let _ = c.set_text(text.to_string());
+    }
+}
+
 fn hit(list: &[[f32; 4]], (x, y): (f32, f32)) -> Option<usize> {
     list.iter().position(|r| x >= r[0] && x < r[2] && y >= r[1] && y < r[3])
 }

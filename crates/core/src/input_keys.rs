@@ -306,6 +306,13 @@ impl App {
         }
         let event_key = PhysicalKey::Code(code);
         if let (true, PhysicalKey::Code(code)) = (self.menu.is_some(), event_key) {
+            if matches!(code, KeyCode::ControlLeft | KeyCode::ControlRight) {
+                if pressed {
+                    self.keys.insert(code);
+                } else {
+                    self.keys.remove(&code);
+                }
+            }
             if pressed {
                 self.start_key(event_loop, code, repeat);
             }

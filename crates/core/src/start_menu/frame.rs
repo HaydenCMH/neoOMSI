@@ -170,6 +170,7 @@ impl App {
             row: m.row,
             zone: m.zone,
             address: &m.address,
+            addr_sel: m.addr_sel,
             caret,
             mp_tab: m.mp_tab,
             host: m.host,

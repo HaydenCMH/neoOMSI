@@ -4,7 +4,12 @@ impl App {
     pub(crate) fn start_text(&mut self, text: &str) {
         let ctrl = self.keys.contains(&KeyCode::ControlLeft) || self.keys.contains(&KeyCode::ControlRight);
         if let Some(m) = self.menu.as_mut().filter(|m| m.page == StartPage::Multiplayer && m.mp_tab == 0 && !ctrl) {
-            m.address.extend(text.chars().filter(|c| !c.is_control()));
+            let clean: String = text.chars().filter(|c| !c.is_control()).collect();
+            if !clean.is_empty() && m.addr_sel {
+                m.address.clear();
+                m.addr_sel = false;
+            }
+            m.address.push_str(&clean);
             m.address = m.address.chars().take(200).collect();
         }
         if let Some(m) = self.menu.as_mut().filter(|m| m.page == StartPage::Start && m.edit != 0 && !ctrl) {

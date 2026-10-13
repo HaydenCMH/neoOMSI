@@ -54,6 +54,7 @@ pub struct StartView<'a> {
     pub row: usize,
     pub zone: usize,
     pub address: &'a str,
+    pub addr_sel: bool,
     pub caret: bool,
     pub mp_tab: usize,
     pub host: bool,

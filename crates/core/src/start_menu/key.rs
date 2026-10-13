@@ -212,13 +212,38 @@ impl App {
                 }
                 K::Backspace => {
                     if let Some(m) = self.menu.as_mut().filter(|m| m.mp_tab == 0) {
-                        m.address.pop();
+                        if m.addr_sel {
+                            m.address.clear();
+                            m.addr_sel = false;
+                        } else {
+                            m.address.pop();
+                        }
+                    }
+                }
+                K::KeyA if ctrl => {
+                    if let Some(m) = self.menu.as_mut().filter(|m| m.mp_tab == 0 && !m.address.is_empty()) {
+                        m.addr_sel = true;
+                    }
+                }
+                K::KeyC | K::KeyX if ctrl => {
+                    if let Some(m) = self.menu.as_mut().filter(|m| m.mp_tab == 0) {
+                        if !m.address.is_empty() {
+                            clipboard_set(&m.address);
+                            if code == K::KeyX {
+                                m.address.clear();
+                            }
+                        }
+                        m.addr_sel = false;
                     }
                 }
                 K::KeyV if ctrl => {
                     if let Some(t) = clipboard_text() {
                         if let Some(m) = self.menu.as_mut().filter(|m| m.mp_tab == 0) {
                             let clean: String = t.lines().next().unwrap_or("").trim().chars().filter(|c| !c.is_control()).collect();
+                            if m.addr_sel {
+                                m.address.clear();
+                                m.addr_sel = false;
+                            }
                             m.address.push_str(&clean);
                             m.address = m.address.chars().take(200).collect();
                         }

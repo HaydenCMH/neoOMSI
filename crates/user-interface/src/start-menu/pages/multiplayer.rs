@@ -70,6 +70,10 @@ impl Ui {
             let shown = format!("{}{}", v.address, if v.caret { "|" } else { "" });
             let text = clip_left(&self.text, &shown, px as f32, room);
             let l = self.text.label(r, scene, &text, px, WHITE);
+            if v.addr_sel {
+                let pad = 4.0 * u;
+                self.text.rounded(r, scene, [tx - pad, fy + (fh - l.h as f32) * 0.5 - pad * 0.5, tx + l.w as f32 + pad, fy + (fh + l.h as f32) * 0.5 + pad * 0.5], 4.0 * u, [232, 160, 48, 90]);
+            }
             l.place(scene, tx, fy + (fh - l.h as f32) * 0.5);
         }
 
