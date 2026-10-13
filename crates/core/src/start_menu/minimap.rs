@@ -3,32 +3,71 @@ use crate::scene::World;
 use anyhow::{Context, Result};
 use glam::{DVec3, Vec3};
 use omsi_launcher_lib as lib;
-use launcher_protocol::api::{
-    Minimap, MinimapEntry, MinimapLane, MinimapRoad, MinimapStop, MinimapTrip, Point,
-};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
 
-const DEFAULT_DATE: &str = "1989-05-30";
-/// The navigator samples every 3 m: unsimplified, a big map is tens of MB.
+#[derive(Clone, Debug, Default)]
+pub struct Point {
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MinimapRoad {
+    pub main: bool,
+    pub width: f64,
+    pub points: Vec<Point>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MinimapStop {
+    pub id: i64,
+    pub name: String,
+    pub x: f64,
+    pub y: f64,
+    pub spawn: String,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MinimapEntry {
+    pub index: u32,
+    pub name: String,
+    pub x: f64,
+    pub y: f64,
+    pub spawn: String,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MinimapLane {
+    pub points: Vec<Point>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MinimapTrip {
+    pub lanes: Vec<u32>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Minimap {
+    pub map: String,
+    pub roads: Vec<MinimapRoad>,
+    pub stops: Vec<MinimapStop>,
+    pub entries: Vec<MinimapEntry>,
+    pub lanes: Vec<MinimapLane>,
+    pub trips: HashMap<String, MinimapTrip>,
+}
+
+const DEFAULT_DATE: &str = "2026-10-01";
 const TOLERANCE: f32 = 0.75;
 const BEFORE_STOP: f64 = 12.0;
 const KEPT: usize = 4;
 
 static BUILT: Mutex<Vec<(String, Minimap)>> = Mutex::new(Vec::new());
-/// One at a time: opening a map sets the tile size for the whole process.
 static BUILDING: Mutex<()> = Mutex::new(());
-static GENERATION: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn wait_idle() {
     drop(BUILDING.lock().unwrap_or_else(|e| e.into_inner()));
-}
-
-pub(super) fn forget() {
-    GENERATION.fetch_add(1, Ordering::SeqCst);
-    BUILT.lock().unwrap_or_else(|e| e.into_inner()).clear();
 }
 
 fn kept(key: &str) -> Option<Minimap> {
@@ -46,15 +85,12 @@ pub(crate) fn minimap(map: &str, date: &str) -> Result<Minimap> {
     if let Some(v) = kept(&key) {
         return Ok(v);
     }
-    let generation = GENERATION.load(Ordering::SeqCst);
     let v = build(map, date)?;
     let mut built = BUILT.lock().unwrap_or_else(|e| e.into_inner());
-    if generation == GENERATION.load(Ordering::SeqCst) {
-        if built.len() >= KEPT {
-            built.remove(0);
-        }
-        built.push((key, v.clone()));
+    if built.len() >= KEPT {
+        built.remove(0);
     }
+    built.push((key, v.clone()));
     Ok(v)
 }
 
@@ -127,7 +163,6 @@ fn trip_routes(
 fn build(map: &str, date: &str) -> Result<Minimap> {
     let t0 = std::time::Instant::now();
     let root = PathBuf::from(lib::load_config().root);
-    // registers the content folder's roots with the OMSI readers
     let _ = lib::content_dir();
     let cfg = ::mods::resolve_path(&root, map);
     let code = ::map::date_code(date).with_context(|| format!("'{date}' is not a date (YYYY-MM-DD)"))?;
@@ -150,7 +185,6 @@ fn build(map: &str, date: &str) -> Result<Minimap> {
         .map(|r| MinimapRoad {
             main: r.main,
             width: round(r.width as f64),
-            // some maps' coordinates run into millions, where an f32 is off by half a metre
             points: line(&r.points),
         })
         .collect();
@@ -159,8 +193,6 @@ fn build(map: &str, date: &str) -> Result<Minimap> {
     let off = ::map::chrono_deactivated_lines(&chrono);
     let tt = ::timetable::TimetableData::load_with_chrono(&world.map_dir, &chrono, &off);
     let mut seen = HashSet::new();
-    // Busstops.cfg is the editor's list and may hold a few of them only: the trips name every
-    // stop they serve, by object id, tile and name
     let named = tt
         .bus_stops
         .iter()
@@ -194,7 +226,6 @@ fn build(map: &str, date: &str) -> Result<Minimap> {
         })
         .collect();
 
-    // as `list_maps` lists them: every entry point of a name picks that name's line
     let eps = &world.global.entry_points;
     let mut line: HashMap<&str, usize> = HashMap::new();
     for (name, places) in world.global.entry_point_groups() {

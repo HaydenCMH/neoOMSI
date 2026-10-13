@@ -1,6 +1,6 @@
 use super::*;
 
-fn route_image(mini: &::launcher_protocol::api::Minimap, trips: &[String], entry: Option<u32>, w: u32, h: u32, zoom: f32, pan: (f32, f32)) -> (Vec<u8>, Vec<(String, f32, f32)>) {
+fn route_image(mini: &minimap::Minimap, trips: &[String], entry: Option<u32>, w: u32, h: u32, zoom: f32, pan: (f32, f32)) -> (Vec<u8>, Vec<(String, f32, f32)>) {
     const BG: [u8; 3] = [24, 24, 26];
     let (wu, hu) = (w.max(2) as usize, h.max(2) as usize);
     let mut img = vec![255u8; wu * hu * 4];

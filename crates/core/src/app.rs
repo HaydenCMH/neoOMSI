@@ -440,7 +440,7 @@ impl App {
         self.scene = Some(scene);
         self.present_splash("Starting");
         if let Some(w) = self.window.as_ref() {
-            crate::game_link::window_shown(w);
+            w.focus_window();
         }
         if self.args.bus.is_some() || self.args.cam.is_some() || self.args.no_menu {
             self.load_world_now(event_loop);
@@ -672,7 +672,6 @@ impl App {
     }
 
     pub(crate) fn load_world_now(&mut self, event_loop: &ActiveEventLoop) {
-        crate::game_link::report(crate::game_link::GameLinkState::Loading, Some(0.0), &self.args.map);
         #[cfg(not(target_os = "android"))]
         {
             self.discord_next_update = Instant::now();
@@ -711,8 +710,6 @@ impl App {
             .as_deref()
             .is_some_and(|weather| weather.starts_with("metar-sync:"))
         {
-            // The first report was loaded above; wait for the selected refresh interval before
-            // asking Aviation Weather again.
             self.metar_next = 600.0;
         }
         self.wetness = self.weather.as_ref().map(initial_wetness).unwrap_or(0.0);
@@ -750,7 +747,6 @@ impl App {
                 }
                 Err(e) => {
                     log::error!("{e:#}");
-                    crate::game_link::failed(&format!("{e:#}"));
                     platform::exit(event_loop);
                 }
             }
@@ -763,7 +759,6 @@ impl App {
             Ok((w, cam)) => self.start_world(Arc::new(w), cam, &renderer, &mut scene),
             Err(e) => {
                 log::error!("{e:#}");
-                crate::game_link::failed(&format!("{e:#}"));
                 platform::exit(event_loop);
             }
         }
@@ -1032,7 +1027,6 @@ impl App {
             }
         }
         self.apply_pending_triple_screen_span();
-        crate::game_link::report(crate::game_link::GameLinkState::Running, None, "");
         self.last = Instant::now();
     }
 
@@ -1081,11 +1075,6 @@ impl App {
                 }
             })
             .unwrap_or_default();
-        crate::game_link::report(
-            crate::game_link::GameLinkState::Loading,
-            Some(done as f32 / total.max(1) as f32),
-            &format!("{} ({done} / {total} tiles)", name.trim()),
-        );
         let map_dir = self.world.as_ref().map(|w| w.map_dir.clone());
         let mut reconfigure = false;
         if let (Some(ui), Some(s), Some(win)) = (

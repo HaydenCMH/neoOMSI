@@ -125,8 +125,8 @@ pub struct Menu {
     pub pan: (f32, f32),
     pub view_for: String,
     pub drag: Option<((f32, f32), (f32, f32))>,
-    pub mini: Option<(String, ::launcher_protocol::api::Minimap)>,
-    pub mini_job: Option<(String, std::sync::mpsc::Receiver<Option<::launcher_protocol::api::Minimap>>)>,
+    pub mini: Option<(String, crate::start_menu::minimap::Minimap)>,
+    pub mini_job: Option<(String, std::sync::mpsc::Receiver<Option<crate::start_menu::minimap::Minimap>>)>,
     pub mini_want: Option<(String, std::time::Instant)>,
     pub mini_failed: Option<String>,
 }
@@ -867,7 +867,7 @@ impl Menu {
         let (tx, rx) = std::sync::mpsc::channel();
         let name = map.clone();
         std::thread::spawn(move || {
-            let r = crate::control::minimap::minimap(&name, "");
+            let r = crate::start_menu::minimap::minimap(&name, "");
             if let Err(e) = &r {
                 log::warn!("map preview of {name}: {e:#}");
             }

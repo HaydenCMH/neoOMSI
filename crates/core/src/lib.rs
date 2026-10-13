@@ -70,7 +70,6 @@ mod bus_service;
 mod camera_tool;
 mod camera_util;
 mod cli;
-mod control;
 mod controllers;
 #[cfg(windows)]
 mod dinput;
@@ -80,7 +79,6 @@ mod editor_ctl;
 mod evdev_axes;
 #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
 mod evdev_ff;
-mod game_link;
 mod game_menu;
 mod lab_menu;
 mod lab_options;
@@ -153,17 +151,10 @@ pub fn run() -> Result<()> {
     }
     #[cfg(target_os = "macos")]
     restart_with_allocator_settings();
-    let protocol = std::env::args().any(|a| a == "--control-protocol");
-    // a console would take over the launcher's pipes
     #[cfg(windows)]
-    if !protocol {
-        attach_parent_console();
-    }
+    attach_parent_console();
     let args = Args::parse();
-    let bare = std::env::args().len() == 1;
-    logging::init(if protocol {
-        "control"
-    } else if args.launcher || (bare && !args.menu) {
+    logging::init(if args.launcher {
         "launcher"
     } else {
         "game"
@@ -182,16 +173,10 @@ pub fn run() -> Result<()> {
             ),
         );
         // (other threads' panics are often caught: a damaged tile, a plugin)
-        if std::thread::current().name() == Some("main") {
-            game_link::failed(&format!("the game stopped on an error: {info}"));
-        }
         default_hook(info);
     }));
     if let Err(e) = config::init(config::default_path()) {
         log::warn!("settings not loaded: {e}");
-    }
-    if protocol {
-        return control::run();
     }
     #[cfg(all(feature = "devtools", debug_assertions))]
     sampler::start();
@@ -203,10 +188,10 @@ pub fn run() -> Result<()> {
             ""
         }
     );
-    let Some((args, server_cfg)) = prepare(args, bare)? else {
+    let Some((args, server_cfg)) = prepare(args)? else {
         return Ok(());
     };
-    if args.launcher || (bare && !args.menu) {
+    if args.launcher {
         let exe = std::env::current_exe()?;
         match omsi_launcher_lib::start_external_launcher(&exe) {
             Ok(true) => return Ok(()),
@@ -221,9 +206,6 @@ pub fn run() -> Result<()> {
             }
             Err(e) => anyhow::bail!("Failed to start neoOMSI desktop launcher: {e:#}"),
         }
-    }
-    if server_cfg.is_none() {
-        game_link::connect();
     }
     let Some(app) = make_app(args, server_cfg)? else {
         return Ok(());
@@ -254,7 +236,6 @@ pub(crate) fn launcher_statics() {
 
 pub(crate) fn prepare(
     mut args: Args,
-    bare: bool,
 ) -> Result<Option<(Args, Option<server::ServerCfg>)>> {
     ui_language(&config::get_string("ui", "language").unwrap_or_else(|| "ENG".into()));
     let server_cfg = match args.server.clone() {
@@ -279,7 +260,7 @@ pub(crate) fn prepare(
         });
     legacy_script::set_session_seed(seed);
     log::info!("script random seed {seed} (OMSI_SEED={seed} repeats it)");
-    let launcher_mode = args.launcher || (bare && !args.menu);
+    let launcher_mode = args.launcher;
     if !is_omsi_root(&args.root) {
         match find_root() {
             Some(p) => {
