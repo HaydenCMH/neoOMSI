@@ -2,7 +2,7 @@ use super::*;
 
 impl App {
     pub(super) fn start_bus_preview(&mut self, dt: f32) {
-        let want = self.menu.as_ref().filter(|m| m.page == StartPage::Maps && matches!(m.sect, 0 | 2)).and_then(|m| {
+        let want = self.menu.as_ref().filter(|m| m.page == StartPage::Start && matches!(m.sect, 0 | 2)).and_then(|m| {
             let bus = m.vehicles.get(m.vehicle)?.1.clone();
             let paint = match m.livery {
                 0 => String::new(),
@@ -13,7 +13,7 @@ impl App {
         });
         let size = self.ui.as_ref().map(|u| u.start.pic_size).filter(|s| s.0 > 0 && s.1 > 0);
         let (Some((bus, paint, map, weather, time)), Some((w, h))) = (want, size) else {
-            if self.menu.as_ref().is_none_or(|m| m.page != StartPage::Maps) {
+            if self.menu.as_ref().is_none_or(|m| m.page != StartPage::Start) {
                 self.lab_room = None;
                 if let (Some((id, _, _)), Some(r), Some(scene)) = (self.lab_pic.take(), self.renderer.as_ref(), self.scene.as_mut()) {
                     r.free_texture(scene, id);
@@ -72,15 +72,40 @@ impl App {
         ui.start.picture = self.lab_pic.map(|p| p.0);
     }
 
-    pub(crate) fn start_frame(&mut self, dt: f32) {
+    pub(crate) fn start_frame(&mut self, event_loop: &ActiveEventLoop, dt: f32) {
+        if let Some(m) = self.menu.as_mut().filter(|m| m.page == StartPage::Multiplayer) {
+            if m.mp_tab == 1 {
+                for s in &m.servers {
+                    m.probe(&s.1, 20.0);
+                }
+            }
+        }
+        let pending = self.menu.as_mut().filter(|m| m.join_pending).and_then(|m| {
+            let addr = m.address.trim().to_string();
+            match m.probe_of(&addr) {
+                Some(Probe::Checking) => None,
+                Some(Probe::Online(_)) => {
+                    m.join_pending = false;
+                    Some(addr)
+                }
+                _ => {
+                    m.join_pending = false;
+                    None
+                }
+            }
+        });
+        if let Some(addr) = pending {
+            self.start_launch(event_loop, None, Some(addr));
+            return;
+        }
         if self.menu.as_ref().is_some_and(|m| m.page == StartPage::Options) {
             self.lab_entries_sync();
         }
         let root = self.args.root.clone();
-        if let Some(m) = self.menu.as_mut().filter(|m| m.page == StartPage::Maps) {
+        if let Some(m) = self.menu.as_mut().filter(|m| m.page == StartPage::Start) {
             m.refresh_options(&root);
         }
-        if let Some(m) = self.menu.as_mut().filter(|m| m.page == StartPage::Maps && m.route) {
+        if let Some(m) = self.menu.as_mut().filter(|m| m.page == StartPage::Start && m.route) {
             m.refresh_lines(&root);
         }
         self.start_update_tick();
@@ -131,6 +156,8 @@ impl App {
             }
             _ => String::new(),
         };
+        let (addr_state, addr_note) = probe_text(m.probe_of(&m.address), false);
+        let server_state: Vec<(u8, String)> = m.servers.iter().map(|s| probe_text(m.probe_of(&s.1), true)).collect();
         let view = StartView {
             update: &update,
             page: m.page,
@@ -144,6 +171,13 @@ impl App {
             zone: m.zone,
             address: &m.address,
             caret,
+            mp_tab: m.mp_tab,
+            host: m.host,
+            servers: &m.servers,
+            server_top: m.server_top,
+            server_state: &server_state,
+            addr_state,
+            addr_note: &addr_note,
             maker: m.vehicle_meta.get(m.vehicle).map_or("", |x| x.0.as_str()),
             vehicle: m.vehicle,
             vehicles: m.vehicles.len(),
@@ -225,5 +259,27 @@ impl App {
             r.queue.present(frame);
         }
         self.set_cursor_kind(hand);
+    }
+}
+
+fn probe_text(p: Option<Probe>, short: bool) -> (u8, String) {
+    match p {
+        None => (0, String::new()),
+        Some(Probe::Checking) => (1, ::i18n::translate("start.join.checking", &[])),
+        Some(Probe::Online(i)) => {
+            let (pl, mx) = (i.players.to_string(), i.max_players.to_string());
+            if short {
+                (2, format!("{pl}/{mx}"))
+            } else {
+                (2, ::i18n::translate("start.join.online", &[("map", &i.map), ("players", &pl), ("max", &mx)]))
+            }
+        }
+        Some(Probe::Offline(e)) => {
+            if short {
+                (3, ::i18n::translate("start.join.offline_short", &[]))
+            } else {
+                (3, ::i18n::translate("start.join.offline", &[("error", &e)]))
+            }
+        }
     }
 }

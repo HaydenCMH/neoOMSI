@@ -57,7 +57,18 @@ pub fn weekday(y: i32, m: i32, d: i32) -> i32 {
 
 const WEATHER_MODES: usize = 4;
 
+#[derive(Clone, Debug)]
+pub enum Probe {
+    Checking,
+    Online(::network::ws::ServerInfo),
+    Offline(String),
+}
+
+pub type Probes = std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, Probe)>>>;
+
 pub struct Menu {
+    pub probes: Probes,
+    pub join_pending: bool,
     pub maps: Vec<(String, String)>,
     pub map_entries: Vec<Vec<(u32, String)>>,
     pub vehicles: Vec<(String, String)>,
@@ -83,6 +94,10 @@ pub struct Menu {
     pub zone: usize,
     pub map_top: usize,
     pub address: String,
+    pub mp_tab: usize,
+    pub host: bool,
+    pub servers: Vec<(String, String)>,
+    pub server_top: usize,
     pub continue_sit: Option<String>,
     pub clicked: Option<(std::time::Instant, usize)>,
     pub situations: Vec<(String, String)>,
@@ -160,6 +175,38 @@ fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
 }
 
 impl Menu {
+    pub fn probe(&self, addr: &str, every: f32) {
+        let key = addr.trim().to_string();
+        if key.is_empty() {
+            return;
+        }
+        {
+            let Ok(mut g) = self.probes.lock() else {
+                return;
+            };
+            if let Some((t, p)) = g.get(&key) {
+                if matches!(p, Probe::Checking) || t.elapsed().as_secs_f32() < every {
+                    return;
+                }
+            }
+            g.insert(key.clone(), (std::time::Instant::now(), Probe::Checking));
+        }
+        let map = self.probes.clone();
+        std::thread::spawn(move || {
+            let p = match ::network::ws::query(&key, false) {
+                Ok(i) => Probe::Online(i),
+                Err(e) => Probe::Offline(e),
+            };
+            if let Ok(mut g) = map.lock() {
+                g.insert(key, (std::time::Instant::now(), p));
+            }
+        });
+    }
+
+    pub fn probe_of(&self, addr: &str) -> Option<Probe> {
+        self.probes.lock().ok()?.get(addr.trim()).map(|x| x.1.clone())
+    }
+
     pub fn new(root: &Path, default_map: &str) -> Menu {
         let merged = |rel: &str| {
             let mut dirs = ::mods::read_dir_merged(rel);
@@ -334,11 +381,17 @@ impl Menu {
             passengers: true,
             schedule: true,
             row: 0,
-            page: StartPage::Maps,
+            page: StartPage::Start,
             sel: 0,
             zone: 0,
             map_top: 0,
             address: String::new(),
+            probes: Default::default(),
+            join_pending: false,
+            mp_tab: 0,
+            host: ::config::get_bool("gameplay", "host_next_drive").unwrap_or(false),
+            servers: omsi_launcher_lib::servers::load().into_iter().map(|s| (s.name, s.address)).collect(),
+            server_top: 0,
             continue_sit: None,
             clicked: None,
             situations,

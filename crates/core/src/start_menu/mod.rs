@@ -6,16 +6,11 @@ mod route;
 mod update;
 
 use super::*;
-use crate::ui::{LineRow, PauseState, StartPage, StartView, TourRow, OPTIONS_PAGE, START_ENTRIES};
+use crate::menu::Probe;
+use crate::ui::{LineRow, PauseState, StartPage, StartView, TourRow, OPTIONS_PAGE};
 
-#[cfg(not(target_os = "android"))]
 fn clipboard_text() -> Option<String> {
     arboard::Clipboard::new().ok()?.get_text().ok()
-}
-
-#[cfg(target_os = "android")]
-fn clipboard_text() -> Option<String> {
-    None
 }
 
 fn hit(list: &[[f32; 4]], (x, y): (f32, f32)) -> Option<usize> {
@@ -97,15 +92,15 @@ impl App {
     }
 
     fn start_back(&mut self) {
-        if self.menu.as_ref().is_some_and(|m| m.page == StartPage::Maps && m.sect != 0) {
+        if self.menu.as_ref().is_some_and(|m| m.page == StartPage::Start && m.sect != 0) {
             if let Some(m) = self.menu.as_mut() {
                 m.open_sect(0);
             }
             return;
         }
         match self.start_page() {
-            Some(StartPage::Maps) => {}
-            Some(StartPage::Join) => self.start_set_page(StartPage::Maps),
+            Some(StartPage::Start) => {}
+            Some(StartPage::Multiplayer) => self.start_set_page(StartPage::Start),
             Some(StartPage::Options) => self.start_options_close(),
             _ => {}
         }
@@ -127,7 +122,7 @@ impl App {
 
     pub(crate) fn start_options_close(&mut self) {
         self.start_options_leave();
-        self.start_goto(StartPage::Maps, 0);
+        self.start_goto(StartPage::Start, 0);
     }
 
     fn start_set_page(&mut self, page: StartPage) {
@@ -140,12 +135,12 @@ impl App {
             self.lab_menu = Some(PauseState { page: Some(OPTIONS_PAGE), sel: 0 });
         }
         let sel = match page {
-            StartPage::Join => 2,
+            StartPage::Multiplayer => 2,
             StartPage::Options => 3,
             _ => 0,
         };
         self.start_goto(page, sel);
-        if page == StartPage::Maps {
+        if page == StartPage::Start {
             if let Some(m) = self.menu.as_mut() {
                 m.open_sect(0);
             }
@@ -154,38 +149,11 @@ impl App {
     }
 
     pub(crate) fn start_tab(&mut self, dir: i32) {
-        const TABS: [StartPage; 3] = [StartPage::Maps, StartPage::Join, StartPage::Options];
+        const TABS: [StartPage; 3] = [StartPage::Start, StartPage::Multiplayer, StartPage::Options];
         let Some(i) = self.start_page().and_then(|p| TABS.iter().position(|t| *t == p)) else {
             return;
         };
         self.start_set_page(TABS[(i as i32 + dir).rem_euclid(3) as usize]);
-    }
-
-    fn start_options_open(&mut self) {
-        self.start_set_page(StartPage::Options);
-    }
-
-    fn start_activate(&mut self, event_loop: &ActiveEventLoop, i: usize) {
-        match START_ENTRIES.get(i).copied() {
-            Some("start") => {
-                self.start_goto(StartPage::Maps, 0);
-                if let Some(m) = self.menu.as_mut() {
-                    m.open_sect(0);
-                    m.focus = 0;
-                }
-                self.start_show_map();
-            }
-            Some("continue") => {
-                let file = self.menu.as_ref().and_then(|m| m.continue_sit.clone());
-                if let Some(file) = file {
-                    self.start_launch(event_loop, Some(file), None);
-                }
-            }
-            Some("join") => self.start_goto(StartPage::Join, 2),
-            Some("options") => self.start_options_open(),
-            Some("quit") => crate::platform::exit(event_loop),
-            _ => {}
-        }
     }
 
     fn start_launch(&mut self, event_loop: &ActiveEventLoop, situation: Option<String>, join: Option<String>) {
@@ -193,6 +161,7 @@ impl App {
         let Some(m) = self.menu.as_ref() else {
             return;
         };
+        let host = m.host;
         self.args.map = m.maps.get(m.map).map(|x| x.1.clone()).unwrap_or(self.args.map.clone());
         self.args.bus = m.vehicles.get(m.vehicle).map(|x| x.1.clone());
         self.args.paint = match m.livery {
@@ -238,9 +207,34 @@ impl App {
                 log::error!("{e:#}");
             }
         }
+        self.args.lan_host = if host && join.is_none() { Some(0) } else { None };
         if let Some(addr) = join {
             let addr = addr.trim();
             self.args.lan_join = Some(if addr.is_empty() { "auto".to_string() } else { addr.to_string() });
+        }
+        if let Some(t) = self.args.lan_join.clone().filter(|t| ::network::official::is_alias(t)) {
+            match ::network::official::resolve_target(&t) {
+                Ok(url) => self.args.lan_join = Some(url),
+                Err(e) => log::warn!("LAN: {e}"),
+            }
+        }
+        self.lan = None;
+        self.lan = crate::lan::start(&self.args);
+        if let Some(l) = self.lan.as_mut() {
+            crate::lan::share_mods(&mut self.args, l);
+            crate::lan::take_host_map(&mut self.args, l);
+            if l.role == ::network::Role::Host {
+                l.clock_speed = if ::config::get_bool("gameplay", "time_sync").unwrap_or(false) {
+                    1.0
+                } else {
+                    ::config::get_float("gameplay", "time_speed").unwrap_or(1.0).clamp(1.0, 30.0)
+                };
+            }
+        }
+        if self.args.lan_join.is_some() {
+            if let Some(t) = self.lan.as_ref().and_then(crate::lan::host_time_now) {
+                self.args.time = t;
+            }
         }
         self.menu = None;
         self.hud = None;
@@ -256,7 +250,37 @@ impl App {
     }
 
     fn start_join(&mut self, event_loop: &ActiveEventLoop) {
-        let addr = self.menu.as_ref().map(|m| m.address.clone()).unwrap_or_default();
-        self.start_launch(event_loop, None, Some(addr));
+        let addr = self.menu.as_ref().map(|m| m.address.trim().to_string()).unwrap_or_default();
+
+        if addr.is_empty() || ::network::SessionCode::decode(&addr).is_ok() {
+            self.start_launch(event_loop, None, Some(addr));
+            return;
+        }
+        let Some(m) = self.menu.as_mut() else {
+            return;
+        };
+        match m.probe_of(&addr) {
+            Some(Probe::Online(_)) => self.start_launch(event_loop, None, Some(addr)),
+            Some(Probe::Checking) => {}
+            _ => {
+                m.probe(&addr, 0.0);
+                m.join_pending = true;
+            }
+        }
+    }
+
+    fn start_join_server(&mut self, event_loop: &ActiveEventLoop, i: usize) {
+        let first = self.menu.as_ref().map_or(0, |m| m.server_top);
+        let Some(m) = self.menu.as_ref() else {
+            return;
+        };
+        let Some(addr) = m.servers.get(first + i).map(|s| s.1.clone()) else {
+            return;
+        };
+        match m.probe_of(&addr) {
+            Some(Probe::Online(_)) => self.start_launch(event_loop, None, Some(addr)),
+            Some(Probe::Checking) => {}
+            _ => m.probe(&addr, 0.0),
+        }
     }
 }

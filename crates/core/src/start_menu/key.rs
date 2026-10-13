@@ -12,40 +12,7 @@ impl App {
         let ctrl = self.keys.contains(&K::ControlLeft) || self.keys.contains(&K::ControlRight);
         let enter = matches!(code, K::Enter | K::NumpadEnter);
         match page {
-            StartPage::Main => {
-                let exit_bound = self
-                    .game_keys
-                    .iter()
-                    .any(|b| b.action == "menu_exit" && Some(b.scan_code) == keys::dik_code(code));
-                if exit_bound && code != K::Escape {
-                    crate::platform::exit(event_loop);
-                    return;
-                }
-                if code == K::Escape {
-                    return;
-                }
-                let Some(m) = self.menu.as_mut() else {
-                    return;
-                };
-                let n = START_ENTRIES.len();
-                let dir: isize = match code {
-                    K::ArrowUp | K::KeyW => -1,
-                    K::ArrowDown | K::KeyS => 1,
-                    _ => 0,
-                };
-                if dir != 0 {
-                    for _ in 0..n {
-                        m.sel = (m.sel as isize + dir).rem_euclid(n as isize) as usize;
-                        if m.sel != 1 || m.continue_sit.is_some() {
-                            break;
-                        }
-                    }
-                } else if enter || code == K::Space {
-                    let sel = m.sel;
-                    self.start_activate(event_loop, sel);
-                }
-            }
-            StartPage::Maps => {
+            StartPage::Start => {
                 if self.menu.as_ref().is_some_and(|m| m.edit != 0) {
                     let paste = if ctrl && code == K::KeyV { clipboard_text() } else { None };
                     if let Some(m) = self.menu.as_mut() {
@@ -236,17 +203,25 @@ impl App {
                     self.start_show_weather();
                 }
             }
-            StartPage::Join => match code {
+            StartPage::Multiplayer => match code {
                 K::Escape => self.start_back(),
-                K::Enter | K::NumpadEnter => self.start_join(event_loop),
+                K::Enter | K::NumpadEnter => {
+                    if self.menu.as_ref().is_some_and(|m| m.mp_tab == 0) {
+                        self.start_join(event_loop);
+                    }
+                }
                 K::Backspace => {
-                    if let Some(m) = self.menu.as_mut() {
+                    if let Some(m) = self.menu.as_mut().filter(|m| m.mp_tab == 0) {
                         m.address.pop();
                     }
                 }
                 K::KeyV if ctrl => {
                     if let Some(t) = clipboard_text() {
-                        self.start_text(t.lines().next().unwrap_or(""));
+                        if let Some(m) = self.menu.as_mut().filter(|m| m.mp_tab == 0) {
+                            let clean: String = t.lines().next().unwrap_or("").trim().chars().filter(|c| !c.is_control()).collect();
+                            m.address.push_str(&clean);
+                            m.address = m.address.chars().take(200).collect();
+                        }
                     }
                 }
                 _ => {}

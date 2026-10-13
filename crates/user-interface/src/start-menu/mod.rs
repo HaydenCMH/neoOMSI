@@ -6,17 +6,13 @@ use super::*;
 mod bar;
 mod join;
 mod pages;
-mod screen;
-
-pub const START_ENTRIES: [&str; 5] = ["start", "continue", "join", "options", "quit"];
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum StartPage {
     #[default]
-    Main,
-    Maps,
-    Join,
-    Options,
+    Start,
+    Multiplayer,
+    Options
 }
 
 #[derive(Clone, Debug, Default)]
@@ -60,6 +56,13 @@ pub struct StartView<'a> {
     pub zone: usize,
     pub address: &'a str,
     pub caret: bool,
+    pub mp_tab: usize,
+    pub host: bool,
+    pub servers: &'a [(String, String)],
+    pub server_top: usize,
+    pub server_state: &'a [(u8, String)],
+    pub addr_state: u8,
+    pub addr_note: &'a str,
     pub maker: &'a str,
     pub vehicle: usize,
     pub vehicles: usize,
@@ -146,6 +149,9 @@ pub struct StartUi {
     pub weather_vis: usize,
     pub go: [f32; 4],
     pub field: [f32; 4],
+    pub mp_tabs: Vec<[f32; 4]>,
+    pub host_row: [f32; 4],
+    pub servers: Vec<[f32; 4]>,
     pub lines: Vec<[f32; 4]>,
     pub tours: Vec<[f32; 4]>,
     pub line_vis: usize,
@@ -203,6 +209,9 @@ impl StartUi {
         self.weathers.clear();
         self.go = [0.0; 4];
         self.field = [0.0; 4];
+        self.mp_tabs.clear();
+        self.host_row = [0.0; 4];
+        self.servers.clear();
         self.lines.clear();
         self.tours.clear();
         self.line_box = [0.0; 4];
@@ -240,19 +249,7 @@ impl Ui {
         self.start.update = v.update.clone();
         let at = |rs: &[[f32; 4]]| rs.iter().any(|rc| inside(*rc, f.cursor));
         match v.page {
-            StartPage::Main => {
-                self.draw_start_screen(r, scene, f, m, v);
-                let items: Vec<[f32; 4]> = self
-                    .start
-                    .items
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, _)| *i != 1 || v.can_continue)
-                    .map(|(_, rc)| *rc)
-                    .collect();
-                self.hand = at(&items) || at(&[self.start.update_btn]);
-            }
-            StartPage::Maps => {
+            StartPage::Start => {
                 self.draw_start_maps(r, scene, f, m, v);
                 self.hand = at(&self.start.items)
                     || at(&self.start.maps)
@@ -277,9 +274,12 @@ impl Ui {
                     || at(&self.start.weathers)
                     || at(&self.start.tabs) || at(&[self.start.go, self.start.quit, self.start.update_btn]);
             }
-            StartPage::Join => {
+            StartPage::Multiplayer => {
                 self.draw_start_join(r, scene, f, m, v);
-                self.hand = at(&self.start.tabs) || at(&[self.start.go, self.start.field, self.start.quit, self.start.update_btn]);
+                self.hand = at(&self.start.mp_tabs)
+                    || at(&self.start.servers)
+                    || at(&self.start.tabs)
+                    || at(&[self.start.go, self.start.field, self.start.host_row, self.start.quit, self.start.update_btn]);
             }
             StartPage::Options => {
                 self.text.rounded(r, scene, [0.0, 0.0, m.w, m.h], 0.0, [10, 12, 16, 255]);

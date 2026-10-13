@@ -168,7 +168,7 @@ fn paint_seg(img: &mut [u8], w: usize, h: usize, a: (f32, f32), b: (f32, f32), w
 
 impl App {
     pub(super) fn start_route_preview(&mut self) {
-        let in_tab = self.menu.as_ref().is_some_and(|m| m.page == StartPage::Maps && m.sect == 1);
+        let in_tab = self.menu.as_ref().is_some_and(|m| m.page == StartPage::Start && m.sect == 1);
         if !in_tab {
             if let Some(m) = self.menu.as_mut() {
                 m.pic_key.clear();

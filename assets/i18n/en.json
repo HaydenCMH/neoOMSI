@@ -1555,13 +1555,25 @@
     },
     "join": {
       "nav": "Multiplayer",
-      "head": "Join multiplayer",
-      "note": "Enter the address of a server or a session code.",
-      "label": "SERVER ADDRESS",
-      "placeholder": "ip:port, server address or auto",
-      "hint": "Leave it empty or type auto to search the local network.",
-      "go": "Join"
+      "note": "Drive with friends by a session code, or join a server.",
+      "tab_join": "Join & host",
+      "tab_servers": "Server list",
+      "label": "SESSION CODE OR SERVER ADDRESS",
+      "placeholder": "Session code or server address",
+      "hint": "Paste a code from a friend, or an IP / address with port. Leave empty to search the local network.",
+      "go": "Join",
+      "checking": "Checking…",
+      "online": "Server online  -  {map}  -  {players}/{max} players",
+      "offline": "Server not reachable: {error}",
+      "offline_short": "Offline",
+      "game": "YOUR GAME",
+      "host": "Host my next drive",
+      "host_note": "Friends join with the code you get when the drive starts.",
+      "servers_note": "Only servers that answer can be joined.",
+      "no_servers": "No saved servers yet."
     },
+
+
     "row": {
       "vehicle": "Vehicle",
       "time": "Time",

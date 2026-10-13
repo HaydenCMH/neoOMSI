@@ -193,7 +193,7 @@ impl App {
                     platform::exit(event_loop);
                 }
             }
-            self.start_frame(dt);
+            self.start_frame(event_loop, dt);
             return None;
         }
         if !self.drive_start(event_loop) {

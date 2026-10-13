@@ -3,31 +3,16 @@ use super::*;
 impl App {
     pub(crate) fn start_text(&mut self, text: &str) {
         let ctrl = self.keys.contains(&KeyCode::ControlLeft) || self.keys.contains(&KeyCode::ControlRight);
-        if let Some(m) = self.menu.as_mut().filter(|m| m.page == StartPage::Join && !ctrl) {
+        if let Some(m) = self.menu.as_mut().filter(|m| m.page == StartPage::Multiplayer && m.mp_tab == 0 && !ctrl) {
             m.address.extend(text.chars().filter(|c| !c.is_control()));
-            m.address.truncate(200);
+            m.address = m.address.chars().take(200).collect();
         }
-        if let Some(m) = self.menu.as_mut().filter(|m| m.page == StartPage::Maps && m.edit != 0 && !ctrl) {
+        if let Some(m) = self.menu.as_mut().filter(|m| m.page == StartPage::Start && m.edit != 0 && !ctrl) {
             let clean: String = text.chars().filter(|c| !c.is_control()).collect();
             let (buf, max) = m.edit_buf();
             buf.push_str(&clean);
             *buf = buf.chars().take(max).collect();
             m.edit_changed();
-        }
-    }
-
-    pub(crate) fn start_hover(&mut self) {
-        let cursor = self.ui_cursor();
-        let Some(u) = self.ui.as_ref() else {
-            return;
-        };
-        let Some(m) = self.menu.as_mut().filter(|m| m.page == StartPage::Main) else {
-            return;
-        };
-        if let Some(k) = hit(&u.start.items, cursor) {
-            if k != 1 || m.continue_sit.is_some() {
-                m.sel = k;
-            }
         }
     }
 
@@ -41,7 +26,7 @@ impl App {
         let dbox = self.ui.as_ref().map_or([0.0; 4], |u| u.start.drop_box);
         let (vw, tfield) = self.ui.as_ref().map_or((8, [0.0; 4]), |u| (u.start.weather_vis, u.start.time_field));
         let (ve, ebox) = self.ui.as_ref().map_or((6, [0.0; 4]), |u| (u.start.entry_vis, u.start.entry_box));
-        if let Some(m) = self.menu.as_mut().filter(|m| m.page == StartPage::Maps) {
+        if let Some(m) = self.menu.as_mut().filter(|m| m.page == StartPage::Start) {
             match m.sect {
                 1 | 2 if m.drop != 0 && hit(&[dbox], cursor).is_some() => {
                     let max = m.drop_items(m.drop).len().saturating_sub(6) as f32;
@@ -110,7 +95,7 @@ impl App {
             }
             let tab = self.ui.as_ref().and_then(|u| hit(&u.start.tabs, cursor));
             if let Some(k) = tab {
-                self.start_set_page([StartPage::Maps, StartPage::Join, StartPage::Options][k]);
+                self.start_set_page([StartPage::Start, StartPage::Multiplayer, StartPage::Options][k]);
             } else if !self.lab_bar_press() {
                 self.lab_click(event_loop);
             }
@@ -135,22 +120,11 @@ impl App {
             return;
         }
         if let Some(k) = hit(&st.tabs, cursor) {
-            self.start_set_page([StartPage::Maps, StartPage::Join, StartPage::Options][k]);
+            self.start_set_page([StartPage::Start, StartPage::Multiplayer, StartPage::Options][k]);
             return;
         }
         match page {
-            StartPage::Main => {
-                if let Some(k) = hit(&st.items, cursor) {
-                    let enabled = k != 1 || self.menu.as_ref().is_some_and(|m| m.continue_sit.is_some());
-                    if enabled {
-                        if let Some(m) = self.menu.as_mut() {
-                            m.sel = k;
-                        }
-                        self.start_activate(event_loop, k);
-                    }
-                }
-            }
-            StartPage::Maps => {
+            StartPage::Start => {
                 if hit(&[st.route_rect], cursor).is_some() {
                     if let Some(m) = self.menu.as_mut().filter(|m| m.sect == 1) {
                         m.drag = Some((cursor, m.pan));
@@ -430,9 +404,28 @@ impl App {
                     Act::Nothing => {}
                 }
             }
-            StartPage::Join => {
-                if hit(&[st.go], cursor).is_some() {
+            StartPage::Multiplayer => {
+                let tab = hit(&st.mp_tabs, cursor);
+                let server = hit(&st.servers, cursor);
+                let go = hit(&[st.go], cursor).is_some();
+                let host = hit(&[st.host_row], cursor).is_some();
+                let tab0 = self.menu.as_ref().is_some_and(|m| m.mp_tab == 0);
+                if let Some(k) = tab {
+                    if let Some(m) = self.menu.as_mut() {
+                        m.mp_tab = k;
+                    }
+                } else if tab0 && go {
                     self.start_join(event_loop);
+                } else if tab0 && host {
+                    if let Some(m) = self.menu.as_mut() {
+                        m.host = !m.host;
+                        ::config::set_setting("gameplay", "host_next_drive", m.host);
+                        if let Err(e) = ::config::save() {
+                            log::warn!("settings: cannot save: {e}");
+                        }
+                    }
+                } else if let (Some(k), false) = (server, tab0) {
+                    self.start_join_server(event_loop, k);
                 }
             }
             StartPage::Options => {}
