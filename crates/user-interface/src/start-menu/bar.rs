@@ -26,6 +26,7 @@ impl Ui {
         self.text.rounded(r, scene, qrc, 6.0 * u, qbg);
         ql.place(scene, qrc[0] + (qw - ql.w as f32) * 0.5, qrc[1] + (qh - ql.h as f32) * 0.5);
         self.start.quit = qrc;
+        self.start_update_chip(r, scene, f, qrc[0] - 14.0 * u, bar_h * 0.5, u);
         self.ensure_logo();
         if let Some((tex, iw, ih)) = self.logo_at(r, scene, (bar_h * 0.46).round()) {
             let top = ((bar_h - ih as f32) * 0.5).round();
@@ -75,6 +76,38 @@ impl Ui {
         let uw = widths[i0] + (widths[i1] - widths[i0]) * sm;
         self.text.rounded(r, scene, [ul, bar_h - 3.0 * u, ul + uw, bar_h], 0.0, ACCENT);
         bar_h
+    }
+
+    pub(super) fn start_update_chip(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, right: f32, cy: f32, u: f32) {
+        let up = self.start.update.clone();
+        self.start.update_btn = [0.0; 4];
+        if up.kind == 0 {
+            return;
+        }
+        let px = (14.0 * u) as u32;
+        let isz = (18.0 * u).round();
+        let busy = up.kind == 2 || up.kind == 3;
+        let l = self.text.label(r, scene, &up.label, px, if busy { WHITE } else { ON_ACCENT });
+        let (bw, bh) = (l.w as f32 + isz + 34.0 * u, l.h as f32 + 14.0 * u);
+        let rc = [right - bw, cy - bh * 0.5, right, cy + bh * 0.5];
+        let hv = self.ease((235, "update", 0), if !busy && inside(rc, f.cursor) { 1.0 } else { 0.0 }, 10.0);
+        if busy {
+            self.text.rounded(r, scene, rc, bh * 0.5, OPT_ROW);
+            let fill = (bw * up.progress.clamp(0.0, 1.0)).max(bh);
+            self.text.rounded(r, scene, [rc[0], rc[1], rc[0] + fill.min(bw), rc[3]], bh * 0.5, fade(ACCENT, 0.55));
+        } else if up.kind == 4 {
+            self.text.rounded(r, scene, rc, bh * 0.5, mix([190, 54, 48, 255], [236, 92, 82, 255], hv));
+        } else {
+            self.text.rounded(r, scene, rc, bh * 0.5, mix(ACCENT, ACCENT_HOT, hv));
+        }
+        let ink = if busy { WHITE } else { ON_ACCENT };
+        if let Some(ic) = self.text.icon(r, scene, "download", isz as u32, ink) {
+            ic.place(scene, rc[0] + 12.0 * u, cy - isz * 0.5);
+        }
+        l.place(scene, rc[0] + 12.0 * u + isz + 8.0 * u, cy - l.h as f32 * 0.5);
+        if !busy {
+            self.start.update_btn = rc;
+        }
     }
 
     pub(super) fn start_head(

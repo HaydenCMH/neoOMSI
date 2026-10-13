@@ -40,7 +40,15 @@ pub struct TourRow {
     pub span: String,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct StartUpdate {
+    pub kind: u8,
+    pub label: String,
+    pub progress: f32,
+}
+
 pub struct StartView<'a> {
+    pub update: &'a StartUpdate,
     pub page: StartPage,
     pub sel: usize,
     pub can_continue: bool,
@@ -98,6 +106,8 @@ pub struct StartView<'a> {
 
 #[derive(Default)]
 pub struct StartUi {
+    pub update: StartUpdate,
+    pub update_btn: [f32; 4],
     pub active: bool,
     pub hand: bool,
     pub items: Vec<[f32; 4]>,
@@ -203,6 +213,7 @@ impl StartUi {
         self.tour_filter = [0.0; 4];
         self.route_rect = [0.0; 4];
         self.pic_rect = [0.0; 4];
+        self.update_btn = [0.0; 4];
     }
 }
 
@@ -226,10 +237,11 @@ impl Ui {
         self.start.page_t = (self.start.page_t + self.anim_dt / 0.3).min(1.0);
         self.start.t = (self.start.t + self.anim_dt / 0.35).min(1.0);
         self.start.clear();
+        self.start.update = v.update.clone();
         let at = |rs: &[[f32; 4]]| rs.iter().any(|rc| inside(*rc, f.cursor));
         match v.page {
             StartPage::Main => {
-                self.draw_start_screen(r, scene, m, v);
+                self.draw_start_screen(r, scene, f, m, v);
                 let items: Vec<[f32; 4]> = self
                     .start
                     .items
@@ -238,7 +250,7 @@ impl Ui {
                     .filter(|(i, _)| *i != 1 || v.can_continue)
                     .map(|(_, rc)| *rc)
                     .collect();
-                self.hand = at(&items);
+                self.hand = at(&items) || at(&[self.start.update_btn]);
             }
             StartPage::Maps => {
                 self.draw_start_maps(r, scene, f, m, v);
@@ -263,11 +275,11 @@ impl Ui {
                     || at(&self.start.cal_days)
                     || at(&self.start.cal_btn)
                     || at(&self.start.weathers)
-                    || at(&self.start.tabs) || at(&[self.start.go, self.start.quit]);
+                    || at(&self.start.tabs) || at(&[self.start.go, self.start.quit, self.start.update_btn]);
             }
             StartPage::Join => {
                 self.draw_start_join(r, scene, f, m, v);
-                self.hand = at(&self.start.tabs) || at(&[self.start.go, self.start.field, self.start.quit]);
+                self.hand = at(&self.start.tabs) || at(&[self.start.go, self.start.field, self.start.quit, self.start.update_btn]);
             }
             StartPage::Options => {
                 self.text.rounded(r, scene, [0.0, 0.0, m.w, m.h], 0.0, [10, 12, 16, 255]);

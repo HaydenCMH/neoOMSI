@@ -130,6 +130,10 @@ impl App {
             crate::platform::exit(event_loop);
             return;
         }
+        if hit(&[st.update_btn], cursor).is_some() {
+            self.start_update_click();
+            return;
+        }
         if let Some(k) = hit(&st.tabs, cursor) {
             self.start_set_page([StartPage::Maps, StartPage::Join, StartPage::Options][k]);
             return;

@@ -3,12 +3,19 @@ mod key;
 pub(crate) mod minimap;
 mod mouse;
 mod route;
+mod update;
 
 use super::*;
 use crate::ui::{LineRow, PauseState, StartPage, StartView, TourRow, OPTIONS_PAGE, START_ENTRIES};
 
+#[cfg(not(target_os = "android"))]
 fn clipboard_text() -> Option<String> {
     arboard::Clipboard::new().ok()?.get_text().ok()
+}
+
+#[cfg(target_os = "android")]
+fn clipboard_text() -> Option<String> {
+    None
 }
 
 fn hit(list: &[[f32; 4]], (x, y): (f32, f32)) -> Option<usize> {

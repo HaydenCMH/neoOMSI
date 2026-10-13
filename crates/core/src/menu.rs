@@ -129,6 +129,7 @@ pub struct Menu {
     pub mini_job: Option<(String, std::sync::mpsc::Receiver<Option<crate::start_menu::minimap::Minimap>>)>,
     pub mini_want: Option<(String, std::time::Instant)>,
     pub mini_failed: Option<String>,
+    pub update: crate::updater::Updater,
 }
 
 fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
@@ -384,6 +385,7 @@ impl Menu {
             mini_job: None,
             mini_want: None,
             mini_failed: None,
+            update: Default::default(),
         };
         m.veh_open = m.maker_key(m.vehicle);
         m

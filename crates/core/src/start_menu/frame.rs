@@ -83,10 +83,12 @@ impl App {
         if let Some(m) = self.menu.as_mut().filter(|m| m.page == StartPage::Maps && m.route) {
             m.refresh_lines(&root);
         }
+        self.start_update_tick();
         self.start_bus_preview(dt);
         self.start_route_preview();
         let cursor = self.ui_cursor();
         let caret = self.started.elapsed().as_secs_f32() % 1.0 < 0.55;
+        let update = self.start_update_view();
         let (Some(m), Some(ui), Some(s), Some(r), Some(scene), Some(win)) = (
             self.menu.as_ref(),
             self.ui.as_mut(),
@@ -130,6 +132,7 @@ impl App {
             _ => String::new(),
         };
         let view = StartView {
+            update: &update,
             page: m.page,
             sel: m.sel,
             can_continue: m.continue_sit.is_some(),

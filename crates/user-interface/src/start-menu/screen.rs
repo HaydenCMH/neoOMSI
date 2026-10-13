@@ -15,7 +15,7 @@ fn entry_icon(id: &str) -> &'static str {
 const OFF: [u8; 4] = [92, 92, 92, 0];
 
 impl Ui {
-    pub(super) fn draw_start_screen(&mut self, r: &Renderer, scene: &mut Scene, m: Metrics, v: &StartView) {
+    pub(super) fn draw_start_screen(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, m: Metrics, v: &StartView) {
         let Metrics { w, h, u, mx, line } = m;
         let o = out(self.start.t);
         self.text.alpha = o;
@@ -101,6 +101,7 @@ impl Ui {
             self.start.items.push(rc);
             y += row_h + gap;
         }
+        self.start_update_chip(r, scene, f, pw + dx - 16.0 * u, h - 36.0 * u, u);
         self.text.alpha = 1.0;
     }
 }
