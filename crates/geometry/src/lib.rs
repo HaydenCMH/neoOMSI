@@ -1267,6 +1267,24 @@ mod tests {
                 Vec3::new(rnd() * 40.0, rnd() * 40.0, 0.0)
             };
             let r = drive_reach(&[a, b, c]);
+            // (the furthest the tolerance reaches: -1e-4 on two corners, the rest on the third)
+            for w in [
+                [1.0002, -1e-4, -1e-4],
+                [-1e-4, 1.0002, -1e-4],
+                [-1e-4, -1e-4, 1.0002],
+            ] {
+                let (x, y) = (
+                    a.x * w[0] + b.x * w[1] + c.x * w[2],
+                    a.y * w[0] + b.y * w[1] + c.y * w[2],
+                );
+                if r[0] > f32::MIN {
+                    taken += 1;
+                    assert!(
+                        x >= r[0] && y >= r[1] && x <= r[2] && y <= r[3],
+                        "{a} {b} {c} ({x}, {y}) {r:?}"
+                    );
+                }
+            }
             for _ in 0..50 {
                 let (x, y) = (rnd() * 44.0 - 2.0, rnd() * 44.0 - 2.0);
                 let d = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
@@ -1278,11 +1296,27 @@ mod tests {
                 let l3 = 1.0 - l1 - l2;
                 if l1.min(l2).min(l3) >= -1e-4 {
                     taken += 1;
-                    assert!(x >= r[0] && y >= r[1] && x <= r[2] && y <= r[3], "{a} {b} {c} ({x}, {y}) {r:?}");
+                    assert!(
+                        x >= r[0] && y >= r[1] && x <= r[2] && y <= r[3],
+                        "{a} {b} {c} ({x}, {y}) {r:?}"
+                    );
                 }
             }
         }
         assert!(taken > 1000);
+    }
+
+    #[test]
+    fn a_probe_past_a_long_triangle_tip_is_inside_its_reach() {
+        // (TruckiHD's case: the tolerance reaches further along the long side than its height)
+        let t = [
+            Vec3::new(0.0, 4.0, 0.0),
+            Vec3::new(30.0, 4.0, 0.0),
+            Vec3::new(31.0, 4.1, 0.0),
+        ];
+        let r = drive_reach(&t);
+        let (x, y) = (31.002f32, 4.100012f32);
+        assert!(x >= r[0] && y >= r[1] && x <= r[2] && y <= r[3], "{r:?}");
     }
 
     #[test]
@@ -2426,10 +2460,7 @@ impl Probe {
     }
 }
 
-/// The box outside which no point lies on triangle `t` as the probes take it: its plan's
-/// bounds, widened by what their tolerance (weights down to -1e-4) lets a point stand
-/// outside an edge, 1e-4 of the triangle's tallest height over an edge. Unbounded for a
-/// sliver whose height cannot be told.
+/// Triangle `t`'s plan bounds, widened by what weights down to -1e-4 add: 2e-4 of its extent.
 fn drive_reach(t: &[Vec3; 3]) -> [f32; 4] {
     const ALL: [f32; 4] = [f32::MIN, f32::MIN, f32::MAX, f32::MAX];
     let (p, q, r) = (t[0].truncate(), t[1].truncate(), t[2].truncate());
@@ -2438,9 +2469,9 @@ fn drive_reach(t: &[Vec3; 3]) -> [f32; 4] {
     if area2 < 1e-9 || shortest < 1e-6 {
         return ALL;
     }
-    let m = 1e-4 * area2 / shortest * 1.5 + 1e-3;
     let (lo, hi) = (p.min(q).min(r), p.max(q).max(r));
-    [lo.x - m, lo.y - m, hi.x + m, hi.y + m]
+    let m = (hi - lo) * 2.5e-4 + 1e-3;
+    [lo.x - m.x, lo.y - m.y, hi.x + m.x, hi.y + m.y]
 }
 
 /// Upward-facing triangles of one tile (tile-local x/y in metres, absolute z), bucketed on a
