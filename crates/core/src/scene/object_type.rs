@@ -313,6 +313,9 @@ pub struct LightObject {
     /// once the listener is near (shared by the copies of the list, like `script`).
     pub sound: Option<PathBuf>,
     pub sounds: Arc<Mutex<Option<::audio::SoundSet>>>,
+    /// What its lamps show, as a hash of the light state, the request and the script's
+    /// variables: when it has not changed, its materials and lenses are not set again.
+    pub shown: Option<u64>,
 }
 
 pub struct SplineType {
