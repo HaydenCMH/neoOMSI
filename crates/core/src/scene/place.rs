@@ -313,6 +313,7 @@ impl World {
                         lit: Vec::new(),
                         xf,
                         animated: false,
+                        shown: None,
                         sound: ot.sco.sound.as_ref().map(|rel| {
                             let dir = ot
                                 .sco

@@ -1212,6 +1212,7 @@ impl World {
                             animated,
                             sound,
                             sounds: Default::default(),
+                            shown: None,
                         });
                     } else if let Some(inst) = object_script.take() {
                         let texture_selection = scenery_texture_selection(&ot, &inst);

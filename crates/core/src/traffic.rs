@@ -7824,6 +7824,21 @@ impl Traffic {
                     }
                 }
             }
+            if !lamp.animated {
+                use std::hash::{Hash, Hasher};
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                (state, request).hash(&mut h);
+                if let Some(script) = lamp.script.as_ref() {
+                    for v in &script.lock().state.vars {
+                        v.to_bits().hash(&mut h);
+                    }
+                }
+                let sig = h.finish();
+                if lamp.shown == Some(sig) {
+                    continue;
+                }
+                lamp.shown = Some(sig);
+            }
             // Traffic lamps do not enter World's ordinary scripted-object update path.
             // Switch their materials here too, so [matl_item] nightmaps light the LEDs.
             for (inst, slot, base, item, var, more) in &lamp.variants {

@@ -43,6 +43,19 @@ pub(crate) fn is_convenience_action(action: &str) -> bool {
     )
 }
 
+
+/// What a press of `bus_dooraft` does besides its trigger, by the door key or the door
+/// release: with the stop brake's release on and the rear doors open, the stop request and
+/// the rear doors' open time are reset.
+fn dooraft_reset(v: &mut ::simulation::VehicleInstance) {
+    let release_on = v.var("bremse_halte_sw").is_some_and(|x| x > 0.5);
+    let open = v.var("doorTarget_23").is_some_and(|x| x > 0.5);
+    if release_on && open && v.var("doorAftLastOpen").is_some() {
+        v.set_var("haltewunsch", 0.0);
+        v.set_var("doorAftLastOpen", 1000.0);
+    }
+}
+
 impl App {
     pub(crate) fn ctrl_held(&self) -> bool {
         self.keys
@@ -78,28 +91,64 @@ impl App {
         {
             return;
         }
+        let fire = self.door_key_fire(n);
+        self.door_key_triggers.entry(code).or_default().extend(fire);
+    }
+
+    /// Door key `n` (front to back) worked on the player's bus; the triggers fired.
+    pub(crate) fn door_key_fire(&mut self, n: usize) -> Vec<String> {
         let Some(p) = self.player.as_mut() else {
-            return;
+            return Vec::new();
         };
         let groups = crate::player::door_keys(&p.vehicle.ty);
         let Some(group) = n.checked_sub(1).and_then(|i| groups.get(i)) else {
-            return;
+            return Vec::new();
         };
         let fire = crate::player::door_group_to_fire(&mut p.vehicle, group);
         log::info!("door key {n}: {}", fire.join(" + "));
         if group.len() == 1 && group[0] == "bus_dooraft" {
-            let v = &mut p.vehicle;
-            let release_on = v.var("bremse_halte_sw").is_some_and(|x| x > 0.5);
-            let open = v.var("doorTarget_23").is_some_and(|x| x > 0.5);
-            if release_on && open && v.var("doorAftLastOpen").is_some() {
-                v.set_var("haltewunsch", 0.0);
-                v.set_var("doorAftLastOpen", 1000.0);
-            }
+            dooraft_reset(&mut p.vehicle);
         }
         for name in &fire {
             p.vehicle.trigger(name);
         }
-        self.door_key_triggers.insert(code, fire);
+        fire
+    }
+
+    /// `doors_release`: the bus's own door release, whatever its script calls it; the triggers fired.
+    pub(crate) fn door_release(&mut self) -> Vec<String> {
+        let Some(p) = self.player.as_mut() else {
+            return Vec::new();
+        };
+        let fired: Vec<String> = p
+            .vehicle
+            .door_release_trigger()
+            .map(str::to_string)
+            .into_iter()
+            .collect();
+        log::info!(
+            "door release: {}",
+            fired.first().map_or("none on this bus", |s| s.as_str())
+        );
+        if fired.first().is_some_and(|t| t == "bus_dooraft") {
+            dooraft_reset(&mut p.vehicle);
+        }
+        for name in &fired {
+            p.vehicle.trigger(name);
+        }
+        fired
+    }
+
+    /// The `_off` of door triggers fired by a key or button now let go.
+    pub(crate) fn door_triggers_off(&mut self, fired: &[String]) {
+        if let Some(p) = self.player.as_mut() {
+            for name in fired {
+                let off = format!("{name}_off");
+                if p.vehicle.ty.program.trigger(&off).is_some() {
+                    p.vehicle.trigger(&off);
+                }
+            }
+        }
     }
 
     pub(crate) fn bus_startup(&mut self) {
@@ -476,6 +525,11 @@ impl App {
                             .and_then(|n| n.parse::<usize>().ok())
                         {
                             self.door_key(n, code);
+                        } else if a == "doors_release" {
+                            if self.view != "free" {
+                                let fired = self.door_release();
+                                self.door_key_triggers.entry(code).or_default().extend(fired);
+                            }
                         } else if self.game_action(&a) && !vehicle_too {
                             return;
                         }

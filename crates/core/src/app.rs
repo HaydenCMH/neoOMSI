@@ -99,6 +99,9 @@ pub(crate) struct App {
     pub(crate) window_focused: bool,
     pub(crate) keys: hashbrown::HashSet<KeyCode>,
     pub(crate) door_key_triggers: hashbrown::HashMap<KeyCode, Vec<String>>,
+    /// A controller door action (`doorkey_N`, `doors_release`) held: how many of its buttons
+    /// are down, and the triggers it fired, let go with the last of them.
+    pub(crate) pad_doors: hashbrown::HashMap<String, (u32, Vec<String>)>,
     pub(crate) last: Instant,
     pub(crate) speed: f32,
     pub(crate) mouse_look: bool,
