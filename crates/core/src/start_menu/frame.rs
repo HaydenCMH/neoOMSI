@@ -108,6 +108,16 @@ impl App {
         if let Some(m) = self.menu.as_mut().filter(|m| m.page == StartPage::Start && m.route) {
             m.refresh_lines(&root);
         }
+        if self.menu.is_some() {
+            let hwnd = self.window.as_deref().and_then(controllers::window_handle);
+            let focused = self.window_focused;
+            let ctl = self
+                .controllers
+                .get_or_insert_with(|| controllers::Controllers::new(&root, hwnd));
+            ctl.set_focus(focused);
+            let _ = ctl.poll();
+            ctl.actions.clear();
+        }
         self.start_update_tick();
         self.start_bus_preview(dt);
         self.start_route_preview();
