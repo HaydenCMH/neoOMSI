@@ -226,14 +226,10 @@ pub(crate) fn rows(pads: Option<&Controllers>) -> Rows {
     let mut out: Rows = Vec::new();
     let mut tab = 2;
     for c in live.iter() {
-        if let Some(i) = devices
+        if devices
             .iter()
-            .position(|d| controllers::names_match(&d.name, &c.name))
+            .any(|d| controllers::names_match(&d.name, &c.name))
         {
-            out.push((
-                row(&c.name, 'o', "", "pause.controls.use.desc", None),
-                format!("pad_open {i}"),
-            ));
             tab += 1;
         } else {
             out.push((
@@ -340,7 +336,7 @@ fn device_rows(root: &Path, d: &DeviceCfg, dev: Option<&Connected>, search: &Key
                 } else {
                     cal
                 }
-                .clamp(-1.0, 1.0)
+                    .clamp(-1.0, 1.0)
             };
             r = if pedal {
                 format!("{r}\u{1f}\u{1f}{:.3}\u{1f}u", (v + 1.0) * 0.5)
