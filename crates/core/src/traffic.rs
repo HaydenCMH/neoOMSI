@@ -1691,7 +1691,7 @@ impl Traffic {
     /// The street traffic density now, 1 = the map's normal level, times the options' share
     /// of random traffic.
     fn street_density(&self) -> f32 {
-        self.street_density_map() * self.unsched_factor
+        self.street_density_map() * unsched_share(self.unsched_factor)
     }
 
     fn street_density_map(&self) -> f32 {
@@ -8331,6 +8331,28 @@ fn in_player_box(
     let rel = p.truncate() - centre.truncate();
     let (x, y) = (rel.dot(right), rel.dot(fwd));
     x.abs() <= wide && y <= ahead && y >= -behind && (p.z - centre.z).abs() < 4.0
+}
+
+/// The options' share of random traffic, kept to the 0-300 % the options offer.
+fn unsched_share(factor: f32) -> f32 {
+    if factor.is_finite() {
+        factor.clamp(0.0, 3.0)
+    } else {
+        1.0
+    }
+}
+
+#[cfg(test)]
+mod unsched_share_tests {
+    use super::unsched_share;
+
+    #[test]
+    fn the_share_stays_within_the_options_range() {
+        assert_eq!(unsched_share(1.5), 1.5);
+        assert_eq!(unsched_share(100.0), 3.0);
+        assert_eq!(unsched_share(-1.0), 0.0);
+        assert_eq!(unsched_share(f32::NAN), 1.0);
+    }
 }
 
 #[cfg(test)]
