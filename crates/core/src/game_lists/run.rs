@@ -61,6 +61,8 @@ pub(crate) fn run_move(app: &mut App, kind: &ListKind, action: &str, mv: Move) -
                     }
                 }
                 "keysearch" => {}
+                "setup_root" if step => crate::lab_options::game_root_pick(),
+                "update_now" if step => crate::lab_options::update_check_now(app),
                 "mods_install" if step => crate::lab_options::mods_install(),
                 "mods_open" if step => {
                     if let Some(d) = ::mods::mods_dir() {

@@ -277,6 +277,7 @@ fn build(l: &Launcher) -> Vec<Group> {
     };
     let mut groups: Vec<Group> = options_groups(&host)
         .into_iter()
+        .filter(|(key, ..)| key != "pause.options.group.game")
         .map(|(key, rows, subs)| {
             let tab = crate::ui::OPTION_GROUPS
                 .iter()

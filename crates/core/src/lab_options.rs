@@ -40,6 +40,8 @@ fn row_of(host: &Host, file: &std::sync::Arc<serde_json::Value>, r: &OptRow) -> 
         OptKind::Opens => Some(opens(r.name, r.desc, r.id)),
         OptKind::Button(text) => Some(button(r.name, text, r.desc, r.id)),
         OptKind::Mic => Some(mic_row(host.app, r)),
+        OptKind::GameRoot => Some(game_root_row(host, r)),
+        OptKind::UpdateNow => Some(update_now_row(host.app, r)),
         OptKind::Keybinds | OptKind::Pads | OptKind::VoicePlayers | OptKind::Mods => None,
     }
 }
@@ -285,4 +287,85 @@ pub(crate) fn mods_install() {
     }
     let _ = ::mods::init(&dir, ::mods::legacy_dir().as_deref());
     *MOD_SCAN.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
+static PENDING_ROOT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+fn game_root_row(host: &Host, r: &OptRow) -> (String, String) {
+    let t = |k: &str| ::i18n::translate(&format!("pause.options.game.{k}"), &[]);
+    let pending = PENDING_ROOT.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let shown = pending
+        .clone()
+        .unwrap_or_else(|| host.root.to_string_lossy().into_owned());
+    let desc = if shown.trim().is_empty() {
+        t("root_none")
+    } else if pending.is_some() {
+        format!("{shown} - {}", t("root_restart"))
+    } else {
+        shown
+    };
+    (row(r.name, 'a', "pause.options.game.root.button", &desc, None), r.id.to_string())
+}
+
+/// Let the player pick the OMSI 2 folder; it is kept for the next start.
+pub(crate) fn game_root_pick() {
+    #[cfg(not(target_os = "android"))]
+    {
+        let Some(p) = rfd::FileDialog::new()
+            .set_title(::i18n::translate("pause.options.game.root.title", &[]))
+            .pick_folder()
+        else {
+            return;
+        };
+        let root = p.to_string_lossy().to_string();
+        let mut c = omsi_launcher_lib::load_config();
+        c.root = root.clone();
+        match omsi_launcher_lib::save_config(&c) {
+            Ok(()) => *PENDING_ROOT.lock().unwrap_or_else(|e| e.into_inner()) = Some(root),
+            Err(e) => log::warn!("OMSI 2 folder not saved: {e}"),
+        }
+    }
+}
+
+fn update_status(app: Option<&App>) -> crate::updater::Status {
+    match app.and_then(|a| a.menu.as_ref()) {
+        Some(m) => m.update.status(),
+        None => crate::updater::shared().lock().unwrap_or_else(|e| e.into_inner()).status(),
+    }
+}
+
+/// Ask GitHub for a newer version (in the background).
+pub(crate) fn update_check_now(app: &mut App) {
+    match app.menu.as_mut() {
+        Some(m) => m.update.check(),
+        None => crate::updater::shared().lock().unwrap_or_else(|e| e.into_inner()).check(),
+    }
+}
+
+fn update_now_row(app: Option<&App>, r: &OptRow) -> (String, String) {
+    use crate::updater::Status;
+    let status = update_status(app);
+    let busy = matches!(
+        status,
+        Status::Checking
+            | Status::Downloading { .. }
+            | Status::Installing(_)
+            | Status::WaitingForInstaller(_)
+            | Status::Restarting(_)
+    );
+    let v = crate::updater::current_version();
+    let key = match &status {
+        Status::UpToDate => "update_latest",
+        Status::Available(_) => "update_available",
+        Status::Failed(_) => "update_failed",
+        Status::Checking => "update_checking",
+        _ => "update_current",
+    };
+    let version = match &status {
+        Status::Available(rel) => rel.version.clone(),
+        _ => v.to_string(),
+    };
+    let desc = ::i18n::translate(&format!("pause.options.game.{key}"), &[("version", &version)]);
+    let button = if busy { "" } else { "pause.options.game.update_now.button" };
+    (row(r.name, 'a', button, &desc, None), r.id.to_string())
 }

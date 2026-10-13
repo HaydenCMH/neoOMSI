@@ -972,6 +972,11 @@ pub fn just_updated() -> Option<String> {
     None
 }
 
+pub(crate) fn shared() -> &'static Mutex<Updater> {
+    static U: std::sync::OnceLock<Mutex<Updater>> = std::sync::OnceLock::new();
+    U.get_or_init(|| Mutex::new(Updater::default()))
+}
+
 /// Open a web page in the system's browser.
 pub fn open_url(url: &str) {
     #[cfg(target_os = "android")]

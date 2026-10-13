@@ -61,6 +61,8 @@ pub enum OptKind {
     Mic,
     VoicePlayers,
     Mods,
+    GameRoot,
+    UpdateNow,
 }
 
 pub const VOICE_SUB: &str = "pause.options.group.voice";
@@ -1069,6 +1071,35 @@ pub const OPTION_GROUPS: &[OptGroup] = &[
                     OptKind::Button("pause.options.button.reset"),
                 ),
                 OptShow::VrBus,
+            ),
+        ],
+        subs: &[],
+    },
+    OptGroup {
+        title: "pause.options.group.game",
+        tab: "",
+        rows: &[
+            row(
+                "setup_root",
+                "pause.options.game.root.name",
+                "pause.options.game.root.desc",
+                OptKind::GameRoot,
+            ),
+            sw(
+                "update_check",
+                "pause.options.game.update_check.name",
+                "pause.options.game.update_check.desc",
+            ),
+            sw(
+                "update_auto",
+                "pause.options.game.update_auto.name",
+                "pause.options.game.update_auto.desc",
+            ),
+            row(
+                "update_now",
+                "pause.options.game.update_now.name",
+                "pause.options.game.update_now.desc",
+                OptKind::UpdateNow,
             ),
         ],
         subs: &[],
