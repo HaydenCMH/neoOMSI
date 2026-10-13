@@ -1,35 +1,165 @@
-//! Start menu: map, vehicle, time, traffic, passengers, schedule - keyboard driven,
-//! drawn as HUD text before the world is loaded.
-
+use crate::ui::{StartPage, VehRow};
 use std::path::{Path, PathBuf};
+
+#[derive(Clone, Debug, Default)]
+pub struct TourItem {
+    pub number: String,
+    pub span: String,
+    pub start: f32,
+    pub trips: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct LineItem {
+    pub name: String,
+    pub title: String,
+    pub tours: Vec<TourItem>,
+}
+
+fn hm(m: f32) -> String {
+    let t = m.max(0.0) as i32;
+    format!("{:02}:{:02}", t / 60 % 24, t % 60)
+}
+
+fn now_local() -> (i32, i32, i32, i32, i32) {
+    use chrono::{Datelike, Timelike};
+    let n = chrono::Local::now();
+    (n.year(), n.month() as i32, n.day() as i32, n.hour() as i32, n.minute() as i32)
+}
+
+pub fn days_in_year(y: i32) -> i32 {
+    if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 {
+        366
+    } else {
+        365
+    }
+}
+
+pub fn days_in_month(y: i32, m: i32) -> i32 {
+    match m {
+        2 => days_in_year(y) - 337,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
+/// 0 = Monday
+pub fn weekday(y: i32, m: i32, d: i32) -> i32 {
+    let yy = if m <= 2 { y - 1 } else { y };
+    let era = yy.div_euclid(400);
+    let yoe = yy.rem_euclid(400);
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    (days + 3).rem_euclid(7)
+}
+
+const WEATHER_MODES: usize = 4;
 
 pub struct Menu {
     pub maps: Vec<(String, String)>,
+    pub map_entries: Vec<Vec<(u32, String)>>,
     pub vehicles: Vec<(String, String)>,
-    /// (manufacturer, type) of each of `vehicles`, as OMSI's [friendlyname] gives them.
     pub vehicle_meta: Vec<(String, String)>,
     pub map: usize,
     pub vehicle: usize,
     pub hour: i32,
+    pub minute: i32,
+    pub year: i32,
+    pub season_mode: usize,
+    pub cal_open: bool,
+    pub cal_year: i32,
+    pub cal_month: i32,
+    pub time_buf: String,
+    pub weather_top: usize,
+    pub custom: crate::weather_setup::CustomWeather,
     pub traffic: usize,
     pub passengers: bool,
     pub schedule: bool,
     pub row: usize,
-    pub start: bool,
-    /// Situations (name, file); index 0 = none.
+    pub page: StartPage,
+    pub sel: usize,
+    pub zone: usize,
+    pub map_top: usize,
+    pub address: String,
+    pub continue_sit: Option<String>,
+    pub clicked: Option<(std::time::Instant, usize)>,
     pub situations: Vec<(String, String)>,
     pub situation: usize,
-    /// Weather files (name, path); index 0 = the map's default.
     pub weathers: Vec<(String, String)>,
     pub weather: usize,
-    /// Day of the year, so winter can be chosen without the command line.
     pub day: i32,
+    pub sect: usize,
+    pub focus: usize,
+    pub veh_top: usize,
+    pub veh_query: String,
+    pub veh_open: Option<String>,
+    pub drop: usize,
+    pub drop_top: usize,
+    pub edit: u8,
+    pub details: bool,
+    pub liveries: Vec<String>,
+    pub livery: usize,
+    pub depots: Vec<(String, String)>,
+    pub depot: usize,
+    pub numbers: Vec<String>,
+    pub number: usize,
+    pub plate: String,
+    pub opts_for: Option<usize>,
+    pub route: bool,
+    pub lines: Vec<LineItem>,
+    pub lines_for: Option<String>,
+    pub line: usize,
+    pub tour: usize,
+    pub line_top: usize,
+    pub tour_top: usize,
+    pub line_query: String,
+    pub tour_query: String,
+    pub entry: Option<u32>,
+    pub entry_for: String,
+    pub entry_top: usize,
+    pub pic_key: String,
+    pub route_tex: Option<(::render::TextureId, u32, u32)>,
+    pub zoom: f32,
+    pub pan: (f32, f32),
+    pub view_for: String,
+    pub drag: Option<((f32, f32), (f32, f32))>,
+    pub mini: Option<(String, ::launcher_protocol::api::Minimap)>,
+    pub mini_job: Option<(String, std::sync::mpsc::Receiver<Option<::launcher_protocol::api::Minimap>>)>,
+    pub mini_want: Option<(String, std::time::Instant)>,
+    pub mini_failed: Option<String>,
+}
+
+fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let chunks = |s: &str| -> Vec<(bool, String)> {
+        let mut out: Vec<(bool, String)> = Vec::new();
+        for c in s.to_lowercase().chars() {
+            let d = c.is_ascii_digit();
+            match out.last_mut() {
+                Some((k, t)) if *k == d => t.push(c),
+                _ => out.push((d, c.to_string())),
+            }
+        }
+        out
+    };
+    let (x, y) = (chunks(a), chunks(b));
+    for (p, q) in x.iter().zip(y.iter()) {
+        let o = if p.0 && q.0 {
+            let (m, n) = (p.1.trim_start_matches('0'), q.1.trim_start_matches('0'));
+            m.len().cmp(&n.len()).then_with(|| m.cmp(n))
+        } else {
+            p.1.cmp(&q.1)
+        };
+        if o != std::cmp::Ordering::Equal {
+            return o;
+        }
+    }
+    x.len().cmp(&y.len())
 }
 
 impl Menu {
     pub fn new(root: &Path, default_map: &str) -> Menu {
-        // the folders of every content root: the installation, the installed mods and the
-        // archives read in place
         let merged = |rel: &str| {
             let mut dirs = ::mods::read_dir_merged(rel);
             if dirs.is_empty() {
@@ -40,16 +170,28 @@ impl Menu {
             dirs
         };
         let mut maps = Vec::new();
+        let mut map_entries: Vec<Vec<(u32, String)>> = Vec::new();
         for d in merged("maps") {
             let cfg = ::mods::resolve_path(&d, "global.cfg");
             if !::legacy_config::vfs::is_file(&cfg) {
                 continue;
             }
-            let name = ::map::GlobalCfg::load(&cfg)
+            let g = ::map::GlobalCfg::load(&cfg).ok();
+            let name = g
+                .as_ref()
                 .map(|g| g.name.clone())
-                .ok()
                 .filter(|n| !n.trim().is_empty())
                 .unwrap_or_else(|| d.file_name().unwrap().to_string_lossy().into_owned());
+            map_entries.push(
+                g.as_ref()
+                    .map(|g| {
+                        g.entry_point_groups()
+                            .into_iter()
+                            .map(|(n, places)| (places[0] as u32, n.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            );
             maps.push((
                 name,
                 format!(
@@ -58,14 +200,9 @@ impl Menu {
                 ),
             ));
         }
-        // every content root's vehicle folders (installed mods too), and of their files only
-        // what OMSI offers: those with a [friendlyname] - never an articulated bus's rear
-        // section, which comes with its front
         let mut vehicles = Vec::new();
         let mut vehicle_meta = Vec::new();
         for d in merged("Vehicles") {
-            // the folder's files over all roots: a repaint installed as a mod brings only
-            // textures and must neither hide the installation's bus nor add one of its own
             let folder = d.file_name().unwrap().to_string_lossy().to_string();
             let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
             let mut files: Vec<PathBuf> = Vec::new();
@@ -99,8 +236,8 @@ impl Menu {
                         .trim()
                         .to_string(),
                 )
-                .filter(|n| !n.is_empty())
-                .unwrap_or(stem);
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or(stem);
                 vehicle_meta.push((
                     v.manufacturer.trim().to_string(),
                     Some(v.type_name.trim().to_string())
@@ -112,7 +249,6 @@ impl Menu {
         }
         log::info!("menu: {} vehicles offered", vehicles.len());
         let mut situations = vec![("-".to_string(), String::new())];
-        // the installation's and the content folder's (where the game saves them)
         let mut files: Vec<PathBuf> = ::mods::read_dir_merged("Situations");
         if files.is_empty() {
             files = std::fs::read_dir(root.join("Situations"))
@@ -138,7 +274,12 @@ impl Menu {
                 ));
             }
         }
-        let mut weathers = vec![("default".to_string(), String::new())];
+        let mut weathers = vec![
+            ("default".to_string(), String::new()),
+            ("cycle".to_string(), crate::weather_cycle::CYCLE.to_string()),
+            ("real".to_string(), "metar-once:".to_string()),
+            ("custom".to_string(), "custom".to_string()),
+        ];
         if let Ok(rd) = std::fs::read_dir(root.join("Weather")) {
             let mut files: Vec<PathBuf> = rd
                 .flatten()
@@ -171,140 +312,902 @@ impl Menu {
             .iter()
             .position(|v| v.1.to_ascii_lowercase().contains("sd80"))
             .unwrap_or(0);
-        Menu {
+        let mut m = Menu {
             maps,
+            map_entries,
             vehicles,
             vehicle_meta,
             map,
             vehicle,
             hour: 9,
+            minute: 0,
+            year: now_local().0,
+            season_mode: 0,
+            cal_open: false,
+            cal_year: now_local().0,
+            cal_month: 0,
+            time_buf: String::new(),
+            weather_top: 0,
+            custom: Default::default(),
             traffic: 30,
             passengers: true,
             schedule: true,
             row: 0,
-            start: false,
+            page: StartPage::Maps,
+            sel: 0,
+            zone: 0,
+            map_top: 0,
+            address: String::new(),
+            continue_sit: None,
+            clicked: None,
             situations,
             situation: 0,
             weathers,
             weather: 0,
             day: 150,
+            sect: 0,
+            focus: 0,
+            veh_top: 0,
+            veh_query: String::new(),
+            veh_open: None,
+            drop: 0,
+            drop_top: 0,
+            edit: 0,
+            details: false,
+            liveries: Vec::new(),
+            livery: 0,
+            depots: Vec::new(),
+            depot: 0,
+            numbers: Vec::new(),
+            number: 0,
+            plate: String::new(),
+            opts_for: None,
+            route: false,
+            lines: Vec::new(),
+            lines_for: None,
+            line: 0,
+            tour: 0,
+            line_top: 0,
+            tour_top: 0,
+            line_query: String::new(),
+            tour_query: String::new(),
+            entry: None,
+            entry_for: String::new(),
+            entry_top: 0,
+            pic_key: String::new(),
+            route_tex: None,
+            zoom: 1.0,
+            pan: (0.0, 0.0),
+            view_for: String::new(),
+            drag: None,
+            mini: None,
+            mini_job: None,
+            mini_want: None,
+            mini_failed: None,
+        };
+        m.veh_open = m.maker_key(m.vehicle);
+        m
+    }
+
+    fn maker_key(&self, i: usize) -> Option<String> {
+        self.vehicle_meta.get(i).map(|x| x.0.trim().to_lowercase())
+    }
+
+    pub fn veh_groups(&self) -> Vec<(String, String, Vec<usize>)> {
+        let q = self.veh_query.trim().to_lowercase();
+        let unknown = ::i18n::translate("start.maps.unknown", &[]);
+        let mut groups: Vec<(String, String, Vec<usize>)> = Vec::new();
+        for (i, v) in self.vehicles.iter().enumerate() {
+            let (maker, ty) = self.vehicle_meta.get(i).cloned().unwrap_or_default();
+            let hay = format!("{} {} {}", maker, ty, v.0).to_lowercase();
+            if !q.is_empty() && !hay.contains(&q) {
+                continue;
+            }
+            let key = maker.trim().to_lowercase();
+            match groups.iter_mut().find(|g| g.0 == key) {
+                Some(g) => g.2.push(i),
+                None => groups.push((
+                    key,
+                    if maker.trim().is_empty() { unknown.clone() } else { maker.trim().to_string() },
+                    vec![i],
+                )),
+            }
+        }
+        for g in groups.iter_mut() {
+            g.2.sort_by(|a, b| {
+                let (x, y) = (&self.vehicle_meta[*a].1, &self.vehicle_meta[*b].1);
+                natural_cmp(x, y).then_with(|| a.cmp(b))
+            });
+        }
+        groups.sort_by(|a, b| natural_cmp(&a.1, &b.1));
+        groups
+    }
+
+    pub fn veh_rows(&self) -> Vec<VehRow> {
+        let searching = !self.veh_query.trim().is_empty();
+        let mut rows = Vec::new();
+        for (key, name, items) in self.veh_groups() {
+            let open = searching || self.veh_open.as_deref() == Some(key.as_str());
+            rows.push(VehRow { label: name, count: items.len(), open, vehicle: None, on: false });
+            if open {
+                for i in items {
+                    rows.push(VehRow {
+                        label: self.vehicle_meta.get(i).map(|x| x.1.clone()).filter(|t| !t.is_empty()).unwrap_or_else(|| self.vehicles[i].0.clone()),
+                        count: 0,
+                        open: false,
+                        vehicle: Some(i),
+                        on: i == self.vehicle,
+                    });
+                }
+            }
+        }
+        rows
+    }
+
+    pub fn veh_row_of_selected(&self) -> usize {
+        let rows = self.veh_rows();
+        rows.iter().position(|r| r.vehicle == Some(self.vehicle)).unwrap_or(0)
+    }
+
+    pub fn veh_pick(&mut self, row: usize) {
+        let rows = self.veh_rows();
+        let Some(r) = rows.get(row) else {
+            return;
+        };
+        match r.vehicle {
+            Some(i) => self.vehicle = i,
+            None => {
+                let key = self.veh_groups().get(rows[..=row].iter().filter(|x| x.vehicle.is_none()).count() - 1).map(|g| g.0.clone());
+                self.veh_open = if self.veh_open == key { None } else { key };
+            }
         }
     }
 
-    pub fn lines(&self) -> Vec<String> {
-        let mark = |r: usize| if self.row == r { ">" } else { " " };
+    pub fn refresh_options(&mut self, root: &Path) {
+        if self.opts_for == Some(self.vehicle) {
+            return;
+        }
+        self.opts_for = Some(self.vehicle);
+        self.liveries.clear();
+        self.depots.clear();
+        self.numbers.clear();
+        self.livery = 0;
+        self.depot = 0;
+        self.number = 0;
+        self.plate.clear();
+        let Some(bus) = self.vehicles.get(self.vehicle).map(|v| v.1.clone()) else {
+            return;
+        };
+        let Ok(path) = crate::spawn::player_bus_path(root, &bus) else {
+            return;
+        };
+        let Ok(def) = ::legacy_vehicle::Vehicle::load(&path) else {
+            return;
+        };
+        if let Some(m) = def.model.as_ref() {
+            if let Ok(model) = ::model::Model::load(&::mods::resolve_path(def.dir(), m)) {
+                let mut names: Vec<String> = model
+                    .ctc
+                    .iter()
+                    .flat_map(|c| ::simulation::vehicle::load_paint_schemes(&::mods::resolve_path(def.dir(), &c.path)))
+                    .map(|s| s.name)
+                    .collect();
+                names.sort_by_key(|n| n.to_lowercase());
+                names.dedup();
+                self.liveries = names;
+            }
+        }
+        let mut files: Vec<(String, String)> = ::legacy_vehicle::hof::depot_files(def.dir())
+            .into_iter()
+            .map(|f| {
+                let file = f.file_name().map(|x| x.to_string_lossy().into_owned()).unwrap_or_default();
+                let label = ::legacy_vehicle::Hof::load(&f)
+                    .ok()
+                    .map(|h| h.name.trim().to_string())
+                    .filter(|n| !n.is_empty() && !file.to_ascii_lowercase().starts_with(&n.to_ascii_lowercase()))
+                    .map(|n| format!("{n}  ({file})"))
+                    .unwrap_or_else(|| file.clone());
+                (label, file)
+            })
+            .collect();
+        files.sort_by_key(|(l, _)| l.to_lowercase());
+        self.depots = files;
+        let mut numbers: Vec<String> = def.numbers_with_plates().into_iter().map(|(n, _)| n).collect();
+        numbers.sort_by(|a, b| natural_cmp(a, b));
+        numbers.dedup();
+        self.numbers = numbers;
+    }
+
+    pub fn livery_text(&self) -> String {
+        match self.livery {
+            0 => ::i18n::translate("start.maps.auto", &[]),
+            i => self.liveries.get(i - 1).cloned().unwrap_or_default(),
+        }
+    }
+
+    pub fn depot_text(&self) -> String {
+        match self.depot {
+            0 => ::i18n::translate("start.maps.auto", &[]),
+            i => self.depots.get(i - 1).map(|d| d.0.clone()).unwrap_or_default(),
+        }
+    }
+
+    pub fn number_text(&self) -> String {
+        match self.number {
+            0 => ::i18n::translate("start.maps.auto", &[]),
+            i => self.numbers.get(i - 1).cloned().unwrap_or_default(),
+        }
+    }
+
+    pub fn drop_items(&self, kind: usize) -> Vec<String> {
+        if kind == 11 {
+            return self.map_names();
+        }
+        if kind == 12 {
+            return self.entry_rows().into_iter().map(|r| r.1).collect();
+        }
+        let mut v = vec![::i18n::translate("start.maps.auto", &[])];
+        match kind {
+            8 => v.extend(self.liveries.iter().cloned()),
+            9 => v.extend(self.depots.iter().map(|d| d.0.clone())),
+            _ => v.extend(self.numbers.iter().cloned()),
+        }
+        v
+    }
+
+    pub fn drop_sel(&self, kind: usize) -> usize {
+        match kind {
+            11 => self.map,
+            12 => {
+                let shown = self.entry_shown();
+                self.entry_rows().iter().position(|r| r.0 == shown).unwrap_or(0)
+            }
+            8 => self.livery,
+            9 => self.depot,
+            _ => self.number,
+        }
+    }
+
+    pub fn drop_pick(&mut self, kind: usize, i: usize) {
+        match kind {
+            11 => self.map = i,
+            12 => {
+                if let Some(r) = self.entry_rows().get(i) {
+                    self.entry_pick(r.0);
+                }
+            }
+            8 => self.livery = i,
+            9 => self.depot = i,
+            _ => self.number = i,
+        }
+        self.drop = 0;
+    }
+
+    pub fn drop_toggle(&mut self, kind: usize) {
+        self.drop = if self.drop == kind { 0 } else { kind };
+        self.drop_top = self.drop_sel(kind).saturating_sub(2);
+    }
+
+    pub fn refresh_continue(&mut self) {
+        self.continue_sit = self
+            .maps
+            .iter()
+            .flat_map(|m| ::omsi_launcher_lib::saved_situations(&m.1))
+            .max_by_key(|s| s.saved)
+            .map(|s| s.file.to_string_lossy().into_owned());
+    }
+
+    pub fn map_names(&self) -> Vec<String> {
+        self.maps.iter().map(|m| m.0.clone()).collect()
+    }
+
+    pub fn rows(&self) -> Vec<(String, String)> {
+        let tr = |k: &str| ::i18n::translate(k, &[]);
+        let onoff = |b: bool| tr(if b { "start.value.on" } else { "start.value.off" });
+        let pick = |v: Option<&(String, String)>| v.map(|x| x.0.clone()).unwrap_or_else(|| "-".to_string());
         vec![
-            "neoOMSI".to_string(),
-            String::new(),
-            format!(
-                "{} Map:        {}",
-                mark(0),
-                self.maps.get(self.map).map(|m| m.0.as_str()).unwrap_or("-")
+            (tr("start.row.vehicle"), pick(self.vehicles.get(self.vehicle))),
+            (
+                tr("start.row.time"),
+                self.time_text(),
             ),
-            format!(
-                "{} Vehicle:    {}",
-                mark(1),
-                self.vehicles
-                    .get(self.vehicle)
-                    .map(|v| v.0.as_str())
-                    .unwrap_or("-")
+            (
+                tr("start.row.traffic"),
+                ::i18n::translate("start.value.vehicles", &[("n", &self.traffic)]),
             ),
-            format!("{} Time:       {:02}:00", mark(2), self.hour),
-            format!("{} Traffic:    {} vehicles", mark(3), self.traffic),
-            format!(
-                "{} Passengers: {}",
-                mark(4),
-                if self.passengers { "on" } else { "off" }
+            (tr("start.row.passengers"), onoff(self.passengers)),
+            (tr("start.row.timetable"), onoff(self.schedule)),
+            (
+                tr("start.row.weather"),
+                self.weather_label(self.weather),
             ),
-            format!(
-                "{} Timetable:  {}",
-                mark(5),
-                if self.schedule { "on" } else { "off" }
-            ),
-            format!(
-                "{} Weather:    {}",
-                mark(6),
-                self.weathers
-                    .get(self.weather)
-                    .map(|w| w.0.as_str())
-                    .unwrap_or("-")
-            ),
-            format!(
-                "{} Date:       {}  ({})",
-                mark(7),
+            (
+                tr("start.row.date"),
                 self.date_text(),
-                self.season_text()
             ),
-            format!(
-                "{} Situation:  {}",
-                mark(8),
-                self.situations
-                    .get(self.situation)
-                    .map(|s| s.0.as_str())
-                    .unwrap_or("-")
-            ),
-            String::new(),
-            "Arrow keys choose, Enter starts, Esc quits".to_string(),
+            (tr("start.row.situation"), self.route_text()),
+            (tr("start.row.season"), self.season_text()),
         ]
     }
 
-    /// The chosen day of the year as a date in the map's default year.
-    pub fn date_text(&self) -> String {
-        let months = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-        let mut d = self.day.max(1);
-        for (i, m) in months.iter().enumerate() {
-            if d <= *m {
-                return format!("{d:02}.{:02}.", i + 1);
-            }
-            d -= m;
-        }
-        "31.12.".to_string()
-    }
-
-    pub fn season_text(&self) -> &'static str {
-        match self.day {
-            1..=59 => "winter",
-            60..=120 => "spring",
-            121..=243 => "summer",
-            244..=304 => "autumn",
-            _ => "winter",
+    pub fn route_text(&self) -> String {
+        match self.chosen_tour() {
+            Some((l, t)) => format!("{}  -  {}", l.name, t.number),
+            None => "-".to_string(),
         }
     }
 
-    /// Handle a key (winit key code name); returns true when consumed.
-    pub fn key(&mut self, code: winit::keyboard::KeyCode) {
-        use winit::keyboard::KeyCode as K;
-        let dir: i32 = match code {
-            K::ArrowLeft => -1,
-            K::ArrowRight => 1,
-            _ => 0,
+    pub fn chosen_tour(&self) -> Option<(&LineItem, &TourItem)> {
+        let l = self.lines.get(self.line)?;
+        Some((l, l.tours.get(self.tour)?))
+    }
+
+    pub fn refresh_lines(&mut self, root: &Path) {
+        let Some(map) = self.maps.get(self.map).map(|m| m.1.clone()) else {
+            return;
         };
-        match code {
-            K::ArrowUp => self.row = (self.row + 8) % 9,
-            K::ArrowDown => self.row = (self.row + 1) % 9,
-            K::Enter | K::NumpadEnter => self.start = true,
+        if self.lines_for.as_deref() == Some(map.as_str()) {
+            return;
+        }
+        self.lines_for = Some(map.clone());
+        self.lines.clear();
+        self.line = 0;
+        self.tour = 0;
+        self.line_top = 0;
+        self.tour_top = 0;
+        self.line_query.clear();
+        self.tour_query.clear();
+        let cfg = ::mods::resolve_path(root, &map);
+        let Some(dir) = cfg.parent() else {
+            return;
+        };
+        let tt = ::timetable::TimetableData::load(dir);
+        let mut chosen: Vec<&::timetable::Line> =
+            tt.lines.iter().filter(|l| l.user_allowed && !l.tours.is_empty()).collect();
+        if chosen.is_empty() {
+            chosen = tt.lines.iter().filter(|l| !l.tours.is_empty()).collect();
+        }
+        let mut lines: Vec<LineItem> = chosen
+            .into_iter()
+            .map(|l| {
+                let title = l
+                    .tours
+                    .first()
+                    .and_then(|t| t.trips.first())
+                    .and_then(|t| tt.trip(&t.trip))
+                    .map(|t| t.terminus.trim().to_string())
+                    .unwrap_or_default();
+                let mut tours: Vec<TourItem> = l
+                    .tours
+                    .iter()
+                    .map(|t| {
+                        let first = t.trips.iter().map(|x| x.departure).fold(f32::MAX, f32::min);
+                        let last = t.trips.iter().map(|x| x.departure).fold(0.0, f32::max);
+                        let mut trips: Vec<String> = Vec::new();
+                        for x in &t.trips {
+                            if !trips.iter().any(|n| n.eq_ignore_ascii_case(&x.trip)) {
+                                trips.push(x.trip.clone());
+                            }
+                        }
+                        TourItem {
+                            number: t.number.trim().to_string(),
+                            span: if t.trips.is_empty() { String::new() } else { format!("{} - {}", hm(first), hm(last)) },
+                            start: if t.trips.is_empty() { 0.0 } else { first },
+                            trips,
+                        }
+                    })
+                    .collect();
+                tours.sort_by(|a, b| a.start.total_cmp(&b.start).then_with(|| natural_cmp(&a.number, &b.number)));
+                LineItem { name: l.name.trim().to_string(), title, tours }
+            })
+            .collect();
+        lines.sort_by(|a, b| natural_cmp(&a.name, &b.name));
+        self.lines = lines;
+        self.pick_line(0);
+    }
+
+    pub fn line_rows(&self) -> Vec<(usize, String, String)> {
+        let q = self.line_query.trim().to_lowercase();
+        self.lines
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| q.is_empty() || format!("{} {}", l.name, l.title).to_lowercase().contains(&q))
+            .map(|(i, l)| (i, l.name.clone(), l.title.clone()))
+            .collect()
+    }
+
+    pub fn tour_rows(&self) -> Vec<(usize, String, String)> {
+        let q = self.tour_query.trim().to_lowercase();
+        let Some(l) = self.lines.get(self.line) else {
+            return Vec::new();
+        };
+        let word = ::i18n::translate("start.maps.tour", &[]);
+        let word = {
+            let w = word.to_lowercase();
+            let mut c = w.chars();
+            c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+        };
+        l.tours
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| q.is_empty() || format!("{} {}", t.number, t.span).to_lowercase().contains(&q))
+            .map(|(i, t)| (i, format!("{word} {}", t.number), t.span.clone()))
+            .collect()
+    }
+
+    pub fn pick_line(&mut self, i: usize) {
+        self.line = i;
+        self.tour_query.clear();
+        self.tour_top = 0;
+        self.tour = 0;
+    }
+
+    pub fn line_step(&mut self, dir: i32) {
+        let rows = self.line_rows();
+        if rows.is_empty() {
+            return;
+        }
+        let at = rows.iter().position(|r| r.0 == self.line).unwrap_or(0) as i32;
+        let next = (at + dir).clamp(0, rows.len() as i32 - 1) as usize;
+        if rows[next].0 != self.line {
+            self.pick_line(rows[next].0);
+        }
+    }
+
+    pub fn tour_step(&mut self, dir: i32) {
+        let rows = self.tour_rows();
+        if rows.is_empty() {
+            return;
+        }
+        let at = rows.iter().position(|r| r.0 == self.tour).unwrap_or(0) as i32;
+        self.tour = rows[(at + dir).clamp(0, rows.len() as i32 - 1) as usize].0;
+    }
+
+    pub fn fix_filters(&mut self) {
+        let rows = self.line_rows();
+        if !rows.is_empty() && !rows.iter().any(|r| r.0 == self.line) {
+            self.pick_line(rows[0].0);
+        }
+        let rows = self.tour_rows();
+        if !rows.is_empty() && !rows.iter().any(|r| r.0 == self.tour) {
+            self.tour = rows[0].0;
+        }
+    }
+
+    pub fn edit_buf(&mut self) -> (&mut String, usize) {
+        match self.edit {
+            1 => (&mut self.veh_query, 60),
+            3 => (&mut self.line_query, 40),
+            4 => (&mut self.tour_query, 40),
+            5 => (&mut self.time_buf, 4),
+            _ => (&mut self.plate, 24),
+        }
+    }
+
+    pub fn edit_changed(&mut self) {
+        match self.edit {
+            1 => self.veh_top = 0,
+            3 => {
+                self.line_top = 0;
+                self.fix_filters();
+            }
+            4 => {
+                self.tour_top = 0;
+                self.fix_filters();
+            }
+            5 => self.apply_time(),
             _ => {}
         }
-        if dir != 0 {
-            let step = |v: usize, n: usize| -> usize {
-                if n == 0 {
-                    0
-                } else {
-                    ((v as i32 + dir).rem_euclid(n as i32)) as usize
-                }
-            };
-            match self.row {
-                0 => self.map = step(self.map, self.maps.len()),
-                1 => self.vehicle = step(self.vehicle, self.vehicles.len()),
-                2 => self.hour = (self.hour + dir).rem_euclid(24),
-                3 => self.traffic = (self.traffic as i32 + dir * 10).clamp(0, 200) as usize,
-                4 => self.passengers = !self.passengers,
-                5 => self.schedule = !self.schedule,
-                6 => self.weather = step(self.weather, self.weathers.len()),
-                7 => self.day = (self.day + dir * 15).rem_euclid(365).max(1),
-                8 => self.situation = step(self.situation, self.situations.len()),
-                _ => {}
+    }
+
+    pub fn want_mini(&mut self) {
+        let Some(map) = self.maps.get(self.map).map(|m| m.1.clone()) else {
+            return;
+        };
+        if self.mini.as_ref().is_some_and(|m| m.0 == map) || self.mini_failed.as_deref() == Some(map.as_str()) {
+            self.mini_want = None;
+            return;
+        }
+        if !self.mini_want.as_ref().is_some_and(|w| w.0 == map) {
+            self.mini_want = Some((map.clone(), std::time::Instant::now()));
+        }
+        if self.mini_job.is_some() {
+            return;
+        }
+        if !self.mini_want.as_ref().is_some_and(|w| w.1.elapsed().as_millis() >= 400) {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let name = map.clone();
+        std::thread::spawn(move || {
+            let r = crate::control::minimap::minimap(&name, "");
+            if let Err(e) = &r {
+                log::warn!("map preview of {name}: {e:#}");
             }
+            let _ = tx.send(r.ok());
+        });
+        self.mini_job = Some((map, rx));
+    }
+
+    pub fn poll_mini(&mut self) {
+        let Some((map, rx)) = self.mini_job.take() else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok(Some(m)) => self.mini = Some((map, m)),
+            Ok(None) => self.mini_failed = Some(map),
+            Err(std::sync::mpsc::TryRecvError::Empty) => self.mini_job = Some((map, rx)),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => self.mini_failed = Some(map),
+        }
+    }
+
+    pub fn ymd(&self) -> (i32, i32, i32) {
+        let mut d = self.day.clamp(1, days_in_year(self.year));
+        for m in 1..=12 {
+            let n = days_in_month(self.year, m);
+            if d <= n {
+                return (self.year, m, d);
+            }
+            d -= n;
+        }
+        (self.year, 12, 31)
+    }
+
+    pub fn set_ymd(&mut self, y: i32, m: i32, d: i32) {
+        let y = y.clamp(1970, 2100);
+        let m = m.clamp(1, 12);
+        let d = d.clamp(1, days_in_month(y, m));
+        self.year = y;
+        self.day = (1..m).map(|k| days_in_month(y, k)).sum::<i32>() + d;
+    }
+
+    pub fn date_text(&self) -> String {
+        let (y, m, d) = self.ymd();
+        format!("{d:02}.{m:02}.{y}")
+    }
+
+    pub fn time_text(&self) -> String {
+        format!("{:02}:{:02}", self.hour, self.minute)
+    }
+
+    fn shift_day(&mut self, dir: i32) {
+        let mut d = self.day + dir;
+        if d < 1 {
+            self.year = (self.year - 1).max(1970);
+            d = days_in_year(self.year);
+        } else if d > days_in_year(self.year) {
+            self.year = (self.year + 1).min(2100);
+            d = 1;
+        }
+        self.day = d;
+    }
+
+    pub fn set_now(&mut self) {
+        let (y, m, d, h, min) = now_local();
+        self.set_ymd(y, m, d);
+        self.hour = h;
+        self.minute = min;
+        self.cal_year = self.year;
+        self.cal_month = m - 1;
+    }
+
+    pub fn season_text(&self) -> String {
+        let key = match self.season_mode {
+            1 => "start.season.spring",
+            2 => "start.season.summer",
+            3 => "start.season.autumn",
+            4 => "start.season.winter",
+            _ => self.season_key(),
+        };
+        ::i18n::translate(key, &[])
+    }
+
+    pub fn season_arg(&self) -> Option<String> {
+        ["spring", "summer", "autumn", "winter"]
+            .get(self.season_mode.wrapping_sub(1))
+            .map(|s| s.to_string())
+    }
+
+    pub fn cal_toggle(&mut self) {
+        if !self.cal_open {
+            let (y, m, _) = self.ymd();
+            self.cal_year = y;
+            self.cal_month = m - 1;
+        }
+        self.cal_open = !self.cal_open;
+    }
+
+    pub fn cal_shift(&mut self, dir: i32) {
+        let mut m = self.cal_month + dir;
+        let mut y = self.cal_year;
+        if m < 0 {
+            m = 11;
+            y -= 1;
+        } else if m > 11 {
+            m = 0;
+            y += 1;
+        }
+        self.cal_year = y.clamp(1970, 2100);
+        self.cal_month = m;
+    }
+
+    pub fn cal_title(&self) -> String {
+        format!(
+            "{} {}",
+            ::i18n::translate(&format!("start.cal.m{}", self.cal_month + 1), &[]),
+            self.cal_year
+        )
+    }
+
+    fn cal_date(&self, k: i32) -> (i32, i32, i32, bool) {
+        let (y, m) = (self.cal_year, self.cal_month + 1);
+        let first = weekday(y, m, 1);
+        let off = k - first + 1;
+        let dim = days_in_month(y, m);
+        if off < 1 {
+            let (py, pm) = if m == 1 { (y - 1, 12) } else { (y, m - 1) };
+            (py, pm, days_in_month(py, pm) + off, false)
+        } else if off > dim {
+            let (ny, nm) = if m == 12 { (y + 1, 1) } else { (y, m + 1) };
+            (ny, nm, off - dim, false)
+        } else {
+            (y, m, off, true)
+        }
+    }
+
+    pub fn cal_cells(&self) -> Vec<(i32, bool, bool)> {
+        let sel = self.ymd();
+        (0..42)
+            .map(|k| {
+                let (y, m, d, inside) = self.cal_date(k);
+                (d, inside, (y, m, d) == sel)
+            })
+            .collect()
+    }
+
+    pub fn cal_pick(&mut self, k: usize) {
+        let (y, m, d, _) = self.cal_date(k as i32);
+        self.set_ymd(y, m, d);
+        self.cal_open = false;
+    }
+
+    fn apply_time(&mut self) {
+        self.time_buf.retain(|c| c.is_ascii_digit());
+        self.time_buf.truncate(4);
+        let d: Vec<i32> = self.time_buf.chars().filter_map(|c| c.to_digit(10)).map(|x| x as i32).collect();
+        let (h, m) = match d.len() {
+            0 => return,
+            1 => (d[0], 0),
+            2 => (d[0] * 10 + d[1], 0),
+            3 => (d[0], d[1] * 10 + d[2]),
+            _ => (d[0] * 10 + d[1], d[2] * 10 + d[3]),
+        };
+        self.hour = h.min(23);
+        self.minute = m.min(59);
+    }
+
+    pub fn step_minute(&mut self, dir: i32) {
+        self.minute = (self.minute + dir).rem_euclid(60);
+    }
+
+    pub fn weather_label(&self, i: usize) -> String {
+        let key = match i {
+            0 => "start.weather.default",
+            1 => "start.weather.cycle",
+            2 => "start.weather.real",
+            3 => "start.weather.custom",
+            _ => return self.weathers.get(i).map(|w| w.0.clone()).unwrap_or_else(|| "-".to_string()),
+        };
+        ::i18n::translate(key, &[])
+    }
+
+    fn weather_icon(&self, i: usize) -> &'static str {
+        match i {
+            0 => "map",
+            1 => "autorenew",
+            2 => "public",
+            3 => "tune",
+            _ => {
+                let n = self.weathers.get(i).map(|w| w.0.to_lowercase()).unwrap_or_default();
+                if n.contains("snow") || n.contains("schnee") {
+                    "ac_unit"
+                } else if n.contains("rain") || n.contains("regen") || n.contains("storm") || n.contains("gewitter") {
+                    "water_drop"
+                } else if n.contains("nebel") || n.contains("fog") || n.contains("cloud") || n.contains("wolk")
+                    || n.contains("overcast") || n.contains("bedeckt")
+                {
+                    "cloud"
+                } else {
+                    "wb_sunny"
+                }
+            }
+        }
+    }
+
+    pub fn weather_rows(&self) -> Vec<(String, String)> {
+        (0..self.weathers.len())
+            .map(|i| (self.weather_icon(i).to_string(), self.weather_label(i)))
+            .collect()
+    }
+
+    pub fn weather_step(&mut self, dir: i32) {
+        let n = self.weathers.len() as i32;
+        if n > 0 {
+            self.weather = (self.weather as i32 + dir).clamp(0, n - 1) as usize;
+        }
+    }
+
+    pub fn weather_arg(&self) -> Option<String> {
+        match self.weather {
+            0 => None,
+            3 => Some(self.custom.encode()),
+            w => self.weathers.get(w).map(|x| x.1.clone()),
+        }
+    }
+
+    pub fn weather_file(&self) -> String {
+        match self.weather {
+            w if w >= WEATHER_MODES => self.weathers.get(w).map(|x| x.1.clone()).unwrap_or_default(),
+            _ => String::new(),
+        }
+    }
+
+    pub fn custom_rows(&self) -> Vec<(String, String)> {
+        let tr = |k: &str| ::i18n::translate(k, &[]);
+        let c = &self.custom;
+        let vis = if c.visibility_m >= 1000.0 {
+            format!("{:.0} km", c.visibility_m / 1000.0)
+        } else {
+            format!("{:.0} m", c.visibility_m)
+        };
+        vec![
+            (tr("start.weather.vis"), vis),
+            (tr("start.weather.clouds"), crate::weather_setup::CUSTOM_CLOUDS[c.cloud].to_string()),
+            (
+                tr("start.weather.precip"),
+                crate::weather_setup::CUSTOM_PRECIP[c.precip.clamp(0, 2) as usize].to_string(),
+            ),
+            (tr("start.weather.temp"), format!("{:.0} \u{b0}C", c.temp_c)),
+        ]
+    }
+
+    fn custom_step(&mut self, i: usize, dir: i32) {
+        const VIS: [f32; 8] = [200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0, 20000.0, 50000.0];
+        let c = &mut self.custom;
+        match i {
+            0 => {
+                let at = VIS.iter().position(|v| *v >= c.visibility_m).unwrap_or(7) as i32;
+                c.visibility_m = VIS[(at + dir).clamp(0, 7) as usize];
+            }
+            1 => c.cloud = (c.cloud as i32 + dir).rem_euclid(crate::weather_setup::CUSTOM_CLOUDS.len() as i32) as usize,
+            2 => {
+                c.precip = (c.precip + dir).rem_euclid(3);
+                c.road_wetness = if c.precip == 1 { 0.8 } else { 0.0 };
+                c.snow_cover = c.precip == 2;
+                c.snow_on_road = c.precip == 2;
+            }
+            _ => c.temp_c = (c.temp_c + dir as f32).clamp(-30.0, 45.0),
+        }
+        c.normalize();
+    }
+
+    pub fn season_key(&self) -> &'static str {
+        match self.day {
+            1..=59 => "start.season.winter",
+            60..=120 => "start.season.spring",
+            121..=243 => "start.season.summer",
+            244..=304 => "start.season.autumn",
+            _ => "start.season.winter",
+        }
+    }
+
+    pub fn step(&mut self, row: usize, dir: i32) {
+        let step = |v: usize, n: usize| -> usize {
+            if n == 0 {
+                0
+            } else {
+                ((v as i32 + dir).rem_euclid(n as i32)) as usize
+            }
+        };
+        match row {
+            0 => self.vehicle_step(dir),
+            8 | 11 => self.livery = step(self.livery, self.liveries.len() + 1),
+            9 => self.depot = step(self.depot, self.depots.len() + 1),
+            10 => self.number = step(self.number, self.numbers.len() + 1),
+            1 => self.hour = (self.hour + dir).rem_euclid(24),
+            12..=15 => self.custom_step(row - 12, dir),
+            2 => self.traffic = (self.traffic as i32 + dir * 10).clamp(0, 200) as usize,
+            3 => self.passengers = !self.passengers,
+            4 => self.schedule = !self.schedule,
+            5 => self.weather = step(self.weather, self.weathers.len()),
+            6 => self.shift_day(dir),
+            7 => self.situation = step(self.situation, self.situations.len()),
+            _ => {}
+        }
+    }
+
+    pub fn sect_rows(sect: usize) -> &'static [usize] {
+        match sect {
+            1 => &[7],
+            3 => &[12, 13, 14, 15],
+            _ => &[],
+        }
+    }
+
+    pub fn open_sect(&mut self, sect: usize) {
+        self.sect = sect.min(3);
+        if self.sect > 0 {
+            self.focus = self.sect - 1;
+        }
+        self.zone = if matches!(self.sect, 1 | 2 | 3) { 0 } else { 1 };
+        self.cal_open = false;
+        self.drop = 0;
+        if let Some(r) = Self::sect_rows(self.sect).first() {
+            self.row = *r;
+        }
+    }
+
+    pub fn vehicle_names(&self) -> Vec<String> {
+        self.vehicles.iter().map(|v| v.0.clone()).collect()
+    }
+
+    pub fn vehicle_step(&mut self, dir: i32) {
+        let order: Vec<usize> = self.veh_groups().into_iter().flat_map(|g| g.2).collect();
+        let n = order.len() as i32;
+        if n == 0 {
+            return;
+        }
+        let at = order.iter().position(|i| *i == self.vehicle);
+        let next = match at {
+            Some(p) => (p as i32 + dir).clamp(0, n - 1) as usize,
+            None => 0,
+        };
+        self.vehicle = order[next];
+        self.veh_open = self.maker_key(self.vehicle);
+    }
+
+    pub fn entry_rows(&self) -> Vec<(u32, String)> {
+        self.map_entries.get(self.map).cloned().unwrap_or_default()
+    }
+
+    pub fn entry_chosen(&self) -> Option<u32> {
+        let map = self.maps.get(self.map)?;
+        self.entry.filter(|_| self.entry_for == map.1)
+    }
+
+    pub fn entry_shown(&self) -> u32 {
+        self.entry_chosen()
+            .or_else(|| self.map_entries.get(self.map).and_then(|e| e.first()).map(|r| r.0))
+            .unwrap_or(0)
+    }
+
+    pub fn entry_text(&self) -> String {
+        let shown = self.entry_shown();
+        self.entry_rows().into_iter().find(|r| r.0 == shown).map_or_else(|| "-".to_string(), |r| r.1)
+    }
+
+    pub fn entry_pick(&mut self, index: u32) {
+        if let Some(map) = self.maps.get(self.map) {
+            self.entry_for = map.1.clone();
+            self.entry = Some(index);
+        }
+    }
+
+    pub fn entry_step(&mut self, dir: i32) {
+        let rows = self.entry_rows();
+        if rows.is_empty() {
+            return;
+        }
+        let cur = self.entry_shown();
+        let at = rows.iter().position(|r| r.0 == cur).unwrap_or(0) as i32;
+        let next = (at + dir).clamp(0, rows.len() as i32 - 1) as usize;
+        self.entry_pick(rows[next].0);
+    }
+
+    pub fn map_step(&mut self, dir: i32) {
+        let n = self.maps.len() as i32;
+        if n > 0 {
+            self.map = (self.map as i32 + dir).clamp(0, n - 1) as usize;
         }
     }
 }

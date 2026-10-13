@@ -445,9 +445,9 @@ impl App {
         if self.args.bus.is_some() || self.args.cam.is_some() || self.args.no_menu {
             self.load_world_now(event_loop);
         } else {
-            let mut fonts = ::simulation::texttex::FontLibrary::new(&self.args.root);
-            self.hud = Some(hud::Hud::new(&mut fonts));
-            self.menu = Some(menu::Menu::new(&self.args.root, &self.args.map));
+            let mut menu = menu::Menu::new(&self.args.root, &self.args.map);
+            menu.refresh_continue();
+            self.menu = Some(menu);
         }
     }
 

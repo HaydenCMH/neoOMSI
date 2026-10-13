@@ -50,6 +50,7 @@ winit.workspace = true
 glam.workspace = true
 pollster.workspace = true
 anyhow.workspace = true
+chrono.workspace = true
 clap.workspace = true
 log.workspace = true
 getrandom = "0.4"

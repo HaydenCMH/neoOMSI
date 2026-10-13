@@ -1,5 +1,5 @@
 mod commands;
-mod minimap;
+pub(crate) mod minimap;
 mod pads;
 
 use launcher_protocol::api::{

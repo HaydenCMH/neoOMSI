@@ -65,6 +65,7 @@ pub struct Showroom {
     pitch_to: f32,
     zoom_to: f32,
     pub auto_turn: bool,
+    pub bare: bool,
     idle: f32,
     /// Where the bus should appear on screen: the share of the width its centre is at.
     pub focus_x: f32,
@@ -122,6 +123,7 @@ impl Showroom {
             pitch_to: 8.0,
             zoom_to: 1.0,
             auto_turn: false,
+            bare: false,
             idle: 0.0,
             focus_x: 0.5,
             focus_now: 0.5,
@@ -201,15 +203,17 @@ impl Showroom {
                         s.look = w.clone();
                         let args = args_for(&w);
                         s.weather = load_weather(&args);
-                        setup_sky(
-                            &args,
-                            renderer,
-                            &mut s.scene,
-                            ::content::Envir::load(&args.root.join("envir.cfg"))
-                                .ok()
-                                .as_ref(),
-                            Some(&s.weather),
-                        );
+                        if !self.bare {
+                            setup_sky(
+                                &args,
+                                renderer,
+                                &mut s.scene,
+                                ::content::Envir::load(&args.root.join("envir.cfg"))
+                                    .ok()
+                                    .as_ref(),
+                                Some(&s.weather),
+                            );
+                        }
                         s.lighting = lighting_for(&args, &s.weather);
                     }
                     self.dirty = true;
@@ -311,8 +315,10 @@ impl Showroom {
         let args = args_for(&r.look);
         let weather = load_weather(&args);
         let envir = ::content::Envir::load(&args.root.join("envir.cfg")).ok();
-        setup_sky(&args, renderer, &mut scene, envir.as_ref(), Some(&weather));
-        add_floor(renderer, &mut scene);
+        if !self.bare {
+            setup_sky(&args, renderer, &mut scene, envir.as_ref(), Some(&weather));
+            add_floor(renderer, &mut scene);
+        }
         let world = r.world;
         let mut vehicle = r.vehicle;
         vehicle.position = DVec3::ZERO;
@@ -487,7 +493,10 @@ impl Showroom {
         let cam = self.camera(w, h)?;
         let s = self.shown.as_mut()?;
         s.scene.overlays.clear();
-        let rgba = renderer.render_to_image(&mut s.scene, w, h, &cam, &s.lighting).ok()?;
+        let mut rgba = renderer.render_to_image(&mut s.scene, w, h, &cam, &s.lighting).ok()?;
+        if self.bare {
+            cut_out(&mut rgba, w as usize, h as usize);
+        }
         Some((w, h, rgba))
     }
 
@@ -570,4 +579,175 @@ fn add_floor(renderer: &Renderer, scene: &mut Scene) {
         glam::Mat4::IDENTITY,
         vec![mat],
     );
+}
+
+fn cut_out(rgba: &mut [u8], w: usize, h: usize) {
+    if w < 2 || h < 2 || rgba.len() < w * h * 4 {
+        return;
+    }
+    let bg = [rgba[0] as i32, rgba[1] as i32, rgba[2] as i32];
+    let same = |p: &[u8], i: usize| (0..3).all(|c| (p[i * 4 + c] as i32 - bg[c]).abs() <= 3);
+    let hazy = |p: &[u8], i: usize, from: usize| {
+        if from == usize::MAX {
+            return false;
+        }
+        let c = |k: usize, ch: usize| p[k * 4 + ch] as i32;
+        (0..3).all(|ch| (c(i, ch) - c(from, ch)).abs() <= 10) && c(i, 2) >= c(i, 0) + 8 && c(i, 2) >= c(i, 1)
+    };
+    let mut clear = vec![false; w * h];
+    let mut stack: Vec<(usize, usize)> = Vec::new();
+    for x in 0..w {
+        stack.push((x, usize::MAX));
+        stack.push(((h - 1) * w + x, usize::MAX));
+    }
+    for y in 0..h {
+        stack.push((y * w, usize::MAX));
+        stack.push((y * w + w - 1, usize::MAX));
+    }
+    while let Some((i, from)) = stack.pop() {
+        if clear[i] || !(same(rgba, i) || hazy(rgba, i, from)) {
+            continue;
+        }
+        clear[i] = true;
+        let (x, y) = (i % w, i / w);
+        if x > 0 {
+            stack.push((i - 1, i));
+        }
+        if x + 1 < w {
+            stack.push((i + 1, i));
+        }
+        if y > 0 {
+            stack.push((i - w, i));
+        }
+        if y + 1 < h {
+            stack.push((i + w, i));
+        }
+    }
+    let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0usize, 0usize);
+    for i in 0..w * h {
+        if clear[i] {
+            rgba[i * 4..i * 4 + 4].fill(0);
+        } else {
+            rgba[i * 4 + 3] = 255;
+            let (x, y) = (i % w, i / w);
+            x0 = x0.min(x);
+            x1 = x1.max(x);
+            y0 = y0.min(y);
+            y1 = y1.max(y);
+        }
+    }
+
+    let mut dist = vec![u8::MAX; w * h];
+    let mut queue: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
+    for i in 0..w * h {
+        if clear[i] {
+            continue;
+        }
+        let (x, y) = (i % w, i / w);
+        let near = (x > 0 && clear[i - 1]) || (x + 1 < w && clear[i + 1]) || (y > 0 && clear[i - w]) || (y + 1 < h && clear[i + w]);
+        if near {
+            dist[i] = 1;
+            queue.push_back(i);
+        }
+    }
+    while let Some(i) = queue.pop_front() {
+        if dist[i] >= 3 {
+            continue;
+        }
+        let (x, y) = (i % w, i / w);
+        let mut ns = [usize::MAX; 4];
+        if x > 0 {
+            ns[0] = i - 1;
+        }
+        if x + 1 < w {
+            ns[1] = i + 1;
+        }
+        if y > 0 {
+            ns[2] = i - w;
+        }
+        if y + 1 < h {
+            ns[3] = i + w;
+        }
+        for n in ns {
+            if n != usize::MAX && !clear[n] && dist[n] == u8::MAX {
+                dist[n] = dist[i] + 1;
+                queue.push_back(n);
+            }
+        }
+    }
+    let src = rgba.to_vec();
+    for i in 0..w * h {
+        if clear[i] || dist[i] > 2 {
+            continue;
+        }
+        let (x, y) = ((i % w) as i32, (i / w) as i32);
+
+        let mut best: Option<(i32, usize)> = None;
+        for oy in -4i32..=4 {
+            for ox in -4i32..=4 {
+                let (nx, ny) = (x + ox, y + oy);
+                if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+                    continue;
+                }
+                let j = ny as usize * w + nx as usize;
+                if !clear[j] && dist[j] >= 3 {
+                    let d = ox * ox + oy * oy;
+                    if best.is_none_or(|b| d < b.0) {
+                        best = Some((d, j));
+                    }
+                }
+            }
+        }
+        let c = |k: usize, ch: usize| src[k * 4 + ch] as f32;
+        let (fg, alpha) = match best {
+            Some((_, j)) => {
+                let (mut num, mut den) = (0.0f32, 0.0f32);
+                for ch in 0..3 {
+                    let d = c(j, ch) - bg[ch] as f32;
+                    num += (c(i, ch) - bg[ch] as f32) * d;
+                    den += d * d;
+                }
+                let a = if den < 400.0 { 1.0 } else { (num / den).clamp(0.0, 1.0) };
+                ([c(j, 0), c(j, 1), c(j, 2)], a)
+            }
+            // a thin line (an antenna): no inside to take the colour from
+            None => {
+                let a = 0.6f32;
+                let un = |ch: usize| (bg[ch] as f32 + (c(i, ch) - bg[ch] as f32) / a).clamp(0.0, 255.0);
+                ([un(0), un(1), un(2)], a)
+            }
+        };
+        if alpha < 0.04 {
+            rgba[i * 4..i * 4 + 4].fill(0);
+        } else {
+            rgba[i * 4] = fg[0].round() as u8;
+            rgba[i * 4 + 1] = fg[1].round() as u8;
+            rgba[i * 4 + 2] = fg[2].round() as u8;
+            rgba[i * 4 + 3] = (alpha * 255.0).round() as u8;
+        }
+    }
+    if x1 < x0 {
+        return;
+    }
+    let dx = (w / 2) as i32 - ((x0 + x1) / 2) as i32;
+    let dy = (h / 2) as i32 - ((y0 + y1) / 2) as i32;
+    if dx == 0 && dy == 0 {
+        return;
+    }
+    let src = rgba.to_vec();
+    rgba[..w * h * 4].fill(0);
+    for y in 0..h {
+        let ny = y as i32 + dy;
+        if ny < 0 || ny >= h as i32 {
+            continue;
+        }
+        for x in 0..w {
+            let nx = x as i32 + dx;
+            if nx < 0 || nx >= w as i32 {
+                continue;
+            }
+            let (a, b) = ((y * w + x) * 4, (ny as usize * w + nx as usize) * 4);
+            rgba[b..b + 4].copy_from_slice(&src[a..a + 4]);
+        }
+    }
 }

@@ -27,6 +27,7 @@ impl Ui {
             lab_groups: Vec::new(),
             lab_actions: Vec::new(),
             dialog: None,
+            start: StartUi::default(),
             dialog_rects: Vec::new(),
             dialog_box: [0.0; 4],
             dialog_back: false,

@@ -29,6 +29,7 @@ mod lights;
 #[cfg(target_os = "macos")]
 mod mac_hid;
 mod menu;
+mod start_menu;
 mod money;
 mod navigator;
 pub mod navmap;

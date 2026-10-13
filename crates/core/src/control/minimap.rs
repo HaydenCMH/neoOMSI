@@ -22,6 +22,10 @@ static BUILT: Mutex<Vec<(String, Minimap)>> = Mutex::new(Vec::new());
 static BUILDING: Mutex<()> = Mutex::new(());
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 
+pub(crate) fn wait_idle() {
+    drop(BUILDING.lock().unwrap_or_else(|e| e.into_inner()));
+}
+
 pub(super) fn forget() {
     GENERATION.fetch_add(1, Ordering::SeqCst);
     BUILT.lock().unwrap_or_else(|e| e.into_inner()).clear();
@@ -32,7 +36,7 @@ fn kept(key: &str) -> Option<Minimap> {
     built.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
 }
 
-pub(super) fn minimap(map: &str, date: &str) -> Result<Minimap> {
+pub(crate) fn minimap(map: &str, date: &str) -> Result<Minimap> {
     let date = if date.trim().is_empty() { DEFAULT_DATE } else { date.trim() };
     let key = format!("{map}|{date}");
     if let Some(v) = kept(&key) {

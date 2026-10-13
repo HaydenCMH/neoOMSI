@@ -414,6 +414,9 @@ impl App {
     pub(crate) fn move_cursor(&mut self, x: f32, y: f32) -> bool {
         let last = self.cursor;
         self.cursor = (x, y);
+        if self.menu.is_some() && (x, y) != last {
+            self.start_hover();
+        }
         if self.lab_menu.is_some() {
             let (ui_x, ui_y) = self.ui_cursor();
             if (x, y) != last {

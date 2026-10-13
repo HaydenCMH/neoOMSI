@@ -1351,9 +1351,13 @@ impl App {
         // a page
         let to = |p: usize| Some(PauseState { page: Some(p), ..st });
         match code {
+            KeyCode::Escape if self.menu.is_some() => self.start_options_close(),
             KeyCode::Escape if self.lab_map_direct => self.close_game_menu(),
             KeyCode::Escape => self.lab_menu = Some(PauseState { page: None, ..st }),
             KeyCode::Delete | KeyCode::Backspace => self.lab_key_clear_hovered(),
+            KeyCode::KeyQ if self.menu.is_some() => self.start_tab(-1),
+            KeyCode::KeyE if self.menu.is_some() => self.start_tab(1),
+            _ if self.menu.is_some() => {}
             KeyCode::ArrowLeft | KeyCode::KeyA | KeyCode::KeyQ => {
                 self.lab_menu = to((tab + n - 1) % n)
             }
