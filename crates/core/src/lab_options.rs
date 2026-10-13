@@ -40,7 +40,7 @@ fn row_of(host: &Host, file: &std::sync::Arc<serde_json::Value>, r: &OptRow) -> 
         OptKind::Opens => Some(opens(r.name, r.desc, r.id)),
         OptKind::Button(text) => Some(button(r.name, text, r.desc, r.id)),
         OptKind::Mic => Some(mic_row(host.app, r)),
-        OptKind::Keybinds | OptKind::Pads | OptKind::VoicePlayers => None,
+        OptKind::Keybinds | OptKind::Pads | OptKind::VoicePlayers | OptKind::Mods => None,
     }
 }
 
@@ -170,6 +170,7 @@ fn rows_of(host: &Host, file: &std::sync::Arc<serde_json::Value>, rows: &[OptRow
             OptKind::Keybinds => key_rows(host.root, &host.keys).into_iter().map(retag).collect(),
             OptKind::Pads => crate::lab_pads::rows(host.pads),
             OptKind::VoicePlayers => voice_player_rows(host.app, r),
+            OptKind::Mods => mod_rows(),
             _ if r.id == "pax_models" => row_of(host, file, r).into_iter().chain([pax_pack_row()]).collect(),
             _ => row_of(host, file, r).into_iter().collect(),
         })
@@ -202,5 +203,63 @@ pub(crate) fn options_groups(host: &Host) -> Vec<(String, Vec<(String, String)>,
         .iter()
         .map(|g| (g.title.to_string(), rows_of(host, &file, g.rows), subs_of(host, &file, g)))
         .filter(|g| !g.1.is_empty() || !g.2.is_empty())
+        .collect()
+}
+static MOD_SCAN: ScanCache = std::sync::Mutex::new(None);
+
+fn mod_problem(m: &::mods::ModEntry) -> (Option<&'static str>, String) {
+    let root = match m.kind {
+        ::mods::ModKind::Folder => ::mods::folder_content_root(&m.path),
+        ::mods::ModKind::Zip => match ::legacy_config::vfs::mount_zip(&m.path) {
+            Ok(r) => r,
+            Err(_) => return (Some("zip_error"), String::new()),
+        },
+    };
+    let Some(entries) = ::legacy_config::vfs::list_dir(&root) else {
+        return (Some("unreadable"), String::new());
+    };
+    let found: Vec<String> = ::legacy_config::CONTENT_FOLDERS
+        .iter()
+        .filter(|f| entries.iter().any(|(n, d)| *d && n.to_string_lossy().eq_ignore_ascii_case(f)))
+        .map(|f| f.to_string())
+        .collect();
+    if found.is_empty() {
+        return (Some("empty"), String::new());
+    }
+    (None, found.join(", "))
+}
+
+fn mod_rows() -> Vec<(String, String)> {
+    let t = |k: &str| ::i18n::translate(&format!("pause.options.mods.{k}"), &[]);
+    let lines = scan_cached(&MOD_SCAN, || {
+        ::mods::list()
+            .iter()
+            .map(|m| {
+                let (problem, found) = mod_problem(m);
+                let kind = if m.kind == ::mods::ModKind::Zip { "zip" } else { "folder" };
+                format!("{}\u{1f}{kind}\u{1f}{}\u{1f}{found}", m.name, problem.unwrap_or(""))
+            })
+            .collect()
+    });
+    if lines.is_empty() {
+        return vec![(row(&t("none"), 'i', "", &t("none_desc"), None), "noop".to_string())];
+    }
+    lines
+        .iter()
+        .map(|l| {
+            let mut p = l.split('\u{1f}');
+            let (name, kind, problem, found) = (
+                p.next().unwrap_or(""),
+                p.next().unwrap_or(""),
+                p.next().unwrap_or(""),
+                p.next().unwrap_or(""),
+            );
+            let (value, desc) = if problem.is_empty() {
+                (t("status.ok"), format!("{} - {found}", t(kind)))
+            } else {
+                (t(&format!("status.{problem}")), format!("{} - {}", t(kind), t(&format!("status.{problem}_desc"))))
+            };
+            (row(name, 'i', &value, &desc, None), "noop".to_string())
+        })
         .collect()
 }

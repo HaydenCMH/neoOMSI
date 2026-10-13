@@ -61,6 +61,12 @@ pub(crate) fn run_move(app: &mut App, kind: &ListKind, action: &str, mv: Move) -
                     }
                 }
                 "keysearch" => {}
+                "mods_open" if step => {
+                    if let Some(d) = ::mods::mods_dir() {
+                        let _ = std::fs::create_dir_all(&d);
+                        crate::updater::open_folder(&d);
+                    }
+                }
                 "pax_pack_get" if step => {
                     crate::pax_pack::shared(crate::startup::content_dir, crate::pax_pack::PaxPack::start);
                 }

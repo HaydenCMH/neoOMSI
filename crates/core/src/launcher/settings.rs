@@ -809,6 +809,12 @@ fn act(l: &mut Launcher, a: Act) {
                         crate::pax_pack::PaxPack::start,
                     );
                 }
+                "mods_open" => {
+                    if let Some(d) = ::mods::mods_dir() {
+                        let _ = std::fs::create_dir_all(&d);
+                        crate::updater::open_folder(&d);
+                    }
+                }
                 "pax_restart" => l.state.restart_games(),
                 "gfxprofile_save" => msg = Some(save_profile(&mut l.settings.profile_name)),
                 "setup_root" => {

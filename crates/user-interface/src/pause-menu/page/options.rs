@@ -60,6 +60,7 @@ pub enum OptKind {
     Pads,
     Mic,
     VoicePlayers,
+    Mods,
 }
 
 pub const VOICE_SUB: &str = "pause.options.group.voice";
@@ -905,6 +906,25 @@ pub const OPTION_GROUPS: &[OptGroup] = &[
                 ),
             ],
         }],
+    },
+    OptGroup {
+        title: "pause.options.group.mods",
+        tab: "",
+        rows: &[
+            row(
+                "mods_open",
+                "pause.options.mods.open.name",
+                "pause.options.mods.open.desc",
+                OptKind::Button("pause.options.mods.open.button"),
+            ),
+            row(
+                "mods_list",
+                "pause.options.mods.list.name",
+                "pause.options.mods.list.desc",
+                OptKind::Mods,
+            ),
+        ],
+        subs: &[],
     },
     OptGroup {
         title: "pause.options.group.vr",

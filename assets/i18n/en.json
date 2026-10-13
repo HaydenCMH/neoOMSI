@@ -486,6 +486,7 @@
         "interface": "Interface",
         "keybinds": "Key bindings",
         "map": "Map",
+        "mods": "Mods",
         "sound": "Sound",
         "vr": "VR",
         "head_tracking": "Head tracking",
@@ -525,6 +526,30 @@
           "desc": "Shows the deviation from the timetable",
           "name": "Delay"
         }
+      },
+      "mods": {
+        "folder": "Folder",
+        "list": {
+          "desc": "All loaded mods and whether data is missing",
+          "name": "Active mods"
+        },
+        "none": "No mods active",
+        "none_desc": "Put mods into the mods folder as a folder or a ZIP",
+        "open": {
+          "button": "Open",
+          "desc": "Opens the folder that holds the mods",
+          "name": "Mods folder"
+        },
+        "status": {
+          "empty": "Data missing",
+          "empty_desc": "no OMSI content found (e.g. Vehicles or maps)",
+          "ok": "OK",
+          "unreadable": "Data missing",
+          "unreadable_desc": "the folder cannot be read",
+          "zip_error": "Data missing",
+          "zip_error_desc": "the ZIP cannot be read"
+        },
+        "zip": "ZIP"
       },
       "interface": {
         "chat": {
