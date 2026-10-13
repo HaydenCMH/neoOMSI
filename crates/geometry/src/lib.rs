@@ -1247,6 +1247,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_point_the_probes_take_on_a_triangle_is_inside_its_reach() {
+        // (a small xorshift: the same triangles every run)
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut rnd = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 40) as f32 / (1u64 << 24) as f32
+        };
+        let mut taken = 0;
+        for k in 0..4000 {
+            // slivers too: one corner drawn close to the line through the others
+            let a = Vec3::new(rnd() * 40.0, rnd() * 40.0, 0.0);
+            let b = Vec3::new(rnd() * 40.0, rnd() * 40.0, 0.0);
+            let c = if k % 4 == 0 {
+                a.lerp(b, rnd()) + Vec3::new(rnd() * 0.01, rnd() * 0.01, 0.0)
+            } else {
+                Vec3::new(rnd() * 40.0, rnd() * 40.0, 0.0)
+            };
+            let r = drive_reach(&[a, b, c]);
+            for _ in 0..50 {
+                let (x, y) = (rnd() * 44.0 - 2.0, rnd() * 44.0 - 2.0);
+                let d = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+                if d.abs() < 1e-9 {
+                    continue;
+                }
+                let l1 = ((b.y - c.y) * (x - c.x) + (c.x - b.x) * (y - c.y)) / d;
+                let l2 = ((c.y - a.y) * (x - c.x) + (a.x - c.x) * (y - c.y)) / d;
+                let l3 = 1.0 - l1 - l2;
+                if l1.min(l2).min(l3) >= -1e-4 {
+                    taken += 1;
+                    assert!(x >= r[0] && y >= r[1] && x <= r[2] && y <= r[3], "{a} {b} {c} ({x}, {y}) {r:?}");
+                }
+            }
+        }
+        assert!(taken > 1000);
+    }
+
+    #[test]
     fn static_mesh_merge_preserves_geometry_uvs_and_material_order() {
         let a = MeshData {
             positions: vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z],
@@ -2387,6 +2426,23 @@ impl Probe {
     }
 }
 
+/// The box outside which no point lies on triangle `t` as the probes take it: its plan's
+/// bounds, widened by what their tolerance (weights down to -1e-4) lets a point stand
+/// outside an edge, 1e-4 of the triangle's tallest height over an edge. Unbounded for a
+/// sliver whose height cannot be told.
+fn drive_reach(t: &[Vec3; 3]) -> [f32; 4] {
+    const ALL: [f32; 4] = [f32::MIN, f32::MIN, f32::MAX, f32::MAX];
+    let (p, q, r) = (t[0].truncate(), t[1].truncate(), t[2].truncate());
+    let area2 = (q - p).perp_dot(r - p).abs();
+    let shortest = (q - r).length().min((r - p).length()).min((p - q).length());
+    if area2 < 1e-9 || shortest < 1e-6 {
+        return ALL;
+    }
+    let m = 1e-4 * area2 / shortest * 1.5 + 1e-3;
+    let (lo, hi) = (p.min(q).min(r), p.max(q).max(r));
+    [lo.x - m, lo.y - m, hi.x + m, hi.y + m]
+}
+
 /// Upward-facing triangles of one tile (tile-local x/y in metres, absolute z), bucketed on a
 /// coarse grid so that a wheel asks only the few faces around it.
 #[derive(Debug, Clone, Default)]
@@ -2403,6 +2459,9 @@ pub struct DriveGrid {
     /// Per cell, the range of `items` that lists its triangles (`cells² + 1` offsets).
     start: Vec<u32>,
     items: Vec<u32>,
+    /// Per triangle, the box (min x, min y, max x, max y) outside which the probes never
+    /// take a point to lie on it (see [`drive_reach`]).
+    reach: Vec<[f32; 4]>,
 }
 
 #[derive(Debug, Clone)]
@@ -2424,6 +2483,7 @@ impl DriveGrid {
             + self.surf_maps.capacity() * std::mem::size_of::<Arc<HeightMap>>()
             + self.start.capacity() * 4
             + self.items.capacity() * 4
+            + self.reach.capacity() * 16
     }
 
     /// Add a triangle; walls (faces steeper than about 70°) are left out, they are nothing
@@ -2501,6 +2561,7 @@ impl DriveGrid {
                 surf_index += 1;
             }
         }
+        self.reach = keep.iter().map(drive_reach).collect();
         self.tris = keep;
         self.ridge = keep_ridge;
         self.surf_tris = keep_surf;
@@ -2560,7 +2621,7 @@ impl DriveGrid {
         let k = cy * self.cells + cx;
         let mut best: Option<(f32, Vec3)> = None;
         for &i in &self.items[self.start[k] as usize..self.start[k + 1] as usize] {
-            if self.ridge.get(i as usize).copied().unwrap_or(false) {
+            if self.ridge.get(i as usize).copied().unwrap_or(false) || !self.reaches(i, x, y) {
                 continue;
             }
             let [a, b, c] = self.tris[i as usize];
@@ -2593,6 +2654,13 @@ impl DriveGrid {
         best
     }
 
+    #[inline]
+    fn reaches(&self, i: u32, x: f32, y: f32) -> bool {
+        self.reach
+            .get(i as usize)
+            .is_none_or(|r| x >= r[0] && y >= r[1] && x <= r[2] && y <= r[3])
+    }
+
     /// The wall tops over tile-local (x, y) alone, as [`DriveGrid::probe`] gives the rest.
     pub fn probe_walls(&self, x: f32, y: f32, z_top: f32) -> Probe {
         self.probe_kind(x, y, z_top, true)
@@ -2609,7 +2677,9 @@ impl DriveGrid {
         }
         let k = cy * self.cells + cx;
         for &i in &self.items[self.start[k] as usize..self.start[k + 1] as usize] {
-            if self.ridge.get(i as usize).copied().unwrap_or(false) != ridges {
+            if self.ridge.get(i as usize).copied().unwrap_or(false) != ridges
+                || !self.reaches(i, x, y)
+            {
                 continue;
             }
             let [a, b, c] = self.tris[i as usize];
