@@ -202,6 +202,7 @@ impl StartUi {
         self.line_filter = [0.0; 4];
         self.tour_filter = [0.0; 4];
         self.route_rect = [0.0; 4];
+        self.pic_rect = [0.0; 4];
     }
 }
 
