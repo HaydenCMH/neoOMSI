@@ -152,7 +152,7 @@ pub(super) fn configured_steering(
         )
     } else {
         let (steering, position) =
-            wheel_steering(value, reversed, d.axis_flags[k], d.deadzone(k), gain);
+            wheel_steering(value, reversed, d.axis_flags[k], d.wheel_deadzone(k), gain);
         (steering, Some(position))
     }
 }

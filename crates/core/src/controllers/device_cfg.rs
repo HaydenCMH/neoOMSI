@@ -136,18 +136,30 @@ impl DeviceCfg {
             .clamp(0.0, 0.3)
     }
 
-    pub(crate) fn stick_deadzone(&self, k: usize) -> f32 {
-        let own = self.deadzone.is_some()
+    fn own_deadzone(&self, k: usize) -> bool {
+        self.deadzone.is_some()
             || self
-            .calibration
-            .get(k)
-            .copied()
-            .flatten()
-            .is_some_and(|c| c.deadzone.is_some());
-        if own {
+                .calibration
+                .get(k)
+                .copied()
+                .flatten()
+                .is_some_and(|c| c.deadzone.is_some())
+    }
+
+    pub(crate) fn stick_deadzone(&self, k: usize) -> f32 {
+        if self.own_deadzone(k) {
             self.deadzone(k)
         } else {
             default_stick_deadzone()
+        }
+    }
+
+    /// A wheel's centre is not slack: only a dead zone set for the wheel itself (#866).
+    pub(crate) fn wheel_deadzone(&self, k: usize) -> f32 {
+        if self.own_deadzone(k) {
+            self.deadzone(k)
+        } else {
+            0.0
         }
     }
 }

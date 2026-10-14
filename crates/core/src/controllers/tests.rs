@@ -39,6 +39,14 @@ fn a_stick_dead_zone_still_reaches_the_whole_lock() {
 }
 
 #[test]
+fn a_wheel_steers_from_its_centre_without_its_own_dead_zone() {
+    let mut d = super::DeviceCfg::default();
+    assert_eq!(d.wheel_deadzone(0), 0.0);
+    d.deadzone = Some(0.04);
+    assert_eq!(d.wheel_deadzone(0), 0.04);
+}
+
+#[test]
 fn calibration_stretches_the_travel_and_finds_the_middle() {
     use super::AxisCal;
     let pedal = AxisCal {
