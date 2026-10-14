@@ -318,6 +318,11 @@ pub(crate) fn game_root_pick() {
             return;
         };
         let root = p.to_string_lossy().to_string();
+        if let Some(memo) = crate::startup::root_memo() {
+            if let Err(e) = std::fs::write(&memo, root.as_bytes()) {
+                log::warn!("OMSI 2 folder not remembered: {e}");
+            }
+        }
         let mut c = omsi_launcher_lib::load_config();
         c.root = root.clone();
         match omsi_launcher_lib::save_config(&c) {
