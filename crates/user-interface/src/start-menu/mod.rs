@@ -319,3 +319,5 @@ pub(super) fn head_alpha(pt: f32) -> f32 {
 
 pub(super) const BG: [u8; 4] = [10, 12, 16, 255];
 pub(super) const ACCENT_TEXT: [u8; 4] = [232, 160, 48, 0];
+/// A dropdown row that is over (a trip already gone): well below `MUTED`.
+pub(super) const GONE: [u8; 4] = [85, 85, 88, 0];

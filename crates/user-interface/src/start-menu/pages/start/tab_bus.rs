@@ -121,7 +121,7 @@ impl Ui {
             let dim = v.drop_dim.get(i).copied().unwrap_or(false);
             let col = match (on || hot, dim) {
                 (true, _) => WHITE,
-                (false, true) => MUTED,
+                (false, true) => GONE,
                 (false, false) => SOFT,
             };
             let l = self.text.label(r, scene, &name, px, col);
