@@ -609,6 +609,12 @@ impl Menu {
         if kind == 12 {
             return self.entry_rows().into_iter().map(|r| r.1).collect();
         }
+        if kind == 13 {
+            return crate::weather_setup::CUSTOM_CLOUDS.iter().map(|s| s.to_string()).collect();
+        }
+        if kind == 14 {
+            return crate::weather_setup::CUSTOM_PRECIP.iter().map(|s| s.to_string()).collect();
+        }
         let mut v = vec![::i18n::translate("start.maps.auto", &[])];
         match kind {
             8 => v.extend(self.liveries.iter().cloned()),
@@ -621,6 +627,8 @@ impl Menu {
     pub fn drop_sel(&self, kind: usize) -> usize {
         match kind {
             11 => self.map,
+            13 => self.custom.cloud,
+            14 => self.custom.precip.clamp(0, 2) as usize,
             12 => {
                 let shown = self.entry_shown();
                 self.entry_rows().iter().position(|r| r.0 == shown).unwrap_or(0)
@@ -634,6 +642,8 @@ impl Menu {
     pub fn drop_pick(&mut self, kind: usize, i: usize) {
         match kind {
             11 => self.map = i,
+            13 => self.custom_set(1, i as f32 / (crate::weather_setup::CUSTOM_CLOUDS.len() - 1).max(1) as f32),
+            14 => self.custom_set(2, i as f32 / 2.0),
             12 => {
                 if let Some(r) = self.entry_rows().get(i) {
                     self.entry_pick(r.0);

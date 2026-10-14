@@ -386,7 +386,11 @@ impl App {
                     }
                     Act::Drop(k) => {
                         if let Some(m) = self.menu.as_mut() {
-                            m.drop_toggle(if sect == 1 { 11 + k } else { 8 + k });
+                            m.drop_toggle(match sect {
+                                1 => 11 + k,
+                                3 => 13 + k,
+                                _ => 8 + k,
+                            });
                         }
                     }
                     Act::DropItem(i) => {

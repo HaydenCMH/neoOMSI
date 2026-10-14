@@ -153,7 +153,21 @@ impl Ui {
             2 => self.start_weather_real(r, scene, f, area, v, u),
             3 => {
                 let rh = (58.0 * u).round();
+                let dh = (50.0 * u).round();
+                let _ = hits;
                 for (k, (label, value)) in v.custom.iter().enumerate() {
+                    if k == 1 || k == 2 {
+                        let kind = 12 + k;
+                        let open = v.drop == kind;
+                        self.start_dropdown(r, scene, f, [a[0], y, a[2], y + dh], k, label, value, open, u);
+                        self.start.sliders.push([0.0; 4]);
+                        y += dh;
+                        if open {
+                            y = self.start_drop_list(r, scene, f, a, y + 6.0 * u, v, u);
+                        }
+                        y += 6.0 * u;
+                        continue;
+                    }
                     let rc = [a[0], y, a[2], y + rh];
                     let hot = inside(rc, f.cursor);
                     let focus = v.zone == 1 && v.row == 12 + k;
@@ -177,7 +191,6 @@ impl Ui {
                     self.start.sliders.push([x0, y, x1, y + rh]);
                     y += rh + 6.0 * u;
                 }
-                let _ = hits;
             }
             _ => {
                 self.start_caption(r, scene, "start.maps.presets", a[0] + 4.0 * u, y, u);
