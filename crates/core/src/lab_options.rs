@@ -270,13 +270,17 @@ pub(crate) fn mods_install() {
     let Some(dir) = ::mods::mods_dir() else { return };
     let Some(files) = rfd::FileDialog::new()
         .set_title(::i18n::translate("pause.options.mods.install.title", &[]))
-        .add_filter("ZIP", &["zip"])
+        .add_filter("Mod archive", &["zip", "7z", "rar"])
         .pick_files()
     else {
         return;
     };
     let _ = std::fs::create_dir_all(&dir);
-    for f in files {
+    let (zips, packed): (Vec<_>, Vec<_>) = files.into_iter().partition(|f| {
+        f.extension()
+            .is_some_and(|x| x.eq_ignore_ascii_case("zip"))
+    });
+    for f in zips {
         let Some(name) = f.file_name() else { continue };
         let to = dir.join(name);
         if to != f {
@@ -285,7 +289,22 @@ pub(crate) fn mods_install() {
             }
         }
     }
-    let _ = ::mods::init(&dir, ::mods::legacy_dir().as_deref());
+    let rescan = move || {
+        let _ = ::mods::init(&dir, ::mods::legacy_dir().as_deref());
+        *MOD_SCAN.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    };
+    if packed.is_empty() {
+        rescan();
+        return;
+    }
+    std::thread::spawn(move || {
+        for f in packed {
+            if let Err(e) = omsi_launcher_lib::install_mod_blocking(&f, "extract", None) {
+                log::warn!("mod install {}: {e}", f.display());
+            }
+        }
+        rescan();
+    });
     *MOD_SCAN.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
