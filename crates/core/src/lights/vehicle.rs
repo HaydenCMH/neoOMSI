@@ -53,6 +53,7 @@ pub(super) fn emit_all(
         vehicle_tests: VEHICLE_TESTS_PER_FRAME,
     };
     let mut mine: Vec<Corona> = Vec::new();
+    let first = scene.lights.len();
 
     for (vi, v) in vehicles.iter().enumerate() {
         if f.dist(v.position) > f.visible_range {
@@ -76,6 +77,13 @@ pub(super) fn emit_all(
             }
         }
     }
+    // (as the map's lamps: a light wholly beyond their range lights only a few far pixels)
+    let range = f.light_range();
+    let mut k = 0;
+    scene.lights.retain(|l| {
+        k += 1;
+        k <= first || f.dist(l.position) - (l.radius as f64) < range
+    });
 }
 
 fn cull_hidden(

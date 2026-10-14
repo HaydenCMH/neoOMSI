@@ -64,10 +64,11 @@ impl Renderer {
                 continue;
             }
             let p = (l.position - ro).as_vec3();
-            let x0 = ((p.x - l.radius - origin[0]) / LIGHT_CELL).floor();
-            let x1 = ((p.x + l.radius - origin[0]) / LIGHT_CELL).floor();
-            let y0 = ((p.y - l.radius - origin[1]) / LIGHT_CELL).floor();
-            let y1 = ((p.y + l.radius - origin[1]) / LIGHT_CELL).floor();
+            let [east, west, north, south] = light_reach(l);
+            let x0 = ((p.x - west - origin[0]) / LIGHT_CELL).floor();
+            let x1 = ((p.x + east - origin[0]) / LIGHT_CELL).floor();
+            let y0 = ((p.y - south - origin[1]) / LIGHT_CELL).floor();
+            let y1 = ((p.y + north - origin[1]) / LIGHT_CELL).floor();
             if x1 < 0.0 || y1 < 0.0 || x0 >= side as f32 || y0 >= side as f32 {
                 continue;
             }

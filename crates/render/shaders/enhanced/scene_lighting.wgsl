@@ -310,6 +310,10 @@ fn lamp_light(p: vec3<f32>, n: vec3<f32>, v: vec3<f32>, sf: Surface, thin: bool)
             continue;
         }
         let dist = sqrt(dist2);
+        // (outside a spot's cone: nothing, known before its falloff and beam shape)
+        if (dot(-d, l.dir.xyz) <= l.occ.w * dist) {
+            continue;
+        }
         let ld = d / max(dist, 1e-3);
         let fall = light_falloff(dist2, range, l.extra.y);
         let is_spot = l.dir.w > OMNI_DIR_W;
