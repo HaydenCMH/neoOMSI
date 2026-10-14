@@ -32,8 +32,17 @@ fn open_pipeline_cache(device: &wgpu::Device, info: &wgpu::AdapterInfo) {
     {
         return;
     }
-    let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) else {
-        return;
+    let home = || std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
+    let base = if cfg!(windows) {
+        std::env::var_os("APPDATA")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(home)
+    } else if cfg!(target_os = "macos") {
+        home().join("Library/Application Support")
+    } else {
+        std::env::var_os("XDG_CONFIG_HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| home().join(".config"))
     };
     let key = wgpu::util::pipeline_cache_key(info).unwrap_or_else(|| {
         format!("{}-{:04x}-{:04x}", info.name, info.vendor, info.device)
@@ -42,8 +51,8 @@ fn open_pipeline_cache(device: &wgpu::Device, info: &wgpu::AdapterInfo) {
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
         .collect();
-    let dir = std::path::PathBuf::from(home)
-        .join(".neoomsi")
+    let dir = base
+        .join("neoOMSI")
         .join("cache")
         .join("pipelines");
     let _ = std::fs::create_dir_all(&dir);
