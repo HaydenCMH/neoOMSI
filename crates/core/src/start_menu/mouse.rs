@@ -145,6 +145,7 @@ impl App {
                     Next,
                     Sum(usize),
                     Mode(usize),
+                    Foot,
                     Season(usize),
                     TimeField,
                     DateField,
@@ -216,6 +217,8 @@ impl App {
                     Act::DropItem(st.drop_first + k)
                 } else if let Some(k) = hit(&st.drops, cursor) {
                     Act::Drop(k)
+                } else if hit(&[st.foot], cursor).is_some() {
+                    Act::Foot
                 } else if let Some(k) = hit(&st.sliders, cursor) {
                     Act::Slider(k)
                 } else if let Some(k) = hit(&st.weather_modes, cursor) {
@@ -291,6 +294,13 @@ impl App {
                     Act::Close => self.start_open(0),
                     Act::Tab(k) | Act::Sum(k) => self.start_open(k + 1),
                     Act::Next => self.start_open((sect + 1).min(3)),
+                    Act::Foot => {
+                        if let Some(m) = self.menu.as_mut() {
+                            m.on_foot = !m.on_foot;
+                            ::config::set_setting("gameplay", "start_on_foot", m.on_foot);
+                            let _ = ::config::save();
+                        }
+                    }
                     Act::Mode(_) => {
                         if let Some(m) = self.menu.as_mut() {
                             m.route = !m.route;

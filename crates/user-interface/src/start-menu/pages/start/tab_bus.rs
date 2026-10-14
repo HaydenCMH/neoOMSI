@@ -7,6 +7,14 @@ impl Ui {
         let g = 6.0 * u;
         let mut y = a[1];
 
+        let foot = [a[0], y, a[2], y + th];
+        self.start_toggle(r, scene, f, foot, "start.maps.onfoot", v.on_foot, u);
+        self.start.foot = foot;
+        y += th + g + 6.0 * u;
+        if v.on_foot {
+            return;
+        }
+
         let lab = tr("start.maps.livery");
         self.start_dropdown(r, scene, f, [a[0], y, a[2], y + th], 0, &lab, v.livery, v.drop == 8, u);
         y += th + g;
@@ -244,6 +252,11 @@ impl Ui {
             self.text.rounded(r, scene, [track[0], ty, track[2], ty + th], 3.0 * u, [255, 255, 255, 60]);
         }
         vis
+    }
+
+    pub(super) fn start_foot_note(&mut self, r: &Renderer, scene: &mut Scene, a: [f32; 4], u: f32) {
+        let l = self.text.label(r, scene, "start.maps.onfoot_short", (15.0 * u) as u32, MUTED);
+        l.place(scene, (a[0] + a[2] - l.w as f32) * 0.5, (a[1] + a[3] - l.h as f32) * 0.5);
     }
 
     pub(super) fn start_bus_picture(&mut self, r: &Renderer, scene: &mut Scene, a: [f32; 4], v: &StartView, u: f32) {

@@ -57,7 +57,11 @@ impl Ui {
         }
 
         let (ay0, ay1) = (sy + bs + 16.0 * u, dock[1]);
-        self.start_bus_picture(r, scene, [card[0], ay0, card[2], ay1], v, u);
+        if v.on_foot {
+            self.start_foot_note(r, scene, [card[0], ay0, card[2], ay1], u);
+        } else {
+            self.start_bus_picture(r, scene, [card[0], ay0, card[2], ay1], v, u);
+        }
 
         self.text.rounded(r, scene, dock, 0.0, SIDEBAR);
         self.text.rounded(r, scene, [dock[0], dock[1], dock[2], dock[1] + 1.0], 0.0, [255, 255, 255, 18]);
@@ -70,7 +74,12 @@ impl Ui {
                 map.to_string(),
                 if v.free { tr("start.maps.free") } else { row(7).1 },
             ),
-            ("directions_bus", TAB_KEYS[1], row(0).1, v.maker.to_string()),
+            (
+                if v.on_foot { "directions_walk" } else { "directions_bus" },
+                TAB_KEYS[1],
+                if v.on_foot { tr("start.maps.onfoot_short") } else { row(0).1 },
+                if v.on_foot { String::new() } else { v.maker.to_string() },
+            ),
             (
                 "schedule",
                 TAB_KEYS[2],
@@ -142,6 +151,10 @@ impl Ui {
                 ic.place(scene, cx - tw * 0.5, y + (wl.h as f32 - wi) * 0.5);
             }
             wl.place(scene, cx - tw * 0.5 + wi + 10.0 * u, y);
+            return;
+        }
+        if v.sect == 2 && v.on_foot {
+            self.start_foot_note(r, scene, rc, u);
             return;
         }
         let map = v.maps.get(v.map).cloned().unwrap_or_else(|| "-".to_string());

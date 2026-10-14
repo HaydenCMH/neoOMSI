@@ -169,7 +169,8 @@ impl App {
         };
         let host = m.host;
         self.args.map = m.maps.get(m.map).map(|x| x.1.clone()).unwrap_or(self.args.map.clone());
-        self.args.bus = m.vehicles.get(m.vehicle).map(|x| x.1.clone());
+        self.args.bus = if m.on_foot { None } else { m.vehicles.get(m.vehicle).map(|x| x.1.clone()) };
+        self.args.on_foot = m.on_foot;
         self.args.paint = match m.livery {
             0 => None,
             i => m.liveries.get(i - 1).cloned(),

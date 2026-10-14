@@ -196,6 +196,7 @@ impl App {
             vehicle: m.vehicle,
             vehicles: m.vehicles.len(),
             free: !m.route,
+            on_foot: m.on_foot,
             lines: &line_rows,
             line_sel,
             line_top: m.line_top,

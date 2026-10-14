@@ -1616,6 +1616,8 @@
       "weather": "WEATHER",
       "presets": "PRESETS",
       "icao": "AIRPORT (ICAO)",
+      "onfoot": "Start on foot (no bus needed)",
+      "onfoot_short": "On foot",
       "icao_ph": "ICAO code, e.g. EDDB",
       "icao_auto": "Empty: nearest airport to the map",
       "noair": "No matching airport"

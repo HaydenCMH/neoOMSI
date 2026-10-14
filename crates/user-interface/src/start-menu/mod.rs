@@ -95,6 +95,7 @@ pub struct StartView<'a> {
     pub custom_fracs: &'a [f32],
     pub icao_rows: &'a [(String, String)],
     pub free: bool,
+    pub on_foot: bool,
     pub lines: &'a [LineRow],
     pub line_sel: Option<usize>,
     pub line_top: usize,
@@ -151,6 +152,7 @@ pub struct StartUi {
     pub weathers: Vec<[f32; 4]>,
     pub weather_vis: usize,
     pub weather_modes: Vec<[f32; 4]>,
+    pub foot: [f32; 4],
     pub sliders: Vec<[f32; 4]>,
     pub icao_field: [f32; 4],
     pub icao_picks: Vec<[f32; 4]>,
@@ -215,6 +217,7 @@ impl StartUi {
         self.cal_btn.clear();
         self.weathers.clear();
         self.weather_modes.clear();
+        self.foot = [0.0; 4];
         self.sliders.clear();
         self.icao_field = [0.0; 4];
         self.icao_picks.clear();
@@ -286,7 +289,7 @@ impl Ui {
                     || at(&self.start.weather_modes)
                     || at(&self.start.sliders)
                     || at(&self.start.icao_picks)
-                    || at(&[self.start.icao_field])
+                    || at(&[self.start.icao_field, self.start.foot])
                     || at(&self.start.tabs) || at(&[self.start.go, self.start.quit, self.start.update_btn]);
             }
             StartPage::Multiplayer => {
