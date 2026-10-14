@@ -187,7 +187,7 @@ impl App {
                 "{}|{}",
                 m.maps.get(m.map).map_or("", |x| x.1.as_str()),
                 match m.chosen_tour() {
-                    Some((l, t)) if m.route => format!("{}/{}", l.name, t.number),
+                    Some((l, t)) if m.route => format!("{}/{}/{}", l.name, t.number, m.trip),
                     _ => String::new(),
                 }
             );
@@ -212,7 +212,10 @@ impl App {
         };
         let map = m.mini_key().map(|(n, d)| format!("{n}|{d}")).unwrap_or_default();
         let trips: Vec<String> = match m.chosen_tour() {
-            Some((_, t)) if m.route => t.trips.clone(),
+            Some((_, t)) if m.route => match m.trip.checked_sub(1).and_then(|i| t.runs.get(i)) {
+                Some(run) => vec![run.2.clone()],
+                None => t.trips.clone(),
+            },
             _ => Vec::new(),
         };
         let have = m.mini.as_ref().is_some_and(|x| x.0 == map);
