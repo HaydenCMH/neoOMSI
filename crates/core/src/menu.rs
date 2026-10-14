@@ -7,7 +7,8 @@ pub struct TourItem {
     pub span: String,
     pub start: f32,
     pub trips: Vec<String>,
-    pub runs: Vec<(f32, String)>,
+    /// departure, "first stop > terminus", trip name
+    pub runs: Vec<(f32, String, String)>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -26,6 +27,15 @@ fn hm(m: f32) -> String {
 fn run_time(m: f32) -> String {
     let t = m.max(0.0) as i32;
     format!("{:02}:{:02}", t / 60, t % 60)
+}
+
+/// A trip's first stop by name, as the launcher showed it.
+fn first_stop(tt: &::timetable::TimetableData, trip: &::timetable::Trip) -> String {
+    let named = |id: i64| tt.bus_stops.iter().find(|b| b.object_id == id).map(|b| b.name.trim().to_string());
+    match trip.stations.first() {
+        Some(id) => named(*id).unwrap_or_default(),
+        None => trip.stations_legacy.first().and_then(|r| r.get(2)).map(|n| n.trim().to_string()).unwrap_or_default(),
+    }
 }
 
 fn now_local() -> (i32, i32, i32, i32, i32) {
@@ -826,6 +836,7 @@ impl Menu {
 
     pub fn route_text(&self) -> String {
         match self.chosen_tour() {
+            Some((l, t)) if self.trip > 0 => format!("{}  -  {}  -  {}", l.name, t.number, self.trip_text()),
             Some((l, t)) => format!("{}  -  {}", l.name, t.number),
             None => "-".to_string(),
         }
@@ -899,10 +910,18 @@ impl Menu {
                                 trips.push(x.trip.clone());
                             }
                         }
-                        let mut runs: Vec<(f32, String)> = t
+                        let mut runs: Vec<(f32, String, String)> = t
                             .trips
                             .iter()
-                            .map(|x| (x.departure, tt.trip(&x.trip).map(|t| t.terminus.trim().to_string()).unwrap_or_default()))
+                            .map(|x| {
+                                let trip = tt.trip(&x.trip);
+                                let to = trip.map(|t| t.terminus.trim().to_string()).unwrap_or_default();
+                                let label = match trip.map(|t| first_stop(&tt, t)).filter(|f| !f.is_empty()) {
+                                    Some(from) => format!("{from} > {to}"),
+                                    None => to,
+                                };
+                                (x.departure, label, x.trip.clone())
+                            })
                             .collect();
                         runs.sort_by(|a, b| a.0.total_cmp(&b.0));
                         TourItem {
@@ -952,7 +971,7 @@ impl Menu {
     pub fn trip_rows(&self) -> Vec<String> {
         let mut v = vec![::i18n::translate("start.maps.autotrip", &[])];
         if let Some((_, t)) = self.chosen_tour() {
-            v.extend(t.runs.iter().map(|(dep, to)| format!("{}  {to}", hm(*dep))));
+            v.extend(t.runs.iter().map(|(dep, to, _)| format!("{}  {to}", hm(*dep))));
         }
         v
     }

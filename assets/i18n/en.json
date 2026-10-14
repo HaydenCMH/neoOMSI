@@ -1615,6 +1615,7 @@
       "entry": "START POINT",
       "noentries": "No start points on this map",
       "linetour": "Line {line}, tour {tour}",
+      "linetourtrip": "Line {line}, tour {tour}, trip {trip}",
       "time": "TIME",
       "date": "DATE",
       "now": "Now",
