@@ -51,6 +51,7 @@ impl Ui {
         self.world_rows_rc.clear();
         self.world_tracks.clear();
         self.world_clear.clear();
+        self.world_alt.clear();
         self.world_drop_rc.clear();
 
         let groups = if self.world_view_page == page {
@@ -544,6 +545,28 @@ impl Ui {
                             fade(WHITE, e),
                         );
                         ctl_w += 16.0 * u + mw;
+                    }
+                    if !row.alt.is_empty() {
+                        let mut ax1 = bx - 10.0 * u - vw - 16.0 * u;
+                        if row.meter.is_some() {
+                            ax1 -= 110.0 * u + 16.0 * u;
+                        }
+                        let apx = (14.0 * u) as u32;
+                        let atxt = clip_to(&self.text, &row.alt, apx as f32, mid_w * 0.25);
+                        let aw = self.text.width(&atxt, apx as f32);
+                        let al = self.text.label(r, scene, &atxt, apx, plain(mix(SOFT, WHITE, hv)));
+                        let (pad_x, pad_y) = (10.0 * u, 4.0 * u);
+                        let arc = [
+                            ax1 - aw - pad_x * 2.0,
+                            ry + (row_h - al.h as f32 - pad_y * 2.0) * 0.5,
+                            ax1,
+                            ry + (row_h + al.h as f32 + pad_y * 2.0) * 0.5,
+                        ];
+                        let ha = if inside(arc, f.cursor) && !busy { 1.0 } else { 0.0 };
+                        self.text.rounded(r, scene, arc, 4.0 * u, fade(mix(CHIP, ACCENT_SOFT, ha), e));
+                        al.place(scene, arc[0] + pad_x, arc[1] + pad_y);
+                        self.world_alt.push((n, arc));
+                        ctl_w += 16.0 * u + aw + pad_x * 2.0;
                     }
                 }
                 kind => {

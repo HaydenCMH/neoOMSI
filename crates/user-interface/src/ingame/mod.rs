@@ -118,6 +118,7 @@ pub struct Ui {
     pub world_tracks: Vec<Option<[f32; 4]>>,
     /// The small "x" behind a key binding: (row, its rectangle).
     pub world_clear: Vec<(usize, [f32; 4])>,
+    pub world_alt: Vec<(usize, [f32; 4])>,
     pub world_group: usize,
     pub world_sub: usize,
     pub world_sub_rc: Vec<[f32; 4]>,
