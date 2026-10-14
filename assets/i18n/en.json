@@ -1,4 +1,9 @@
 {
+  "splash": {
+    "compile-shaders": "Compile shaders..",
+    "loading": "Loading..",
+    "load-map": "Loading {map}.."
+  },
   "ingame": {
     "navigator": {
       "kmh": "km/h",

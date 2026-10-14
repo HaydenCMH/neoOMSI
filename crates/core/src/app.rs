@@ -383,7 +383,7 @@ impl App {
                         queue,
                         &view,
                         (pw, ph),
-                        "Compile Shader...",
+                        &::i18n::translate("splash.compile-shaders", &[]),
                         None,
                         started.elapsed().as_secs_f32(),
                     );
@@ -534,7 +534,7 @@ impl App {
         self.surface = Some(surface);
         self.renderer = Some(renderer);
         self.scene = Some(scene);
-        self.present_splash("Starting");
+        self.present_splash(&::i18n::translate("splash.loading", &[]));
         if let Some(w) = self.window.as_ref() {
             w.focus_window();
         }
@@ -594,7 +594,6 @@ impl App {
                 s.config.width as f32,
                 s.config.height as f32,
                 scale,
-                "",
                 caption,
                 None,
                 None,
@@ -673,8 +672,7 @@ impl App {
                 s.config.width as f32,
                 s.config.height as f32,
                 scale,
-                &name,
-                "Loading",
+                &::i18n::translate("splash.load-map", &[("map", &name)]),
                 Some((t / 10.0).fract()),
                 map_dir.as_deref(),
                 t,
@@ -1194,8 +1192,7 @@ impl App {
                 s.config.width as f32,
                 s.config.height as f32,
                 scale,
-                name.trim(),
-                "Loading",
+                &::i18n::translate("splash.load-map", &[("map", &name.trim())]),
                 Some(done as f32 / total.max(1) as f32),
                 map_dir.as_deref(),
                 self.started.elapsed().as_secs_f32(),

@@ -39,7 +39,7 @@ impl App {
     pub(crate) fn back_to_main_menu(&mut self) {
         self.finish_session();
         self.exiting = false;
-        self.present_splash(&::i18n::translate("pause.entry.mainmenu", &[]));
+        self.present_splash(&::i18n::translate("splash.loading", &[]));
         if let Some(ui) = self.ui.as_mut() {
             ui.scene_replaced();
         }
