@@ -26,6 +26,7 @@ pub struct WorldRow {
     pub meter_one_sided: bool,
     /// The row's control is pressed now (a controller button): shown highlighted.
     pub lit: bool,
+    pub alt: String,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -192,6 +193,7 @@ impl Ui {
                     || at(&self.world_sub_rc)
                     || at(&self.world_rows_rc)
                     || self.world_clear.iter().any(|(_, r)| at(&[*r]))
+                    || self.world_alt.iter().any(|(_, r)| at(&[*r]))
                     || at(&self.world_drop_rc)
             }
         };

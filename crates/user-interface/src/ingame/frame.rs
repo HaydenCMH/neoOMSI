@@ -62,6 +62,7 @@ impl Ui {
             world_rows_rc: Vec::new(),
             world_tracks: Vec::new(),
             world_clear: Vec::new(),
+            world_alt: Vec::new(),
             world_group: 0,
             world_sub: 0,
             world_sub_rc: Vec::new(),
