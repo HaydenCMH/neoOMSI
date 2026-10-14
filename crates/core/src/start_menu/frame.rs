@@ -167,6 +167,10 @@ impl App {
         let entry_names: Vec<String> = entry_rows.iter().map(|r| r.1.clone()).collect();
         let entry_sel = entry_rows.iter().position(|r| r.0 == m.entry_shown());
         let route_sub = match m.chosen_tour() {
+            Some((l, t)) if m.route && m.trip > 0 => ::i18n::translate(
+                "start.maps.linetourtrip",
+                &[("line", &l.name), ("tour", &t.number), ("trip", &m.trip_text())],
+            ),
             Some((l, t)) if m.route => {
                 ::i18n::translate("start.maps.linetour", &[("line", &l.name), ("tour", &t.number)])
             }
@@ -198,6 +202,7 @@ impl App {
             zone: m.zone,
             address: &m.address,
             addr_sel: m.addr_sel,
+            addr_focus: m.addr_focus,
             caret,
             mp_tab: m.mp_tab,
             host: m.host,

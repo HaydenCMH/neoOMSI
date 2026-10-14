@@ -48,7 +48,8 @@ impl Ui {
         let fy = a[1] + cap.h as f32 + 8.0 * u;
         let field = [a[0], fy, a[2], fy + fh];
         let hv = self.ease((216, "field", 0), if inside(field, f.cursor) { 1.0 } else { 0.0 }, 10.0);
-        self.text.rounded(r, scene, field, ROW_R * u, ACCENT);
+        let fv = self.ease((216, "fieldon", 0), if v.addr_focus { 1.0 } else { 0.0 }, 12.0);
+        self.text.rounded(r, scene, field, ROW_R * u, mix(OPT_LINE, ACCENT, fv));
         let line = (1.5 * u).round().max(1.0);
         let inner = [field[0] + line, field[1] + line, field[2] - line, field[3] - line];
         self.text.rounded(r, scene, inner, (ROW_R * u - line).max(1.0), mix(OPT_FIELD, OPT_FIELD_HOT, hv));
@@ -62,12 +63,12 @@ impl Ui {
         if v.address.is_empty() {
             let l = self.text.label(r, scene, "start.join.placeholder", px, MUTED);
             l.place(scene, tx, fy + (fh - l.h as f32) * 0.5);
-            if v.caret {
+            if v.caret && v.addr_focus {
                 let c = self.text.label(r, scene, "|", px, WHITE);
                 c.place(scene, tx - c.w as f32 * 0.5, fy + (fh - c.h as f32) * 0.5);
             }
         } else {
-            let shown = format!("{}{}", v.address, if v.caret { "|" } else { "" });
+            let shown = format!("{}{}", v.address, if v.caret && v.addr_focus { "|" } else { "" });
             let text = clip_left(&self.text, &shown, px as f32, room);
             let l = self.text.label(r, scene, &text, px, WHITE);
             if v.addr_sel {

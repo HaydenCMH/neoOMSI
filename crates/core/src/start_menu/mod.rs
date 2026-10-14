@@ -219,6 +219,10 @@ impl App {
             self.args.entry = m.entry_shown() as usize;
             self.args.auto_entry = false;
         }
+        if m.route && m.entry_chosen().is_some() {
+            self.args.entry = m.entry_shown() as usize;
+            self.args.auto_entry = false;
+        }
         let chosen = match situation {
             Some(file) => Some(file),
             None => None,

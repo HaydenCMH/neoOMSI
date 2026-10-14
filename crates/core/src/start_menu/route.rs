@@ -1,6 +1,6 @@
 use super::*;
 
-fn route_image(mini: &minimap::Minimap, trips: &[String], entry: Option<u32>, w: u32, h: u32, zoom: f32, pan: (f32, f32)) -> (Vec<u8>, Vec<(String, f32, f32)>) {
+fn route_image(mini: &minimap::Minimap, trips: &[String], entry: Option<u32>, w: u32, h: u32, zoom: f32, pan: (f32, f32)) -> (Vec<u8>, Vec<(String, f32, f32)>, Vec<(u32, f32, f32)>) {
     const BG: [u8; 3] = [24, 24, 26];
     let (wu, hu) = (w.max(2) as usize, h.max(2) as usize);
     let mut img = vec![255u8; wu * hu * 4];
@@ -40,7 +40,7 @@ fn route_image(mini: &minimap::Minimap, trips: &[String], entry: Option<u32>, w:
         }
     }
     if b.0 > b.2 {
-        return (img, Vec::new());
+        return (img, Vec::new(), Vec::new());
     }
     let (min_ext, pad) = if route.is_empty() { (100.0, 0.04) } else { (500.0, 0.2) };
     let bw = (b.2 - b.0).max(min_ext);
@@ -91,21 +91,26 @@ fn route_image(mini: &minimap::Minimap, trips: &[String], entry: Option<u32>, w:
         paint_disc(&mut img, wu, hu, n.2, 6.0, [255, 255, 255]);
         paint_disc(&mut img, wu, hu, n.2, 3.5, BG);
     }
-    if let Some(chosen) = entry {
-        let mut shown: Vec<u32> = Vec::new();
-        for e in mini.entries.iter().filter(|e| e.index != chosen) {
-            if !shown.contains(&e.index) {
-                shown.push(e.index);
-                paint_disc(&mut img, wu, hu, to(e.x, e.y), 5.0, [255, 255, 255]);
-                paint_disc(&mut img, wu, hu, to(e.x, e.y), 3.0, BG);
-            }
+    let mut hits: Vec<(u32, f32, f32)> = Vec::new();
+    let mut shown: Vec<u32> = Vec::new();
+    for e in mini.entries.iter().filter(|e| Some(e.index) != entry) {
+        if !shown.contains(&e.index) {
+            shown.push(e.index);
+            let c = to(e.x, e.y);
+            paint_disc(&mut img, wu, hu, c, 6.5, [255, 255, 255]);
+            paint_disc(&mut img, wu, hu, c, 4.0, BG);
+            hits.push((e.index, c.0 / wu as f32, c.1 / hu as f32));
         }
+    }
+    if let Some(chosen) = entry {
         if let Some(e) = mini.entries.iter().find(|e| e.index == chosen) {
             let c = to(e.x, e.y);
             paint_disc(&mut img, wu, hu, c, 9.0, [255, 255, 255]);
             paint_disc(&mut img, wu, hu, c, 6.5, [255, 106, 0]);
+            hits.push((e.index, c.0 / wu as f32, c.1 / hu as f32));
         }
     }
+    hits.retain(|l| (0.0..=1.0).contains(&l.1) && (0.0..=1.0).contains(&l.2));
     let step = (named.len() as f32 / (10.0 * zoom.max(1.0))).max(1.0);
     let mut labels = Vec::new();
     let mut at = 0.0f32;
@@ -120,7 +125,7 @@ fn route_image(mini: &minimap::Minimap, trips: &[String], entry: Option<u32>, w:
         }
     }
     labels.retain(|l| (0.0..=1.0).contains(&l.1) && (0.0..=1.0).contains(&l.2));
-    (img, labels)
+    (img, labels, hits)
 }
 
 fn seg_distance(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
@@ -167,6 +172,32 @@ fn paint_seg(img: &mut [u8], w: usize, h: usize, a: (f32, f32), b: (f32, f32), w
 }
 
 impl App {
+    pub(super) fn start_entry_click(&mut self, cursor: (f32, f32)) {
+        let Some(u) = self.ui.as_ref() else {
+            return;
+        };
+        let a = u.start.route_rect;
+        if a[2] <= a[0] || a[3] <= a[1] {
+            return;
+        }
+        let (w, h) = (a[2] - a[0], a[3] - a[1]);
+        let near = u
+            .start
+            .entry_hits
+            .iter()
+            .map(|&(i, nx, ny)| (i, (a[0] + nx * w - cursor.0).hypot(a[1] + ny * h - cursor.1)))
+            .filter(|d| d.1 < 16.0)
+            .min_by(|x, y| x.1.total_cmp(&y.1));
+        let (Some((index, _)), Some(m)) = (near, self.menu.as_mut()) else {
+            return;
+        };
+        if m.route && m.entry_chosen() == Some(index) {
+            m.entry = None;
+        } else {
+            m.entry_pick(index);
+        }
+    }
+
     pub(super) fn start_route_preview(&mut self) {
         let in_tab = self.menu.as_ref().is_some_and(|m| m.page == StartPage::Start && m.sect == 1);
         if !in_tab {
@@ -176,6 +207,7 @@ impl App {
             if let Some(u) = self.ui.as_mut() {
                 u.start.route_pic = None;
                 u.start.stops.clear();
+                u.start.entry_hits.clear();
             }
             return;
         }
@@ -187,7 +219,7 @@ impl App {
                 "{}|{}",
                 m.maps.get(m.map).map_or("", |x| x.1.as_str()),
                 match m.chosen_tour() {
-                    Some((l, t)) if m.route => format!("{}/{}", l.name, t.number),
+                    Some((l, t)) if m.route => format!("{}/{}/{}", l.name, t.number, m.trip),
                     _ => String::new(),
                 }
             );
@@ -212,7 +244,10 @@ impl App {
         };
         let map = m.mini_key().map(|(n, d)| format!("{n}|{d}")).unwrap_or_default();
         let trips: Vec<String> = match m.chosen_tour() {
-            Some((_, t)) if m.route => t.trips.clone(),
+            Some((_, t)) if m.route => match m.trip.checked_sub(1).and_then(|i| t.runs.get(i)) {
+                Some(run) => vec![run.2.clone()],
+                None => t.trips.clone(),
+            },
             _ => Vec::new(),
         };
         let have = m.mini.as_ref().is_some_and(|x| x.0 == map);
@@ -226,14 +261,15 @@ impl App {
         let Some((_, mini)) = m.mini.as_ref().filter(|_| have) else {
             ui.start.route_pic = None;
             ui.start.stops.clear();
+            ui.start.entry_hits.clear();
             return;
         };
-        let entry = if m.route { None } else { Some(m.entry_shown()) };
+        let entry = if m.route { m.entry_chosen() } else { Some(m.entry_shown()) };
         let key = format!("{map}|{}|{w}x{h}|{:.3}|{:.0}|{:.0}|{:?}", trips.join(","), m.zoom, m.pan.0, m.pan.1, entry);
         if m.pic_key == key && ui.start.route_pic.is_some() {
             return;
         }
-        let (rgba, stops) = route_image(mini, &trips, entry, w, h, m.zoom, m.pan);
+        let (rgba, stops, entry_hits) = route_image(mini, &trips, entry, w, h, m.zoom, m.pan);
         let id = match cur_tex {
             Some((id, tw, th)) if (tw, th) == (w, h) => id,
             old => {
@@ -246,6 +282,7 @@ impl App {
         r.update_texture(scene, id, &::texture::Image { width: w, height: h, rgba, has_alpha: true });
         ui.start.route_pic = Some(id);
         ui.start.stops = stops;
+        ui.start.entry_hits = entry_hits;
         if let Some(m) = self.menu.as_mut() {
             m.route_tex = Some((id, w, h));
             m.pic_key = key;

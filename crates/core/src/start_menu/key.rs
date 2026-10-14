@@ -207,14 +207,24 @@ impl App {
                 }
             }
             StartPage::Multiplayer => match code {
-                K::Escape => self.start_back(),
+                K::Escape => {
+                    if let Some(m) = self.menu.as_mut().filter(|m| m.addr_focus) {
+                        m.addr_focus = false;
+                        m.addr_sel = false;
+                    } else {
+                        self.start_back();
+                    }
+                }
+                K::KeyQ | K::KeyE if !ctrl && !self.menu.as_ref().is_some_and(|m| m.addr_focus) => {
+                    self.start_tab(if code == K::KeyQ { -1 } else { 1 });
+                }
                 K::Enter | K::NumpadEnter => {
                     if self.menu.as_ref().is_some_and(|m| m.mp_tab == 0) {
                         self.start_join(event_loop);
                     }
                 }
                 K::Backspace => {
-                    if let Some(m) = self.menu.as_mut().filter(|m| m.mp_tab == 0) {
+                    if let Some(m) = self.menu.as_mut().filter(|m| m.mp_tab == 0 && m.addr_focus) {
                         if m.addr_sel {
                             m.address.clear();
                             m.addr_sel = false;
@@ -224,7 +234,7 @@ impl App {
                     }
                 }
                 K::KeyA if ctrl => {
-                    if let Some(m) = self.menu.as_mut().filter(|m| m.mp_tab == 0 && !m.address.is_empty()) {
+                    if let Some(m) = self.menu.as_mut().filter(|m| m.mp_tab == 0 && m.addr_focus && !m.address.is_empty()) {
                         m.addr_sel = true;
                     }
                 }
@@ -241,7 +251,7 @@ impl App {
                 }
                 K::KeyV if ctrl => {
                     if let Some(t) = clipboard_text() {
-                        if let Some(m) = self.menu.as_mut().filter(|m| m.mp_tab == 0) {
+                        if let Some(m) = self.menu.as_mut().filter(|m| m.mp_tab == 0 && m.addr_focus) {
                             let clean: String = t.lines().next().unwrap_or("").trim().chars().filter(|c| !c.is_control()).collect();
                             if m.addr_sel {
                                 m.address.clear();
