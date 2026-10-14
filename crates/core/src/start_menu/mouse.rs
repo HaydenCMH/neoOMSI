@@ -6,7 +6,7 @@ impl App {
         if !ctrl && self.drv_text(text) {
             return;
         }
-        if let Some(m) = self.menu.as_mut().filter(|m| m.page == StartPage::Multiplayer && m.mp_tab == 0 && !ctrl) {
+        if let Some(m) = self.menu.as_mut().filter(|m| m.page == StartPage::Multiplayer && m.mp_tab == 0 && m.addr_focus && !ctrl) {
             let clean: String = text.chars().filter(|c| !c.is_control()).collect();
             if !clean.is_empty() && m.addr_sel {
                 m.address.clear();
@@ -503,6 +503,13 @@ impl App {
                 let go = hit(&[st.go], cursor).is_some();
                 let host = hit(&[st.host_row], cursor).is_some();
                 let tab0 = self.menu.as_ref().is_some_and(|m| m.mp_tab == 0);
+                let on_field = tab0 && hit(&[st.field], cursor).is_some();
+                if let Some(m) = self.menu.as_mut() {
+                    m.addr_focus = on_field;
+                    if !on_field {
+                        m.addr_sel = false;
+                    }
+                }
                 if let Some(k) = tab {
                     if let Some(m) = self.menu.as_mut() {
                         m.mp_tab = k;

@@ -92,6 +92,7 @@ pub struct StartView<'a> {
     pub zone: usize,
     pub address: &'a str,
     pub addr_sel: bool,
+    pub addr_focus: bool,
     pub caret: bool,
     pub mp_tab: usize,
     pub host: bool,
@@ -186,9 +187,12 @@ pub struct StartUi {
     pub drops: Vec<[f32; 4]>,
     pub drop_items: Vec<[f32; 4]>,
     pub drop_box: [f32; 4],
+    /// A dropdown list waiting to be drawn on top of the page: [x0, y, x1, _].
     pub drop_pending: Option<[f32; 4]>,
     pub drop_first: usize,
+    /// The smoothly scrolled top row of the open dropdown list, and the list it belongs to.
     pub drop_scroll: f32,
+    /// Height of the page in layout units (the limit of an open dropdown list).
     pub view_h: f32,
     pub drop_scroll_for: usize,
     pub details: [f32; 4],
@@ -230,6 +234,7 @@ pub struct StartUi {
     pub route_rect: [f32; 4],
     pub route_status: String,
     pub stops: Vec<(String, f32, f32)>,
+    /// The entry points on the map picture (index, x and y as shares of the picture).
     pub entry_hits: Vec<(u32, f32, f32)>,
     t: f32,
     page_t: f32,

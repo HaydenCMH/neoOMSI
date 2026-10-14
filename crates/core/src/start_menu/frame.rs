@@ -197,6 +197,7 @@ impl App {
             zone: m.zone,
             address: &m.address,
             addr_sel: m.addr_sel,
+            addr_focus: m.addr_focus,
             caret,
             mp_tab: m.mp_tab,
             host: m.host,
