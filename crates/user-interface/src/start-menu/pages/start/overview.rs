@@ -95,20 +95,15 @@ impl Ui {
             let rc = [x, dock[1] + 14.0 * u, x + tw, dock[3] - 14.0 * u];
             let th = rc[3] - rc[1];
             let hot = inside(rc, f.cursor);
-            let on = v.focus == k;
-            let hv = self.ease((220, "sum", k), if hot || on { 1.0 } else { 0.0 }, 10.0);
+            let hv = self.ease((220, "sum", k), if hot { 1.0 } else { 0.0 }, 10.0);
             self.text.rounded(r, scene, rc, ROW_R * u, mix(OPT_ROW, OPT_ROW_HOT, hv));
-            let ov = self.ease((220, "sumon", k), if on { 1.0 } else { 0.0 }, 10.0);
-            if ov > 0.0 {
-                self.accent_bar(r, scene, rc, ov, false, u);
-            }
             let ix = rc[0] + 18.0 * u;
             if let Some(ic) = self.text.icon(r, scene, icon, isz as u32, ACCENT) {
                 ic.place(scene, ix, rc[1] + (th - isz) * 0.5);
             }
             let tx = ix + isz + 16.0 * u;
             let room = rc[2] - tx - 14.0 * u;
-            let cl = self.text.label(r, scene, key, (11.0 * u) as u32, if hot || on { SOFT } else { MUTED });
+            let cl = self.text.label(r, scene, key, (11.0 * u) as u32, if hot { SOFT } else { MUTED });
             let vt = clip_to(&self.text, value, 19.0 * u, room);
             let vl = self.text.label(r, scene, &vt, (19.0 * u) as u32, WHITE);
             let st = clip_to(&self.text, sub, 13.0 * u, room);
