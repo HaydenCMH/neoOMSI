@@ -466,6 +466,12 @@ fn shade_enhanced(in: FsIn, puddle_weight: ptr<function, vec2<f32>>, capture: bo
         alpha = 1.0;
     }
     alpha = alpha * clamp(window_wetness(in), 0.0, 1.0);
+    // (whole 2x2 quads of blended texels that show nothing, most of a terrain layer, are not lit)
+    let seen = alpha + abs(dpdxFine(alpha)) + abs(dpdyFine(alpha));
+    let quad_seen = seen + abs(dpdxFine(seen)) + abs(dpdyFine(seen));
+    if (mode > 1.5 && quad_seen <= 0.0 && material.ambient.w <= 1.5 && material.flags.x <= 0.5 && enh.debug.x <= 0.5) {
+        return vec4<f32>(0.0);
+    }
     let pre = enh.exposure.x;
     let to_cam = eye - in.world;
     let dist = length(to_cam);
