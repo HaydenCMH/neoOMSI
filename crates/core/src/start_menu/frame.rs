@@ -159,6 +159,7 @@ impl App {
             .map(|(_, label, span)| TourRow { label, span })
             .collect();
         let tour_sel = m.tour_rows().iter().position(|r| r.0 == m.tour);
+        let trip_text = m.trip_text();
         let entry_text = m.entry_text();
         let entry_rows = m.entry_rows();
         let entry_names: Vec<String> = entry_rows.iter().map(|r| r.1.clone()).collect();
@@ -205,6 +206,7 @@ impl App {
             tour_sel,
             tour_top: m.tour_top,
             tour_query: &m.tour_query,
+            trip_text: &trip_text,
             route_sub: &route_sub,
             entries: &entry_names,
             entry_text: &entry_text,

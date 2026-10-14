@@ -1601,6 +1601,8 @@
       "filter": "Filter...",
       "nolines": "No lines on this map",
       "notours": "No tours",
+      "trip": "TRIP",
+      "autotrip": "By start time",
       "mappreview": "Loading map...",
       "autoentry": "Automatic (nearest to the first stop)",
       "entry": "START POINT",

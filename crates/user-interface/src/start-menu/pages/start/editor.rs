@@ -83,13 +83,13 @@ impl Ui {
         let gap = 16.0 * u;
         let filter_h = (38.0 * u).round();
         let route = !v.free;
-        let open = v.drop == 11 || v.drop == 12;
+        let open = v.drop == 11 || v.drop == 12 || v.drop == 16;
         let open_h = if open { v.drop_items.len().clamp(1, 6) as f32 * row_h + 14.0 * u } else { 0.0 };
         let head = filter_h + 6.0 * u;
-        let fixed = (cap + 6.0 * u + field_h) * if route { 1.0 } else { 2.0 }
+        let fixed = (cap + 6.0 * u + field_h) * 2.0
             + field_h
             + open_h
-            + if route { gap * 3.0 + head * 2.0 } else { gap * 2.0 };
+            + if route { gap * 4.0 + head * 2.0 } else { gap * 2.0 };
         let avail = (a[3] - a[1] - fixed).max(row_h * 4.0);
         let lh = (avail * 0.4).max(row_h * 2.0);
         let th = (avail * 0.6).max(row_h * 2.0);
@@ -151,5 +151,14 @@ impl Ui {
         self.start.tour_vis = self.start_pick_list(r, scene, f, tb, &rows, false, v.tour_sel, v.tour_top, 217, u, &mut rects, v.zone == 3, "start.maps.notours");
         self.start.tours = rects;
         self.start.tour_box = tb;
+        y += th + gap;
+
+        self.start_caption(r, scene, "start.maps.trip", a[0] + 4.0 * u, y, u);
+        y += cap + 6.0 * u;
+        self.start_dropdown(r, scene, f, [a[0], y, a[2], y + field_h], 1, "", v.trip_text, v.drop == 16, u);
+        y += field_h;
+        if v.drop == 16 {
+            self.start_drop_list(r, scene, f, a, y + 6.0 * u, v, u);
+        }
     }
 }

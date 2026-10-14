@@ -544,6 +544,7 @@ impl App {
             let mut menu = menu::Menu::new(&self.args.root, &self.args.map);
             menu.refresh_continue();
             menu.apply_last_situation();
+            menu.recall();
             self.menu = Some(menu);
         }
     }
