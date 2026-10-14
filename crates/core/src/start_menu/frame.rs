@@ -107,6 +107,7 @@ impl App {
         }
         if let Some(m) = self.menu.as_mut().filter(|m| m.page == StartPage::Start && m.route) {
             m.refresh_lines(&root);
+            m.fix_filters();
         }
         if self.menu.is_some() {
             let hwnd = self.window.as_deref().and_then(controllers::window_handle);

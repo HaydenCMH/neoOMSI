@@ -955,9 +955,18 @@ impl Menu {
         let dep = self.chosen_tour().and_then(|(_, t)| t.runs.get(i.checked_sub(1)?)).map(|r| r.0);
         if let Some(dep) = dep {
             let at = (dep.floor() as i32 - 3).max(0);
-            self.hour = at / 60 % 24;
-            self.minute = at % 60;
+            // a later trip keeps the start time: the bus waits for it
+            if self.hour * 60 + self.minute > at {
+                self.hour = at / 60 % 24;
+                self.minute = at % 60;
+            }
         }
+    }
+
+    /// A tour still has a trip leaving at the start time or later.
+    fn tour_left(&self, t: &TourItem) -> bool {
+        let now = (self.hour * 60 + self.minute) as f32;
+        t.runs.iter().any(|r| r.0 >= now)
     }
 
     pub fn line_rows(&self) -> Vec<(usize, String, String)> {
@@ -966,6 +975,7 @@ impl Menu {
             .iter()
             .enumerate()
             .filter(|(_, l)| q.is_empty() || format!("{} {}", l.name, l.title).to_lowercase().contains(&q) || l.tours.iter().any(|t| t.runs.iter().any(|r| r.1.to_lowercase().contains(&q))))
+            .filter(|(_, l)| l.tours.iter().any(|t| self.tour_left(t)))
             .map(|(i, l)| (i, l.name.clone(), l.title.clone()))
             .collect()
     }
@@ -985,6 +995,7 @@ impl Menu {
             .iter()
             .enumerate()
             .filter(|(_, t)| q.is_empty() || format!("{} {}", t.number, t.span).to_lowercase().contains(&q))
+            .filter(|(_, t)| self.tour_left(t))
             .map(|(i, t)| (i, format!("{word} {}", t.number), t.span.clone()))
             .collect()
     }
