@@ -659,6 +659,15 @@ impl Menu {
         }
     }
 
+    /// The rows of dropdown `kind` shown dimmed: the trips that left before the start time.
+    pub fn drop_dim(&self, kind: usize) -> Vec<bool> {
+        let now = (self.hour * 60 + self.minute) as f32;
+        match (kind, self.chosen_tour()) {
+            (16, Some((_, t))) => std::iter::once(false).chain(t.runs.iter().map(|r| r.0 < now)).collect(),
+            _ => Vec::new(),
+        }
+    }
+
     pub fn drop_items(&self, kind: usize) -> Vec<String> {
         if kind == 11 {
             return self.map_names();

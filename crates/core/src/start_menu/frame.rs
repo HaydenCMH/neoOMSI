@@ -145,6 +145,7 @@ impl App {
         let rows = m.rows();
         let (time_text, cal_title, cal_cells) = (m.time_text(), m.cal_title(), m.cal_cells());
         let drop_items = if m.drop != 0 { m.drop_items(m.drop) } else { Vec::new() };
+        let drop_dim = m.drop_dim(m.drop);
         let (weather_rows, custom_rows) = (m.weather_rows(), m.custom_rows());
         let icao_rows = m.icao_matches(5);
         let custom_fracs = m.custom_fracs();
@@ -219,6 +220,7 @@ impl App {
             query: &m.veh_query,
             drop: m.drop,
             drop_items: &drop_items,
+            drop_dim: &drop_dim,
             drop_sel: m.drop_sel(m.drop),
             drop_top: m.drop_top,
             edit: m.edit,

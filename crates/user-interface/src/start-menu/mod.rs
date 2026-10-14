@@ -72,6 +72,7 @@ pub struct StartView<'a> {
     pub query: &'a str,
     pub drop: usize,
     pub drop_items: &'a [String],
+    pub drop_dim: &'a [bool],
     pub drop_sel: usize,
     pub drop_top: usize,
     pub edit: u8,

@@ -118,7 +118,13 @@ impl Ui {
                 self.text.rounded(r, scene, rc, ROW_R * u, fade(base, if on { 1.0 } else { hv }));
             }
             let name = clip_to(&self.text, &v.drop_items[i], px as f32, rc[2] - rc[0] - TEXT_IN * u * 2.0);
-            let l = self.text.label(r, scene, &name, px, if on || hot { WHITE } else { SOFT });
+            let dim = v.drop_dim.get(i).copied().unwrap_or(false);
+            let col = match (on || hot, dim) {
+                (true, _) => WHITE,
+                (false, true) => MUTED,
+                (false, false) => SOFT,
+            };
+            let l = self.text.label(r, scene, &name, px, col);
             l.place(scene, rc[0] + TEXT_IN * u, ry + (row_h - l.h as f32) * 0.5);
             self.start.drop_items.push(rc);
         }
