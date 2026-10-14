@@ -174,8 +174,19 @@ impl App {
         };
         let (addr_state, addr_note) = probe_text(m.probe_of(&m.address), false);
         let server_state: Vec<(u8, String)> = m.servers.iter().map(|s| probe_text(m.probe_of(&s.1), true)).collect();
+        let profile = profile::load(m.page == StartPage::Profile);
+        let drivers = ui::DriverMenu {
+            open: m.drv_open,
+            names: m.drv_names.clone(),
+            current: m.drv_names.iter().position(|n| n.eq_ignore_ascii_case(&profile.name)),
+            new: m.drv_new.clone(),
+            confirm: m.drv_confirm,
+            note: m.drv_note.clone(),
+        };
         let view = StartView {
             update: &update,
+            profile: &profile,
+            drivers: &drivers,
             page: m.page,
             sel: m.sel,
             can_continue: m.continue_sit.is_some(),
@@ -313,6 +324,15 @@ impl App {
         let Some(k) = self.menu.as_ref().and_then(|m| m.slider) else {
             return;
         };
+        if k == usize::MAX {
+            let bx = self.ui.as_ref().map_or([0.0; 4], |u| u.start.drop_box);
+            if let Some(m) = self.menu.as_mut().filter(|m| m.drop != 0 && bx[3] > bx[1]) {
+                let max = m.drop_items(m.drop).len().saturating_sub(6);
+                let t = ((cursor.1 - bx[1]) / (bx[3] - bx[1])).clamp(0.0, 1.0);
+                m.drop_top = (t * max as f32).round() as usize;
+            }
+            return;
+        }
         let rc = self.ui.as_ref().and_then(|u| u.start.sliders.get(k).copied());
         if let (Some(rc), Some(m)) = (rc, self.menu.as_mut()) {
             if rc[2] > rc[0] {

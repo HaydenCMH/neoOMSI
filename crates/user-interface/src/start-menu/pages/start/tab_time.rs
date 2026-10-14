@@ -163,7 +163,7 @@ impl Ui {
                         self.start.sliders.push([0.0; 4]);
                         y += dh;
                         if open {
-                            y = self.start_drop_list(r, scene, f, a, y + 6.0 * u, v, u);
+                            self.start_drop_list(r, scene, f, a, y + 6.0 * u, v, u);
                         }
                         y += 6.0 * u;
                         continue;
@@ -265,9 +265,18 @@ impl Ui {
         let bar_room = if count > vis { 14.0 * u } else { 0.0 };
         let px = (16.0 * u) as u32;
         let isz = (20.0 * u).round();
-        for (k, i) in (first..n.min(first + vis)).enumerate() {
-            let y = a[1] + k as f32 * row_h;
-            let rc = [a[0], y, a[2] - bar_room, y + row_h];
+        let (i0, frac) = self.glide_rows(227, first);
+        let bottom = a[1] + vis as f32 * row_h;
+        let slots = vis.min(n - first);
+        let mut slot_rects = vec![[0.0f32; 4]; slots];
+        let alpha0 = self.text.alpha;
+        for i in i0..n.min(i0 + vis + 1) {
+            let y = a[1] + ((i - i0) as f32 - frac) * row_h;
+            let Some((vy0, vy1, seen)) = row_seen(a[1], bottom, y, row_h) else {
+                continue;
+            };
+            let rc = [a[0], vy0, a[2] - bar_room, vy1];
+            self.text.alpha = alpha0 * seen.powi(3);
             let on = v.weather == i;
             let hot = inside(rc, f.cursor);
             let hv = self.ease((227, "item", i), if hot || on { 1.0 } else { 0.0 }, 10.0);
@@ -288,13 +297,17 @@ impl Ui {
             let name = clip_to(&self.text, label, px as f32, rc[2] - tx - TEXT_IN * u);
             let l = self.text.label(r, scene, &name, px, if on || hot { WHITE } else { SOFT });
             l.place(scene, tx, y + (row_h - l.h as f32) * 0.5);
-            rects.push(rc);
+            if i >= first && i - first < slots {
+                slot_rects[i - first] = rc;
+            }
         }
+        self.text.alpha = alpha0;
+        rects.extend(slot_rects);
         if count > vis {
             let track = [a[2] - 6.0 * u, a[1], a[2], a[1] + vis as f32 * row_h];
             self.text.rounded(r, scene, track, 3.0 * u, OPT_TRACK);
             let th = ((vis as f32 / count as f32) * (track[3] - track[1])).max(24.0 * u);
-            let ty = track[1] + (track[3] - track[1] - th) * (first - base) as f32 / (count - vis) as f32;
+            let ty = track[1] + (track[3] - track[1] - th) * ((i0 as f32 + frac) - base as f32).max(0.0) / (count - vis) as f32;
             self.text.rounded(r, scene, [track[0], ty, track[2], ty + th], 3.0 * u, [255, 255, 255, 60]);
         }
         vis

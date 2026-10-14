@@ -72,6 +72,7 @@ impl Ui {
             self.start_button(r, scene, f, btn, "start.maps.drive", "play_arrow", 0, u);
             self.start.go = btn;
         }
+        self.start_drop_flush(r, scene, f, v, u);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -83,12 +84,9 @@ impl Ui {
         let gap = 16.0 * u;
         let filter_h = (38.0 * u).round();
         let route = !v.free;
-        let open = v.drop == 11 || v.drop == 12 || v.drop == 16;
-        let open_h = if open { v.drop_items.len().clamp(1, 6) as f32 * row_h + 14.0 * u } else { 0.0 };
         let head = filter_h + 6.0 * u;
         let fixed = (cap + 6.0 * u + field_h) * 2.0
             + field_h
-            + open_h
             + if route { gap * 4.0 + head * 2.0 } else { gap * 2.0 };
         let avail = (a[3] - a[1] - fixed).max(row_h * 4.0);
         let lh = (avail * 0.4).max(row_h * 2.0);
@@ -101,7 +99,7 @@ impl Ui {
         self.start_dropdown(r, scene, f, [a[0], y, a[2], y + field_h], 0, "", map, v.drop == 11, u);
         y += field_h;
         if v.drop == 11 {
-            y = self.start_drop_list(r, scene, f, a, y + 6.0 * u, v, u);
+            self.start_drop_list(r, scene, f, a, y + 6.0 * u, v, u);
         }
         y += gap;
 
@@ -111,7 +109,7 @@ impl Ui {
             self.start_dropdown(r, scene, f, [a[0], y, a[2], y + field_h], 1, "", v.entry_text, v.drop == 12, u);
             y += field_h;
             if v.drop == 12 {
-                y = self.start_drop_list(r, scene, f, a, y + 6.0 * u, v, u);
+                self.start_drop_list(r, scene, f, a, y + 6.0 * u, v, u);
             }
             y += gap;
         }

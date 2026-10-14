@@ -210,6 +210,7 @@ impl App {
             let crash = std::mem::take(&mut p.vehicle.last_crash);
             if !self.exiting && !self.paused {
                 self.career.tick(dt, &p.vehicle, riders);
+                self.career.autosave(dt);
             }
             if crash > 0.0 {
                 self.career

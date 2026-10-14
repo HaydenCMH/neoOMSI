@@ -3,6 +3,9 @@ use super::*;
 impl App {
     pub(crate) fn start_text(&mut self, text: &str) {
         let ctrl = self.keys.contains(&KeyCode::ControlLeft) || self.keys.contains(&KeyCode::ControlRight);
+        if !ctrl && self.drv_text(text) {
+            return;
+        }
         if let Some(m) = self.menu.as_mut().filter(|m| m.page == StartPage::Multiplayer && m.mp_tab == 0 && !ctrl) {
             let clean: String = text.chars().filter(|c| !c.is_control()).collect();
             if !clean.is_empty() && m.addr_sel {
@@ -33,7 +36,7 @@ impl App {
         let (ve, ebox) = self.ui.as_ref().map_or((6, [0.0; 4]), |u| (u.start.entry_vis, u.start.entry_box));
         if let Some(m) = self.menu.as_mut().filter(|m| m.page == StartPage::Start) {
             match m.sect {
-                1 | 2 if m.drop != 0 && hit(&[dbox], cursor).is_some() => {
+                1 | 2 | 3 if m.drop != 0 && hit(&[dbox], cursor).is_some() => {
                     let max = m.drop_items(m.drop).len().saturating_sub(6) as f32;
                     m.drop_top = (m.drop_top as f32 - amount * 2.0).clamp(0.0, max).round() as usize;
                 }
@@ -94,6 +97,9 @@ impl App {
                 }
                 return;
             }
+            if self.drv_click(cursor) {
+                return;
+            }
             if self.ui.as_ref().is_some_and(|u| hit(&[u.start.quit], cursor).is_some()) {
                 crate::platform::exit(event_loop);
                 return;
@@ -111,6 +117,9 @@ impl App {
                 m.drag = None;
                 m.slider = None;
             }
+            return;
+        }
+        if self.drv_click(cursor) {
             return;
         }
         let Some(u) = self.ui.as_ref() else {
@@ -138,6 +147,7 @@ impl App {
                     }
                 }
                 enum Act {
+                    DropBar,
                     Go,
                     Cont,
                     Close,
@@ -193,7 +203,12 @@ impl App {
                     .menu
                     .as_ref()
                     .map_or(0, |m| m.weather_top.min(m.weathers.len().saturating_sub(st.weather_vis)).max(4.min(m.weathers.len())));
-                let act = if hit(&[st.go], cursor).is_some() {
+                let act = if st.drop_box[2] > st.drop_box[0] && hit(&[st.drop_box], cursor).is_some() {
+                    match hit(&st.drop_items, cursor) {
+                        Some(k) => Act::DropItem(st.drop_first + k),
+                        None => Act::DropBar,
+                    }
+                } else if hit(&[st.go], cursor).is_some() {
                     Act::Go
                 } else if hit(&[st.cont], cursor).is_some() {
                     Act::Cont
@@ -267,7 +282,7 @@ impl App {
                     if m.cal_open && !matches!(act, Act::Cal(_) | Act::CalDay(_) | Act::DateField) {
                         m.cal_open = false;
                     }
-                    if m.drop != 0 && !matches!(act, Act::Drop(_) | Act::DropItem(_)) {
+                    if m.drop != 0 && !matches!(act, Act::Drop(_) | Act::DropItem(_) | Act::DropBar) {
                         m.drop = 0;
                     }
                     if matches!(act, Act::TimeField) {
@@ -407,6 +422,15 @@ impl App {
                             });
                         }
                     }
+                    Act::DropBar => {
+                        let bx = self.ui.as_ref().map_or([0.0; 4], |u| u.start.drop_box);
+                        if cursor.0 >= bx[2] - ((bx[2] - bx[0]) * 0.06).max(16.0) {
+                            if let Some(m) = self.menu.as_mut() {
+                                m.slider = Some(usize::MAX);
+                            }
+                            self.start_slider_drag();
+                        }
+                    }
                     Act::DropItem(i) => {
                         if let Some(m) = self.menu.as_mut() {
                             let kind = m.drop;
@@ -488,7 +512,7 @@ impl App {
                     self.start_join_server(event_loop, k);
                 }
             }
-            StartPage::Options => {}
+            StartPage::Options | StartPage::Profile => {}
         }
     }
 }

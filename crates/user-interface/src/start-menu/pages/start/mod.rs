@@ -13,6 +13,12 @@ const HEADS: [&str; 3] = ["start.maps.h1", "start.maps.h2", "start.maps.h3"];
 
 type Hits = ([[f32; 4]; 16], [[f32; 4]; 32]);
 
+fn row_seen(top: f32, bottom: f32, y: f32, row_h: f32) -> Option<(f32, f32, f32)> {
+    let (y0, y1) = (y.max(top), (y + row_h).min(bottom));
+    let seen = ((y1 - y0) / row_h).clamp(0.0, 1.0);
+    (seen > 0.0).then_some((y0, y1, seen))
+}
+
 fn tr(key: &str) -> String {
     (&*crate::tr(key)).to_string()
 }
@@ -20,6 +26,7 @@ fn tr(key: &str) -> String {
 impl Ui {
     pub(in super::super) fn draw_start_maps(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, m: Metrics, v: &StartView) {
         let Metrics { w, h, u, .. } = m;
+        self.start.view_h = h;
         self.text.rounded(r, scene, [0.0, 0.0, w, h], 0.0, BG);
         let bar_h = self.draw_start_bar(r, scene, f, m, 0);
         if self.start.last_sect != Some(v.sect) {

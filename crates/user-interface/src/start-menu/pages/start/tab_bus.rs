@@ -19,7 +19,7 @@ impl Ui {
         self.start_dropdown(r, scene, f, [a[0], y, a[2], y + th], 0, &lab, v.livery, v.drop == 8, u);
         y += th + g;
         if v.drop == 8 {
-            y = self.start_drop_list(r, scene, f, a, y, v, u) + g;
+            self.start_drop_list(r, scene, f, a, y - g + 4.0 * u, v, u);
         }
 
         let dh = (32.0 * u).round();
@@ -40,7 +40,7 @@ impl Ui {
                 self.start_dropdown(r, scene, f, [a[0], y, a[2], y + th], k, &lab, val, v.drop == 8 + k, u);
                 y += th + g;
                 if v.drop == 8 + k {
-                    y = self.start_drop_list(r, scene, f, a, y, v, u) + g;
+                    self.start_drop_list(r, scene, f, a, y - g + 4.0 * u, v, u);
                 }
             }
             let rc = [a[0], y, a[2], y + th];
@@ -97,19 +97,61 @@ impl Ui {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn start_drop_list(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, a: [f32; 4], y: f32, v: &StartView, u: f32) -> f32 {
+    pub(super) fn start_drop_list(&mut self, _r: &Renderer, _scene: &mut Scene, _f: &Frame, a: [f32; 4], y: f32, _v: &StartView, _u: f32) {
+        let field_top = self.start.drops.last().map_or(y, |r| r[1]);
+        self.start.drop_pending = Some([a[0], y, a[2], field_top]);
+    }
+
+    pub(super) fn start_drop_flush(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, v: &StartView, u: f32) {
+        if let Some(p) = self.start.drop_pending.take() {
+            self.start_drop_draw(r, scene, f, [p[0], p[3], p[2], 0.0], p[1], v, u);
+        } else {
+            self.start.drop_scroll_for = 0;
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn start_drop_draw(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, a: [f32; 4], y: f32, v: &StartView, u: f32) -> f32 {
         let row_h = (ROW_H * u).round();
         let n = v.drop_items.len();
         let vis = n.clamp(1, 6);
         let pad = 4.0 * u;
-        let bx = [a[0], y, a[2], y + vis as f32 * row_h + pad * 2.0];
-        self.text.rounded(r, scene, bx, ROW_R * u, OPT_ROW);
-        let first = v.drop_top.min(n.saturating_sub(vis));
-        let bar_room = if n > vis { 12.0 * u } else { 0.0 };
+        let h = vis as f32 * row_h + pad * 2.0;
+        let (limit, edge) = (self.start.view_h - 10.0 * u, 8.0 * u);
+        let mut y = y;
+        if y + h > limit {
+            let up = a[1] - 6.0 * u - h;
+            y = if up >= edge { up } else { (limit - h).max(edge) };
+        }
+        let bx = [a[0], y, a[2], y + h];
+        self.text.rounded(r, scene, [bx[0] - 1.0, bx[1] - 1.0, bx[2] + 1.0, bx[3] + 1.0], ROW_R * u + 1.0, [255, 255, 255, 30]);
+        self.text.rounded(r, scene, bx, ROW_R * u, [30, 30, 34, 255]);
+        let target = v.drop_top.min(n.saturating_sub(vis));
+        if self.start.drop_scroll_for != v.drop {
+            self.start.drop_scroll_for = v.drop;
+            self.start.drop_scroll = target as f32;
+        }
+        let cur = self.start.drop_scroll;
+        let k = 1.0 - (-self.anim_dt * 20.0).exp();
+        let mut s = cur + (target as f32 - cur) * k;
+        if (target as f32 - s).abs() < 0.01 {
+            s = target as f32;
+        }
+        self.start.drop_scroll = s;
+        let first = s.floor().max(0.0) as usize;
+        let frac = s - first as f32;
+        let bar_room = if n > vis { 14.0 * u } else { 0.0 };
         let px = (15.0 * u) as u32;
-        for (k, i) in (first..n.min(first + vis)).enumerate() {
-            let ry = y + pad + k as f32 * row_h;
-            let rc = [a[0] + pad, ry, a[2] - pad - bar_room, ry + row_h];
+        let (top, bottom) = (y + pad, y + pad + vis as f32 * row_h);
+        let backup_alpha = self.text.alpha;
+        for i in first..n.min(first + vis + 1) {
+            let ry = top + ((i - first) as f32 - frac) * row_h;
+            let (vy0, vy1) = (ry.max(top), (ry + row_h).min(bottom));
+            let seen = ((vy1 - vy0) / row_h).clamp(0.0, 1.0);
+            if seen <= 0.0 {
+                continue;
+            }
+            let rc = [a[0] + pad, vy0, a[2] - pad - bar_room, vy1];
             let on = v.drop_sel == i;
             let hot = inside(rc, f.cursor);
             let hv = self.ease((232, "item", i), if hot || on { 1.0 } else { 0.0 }, 10.0);
@@ -118,6 +160,7 @@ impl Ui {
                 self.text.rounded(r, scene, rc, ROW_R * u, fade(base, if on { 1.0 } else { hv }));
             }
             let name = clip_to(&self.text, &v.drop_items[i], px as f32, rc[2] - rc[0] - TEXT_IN * u * 2.0);
+            self.text.alpha = backup_alpha * if seen < 1.0 { seen * seen * seen } else { 1.0 };
             let dim = v.drop_dim.get(i).copied().unwrap_or(false);
             let col = match (on || hot, dim) {
                 (true, _) => WHITE,
@@ -126,13 +169,14 @@ impl Ui {
             };
             let l = self.text.label(r, scene, &name, px, col);
             l.place(scene, rc[0] + TEXT_IN * u, ry + (row_h - l.h as f32) * 0.5);
+            self.text.alpha = backup_alpha;
             self.start.drop_items.push(rc);
         }
         if n > vis {
             let track = [a[2] - pad - 6.0 * u, y + pad, a[2] - pad, y + pad + vis as f32 * row_h];
             self.text.rounded(r, scene, track, 3.0 * u, OPT_TRACK);
             let th = ((vis as f32 / n as f32) * (track[3] - track[1])).max(24.0 * u);
-            let ty = track[1] + (track[3] - track[1] - th) * first as f32 / (n - vis) as f32;
+            let ty = track[1] + (track[3] - track[1] - th) * (s / (n - vis) as f32).clamp(0.0, 1.0);
             self.text.rounded(r, scene, [track[0], ty, track[2], ty + th], 3.0 * u, [255, 255, 255, 60]);
         }
         self.start.drop_box = bx;
@@ -212,10 +256,19 @@ impl Ui {
         let first = v.veh_top.min(n.saturating_sub(vis));
         let bar_room = if n > vis { 14.0 * u } else { 0.0 };
         let px = (15.0 * u) as u32;
-        for (k, i) in (first..n.min(first + vis)).enumerate() {
+        let (i0, frac) = self.glide_rows(222, first);
+        let bottom = a[1] + vis as f32 * row_h;
+        let slots = vis.min(n - first);
+        let mut slot_rects = vec![[0.0f32; 4]; slots];
+        let alpha0 = self.text.alpha;
+        for i in i0..n.min(i0 + vis + 1) {
             let row = &rows[i];
-            let y = a[1] + k as f32 * row_h;
-            let rc = [a[0], y, a[2] - bar_room, y + row_h];
+            let y = a[1] + ((i - i0) as f32 - frac) * row_h;
+            let Some((vy0, vy1, seen)) = row_seen(a[1], bottom, y, row_h) else {
+                continue;
+            };
+            let rc = [a[0], vy0, a[2] - bar_room, vy1];
+            self.text.alpha = alpha0 * seen.powi(3);
             let hot = inside(rc, f.cursor);
             let header = row.vehicle.is_none();
             let hv = self.ease((222, "item", i), if hot || row.on { 1.0 } else { 0.0 }, 10.0);
@@ -245,16 +298,20 @@ impl Ui {
                 let l = self.text.label(r, scene, &name, px, if row.on || hot { WHITE } else { SOFT });
                 l.place(scene, ix, y + (row_h - l.h as f32) * 0.5);
             }
-            if header && k > 0 {
+            if header && i > i0 {
                 self.text.rounded(r, scene, [rc[0] + 4.0 * u, y, rc[2] - 4.0 * u, y + 1.0], 0.0, [255, 255, 255, 14]);
             }
-            self.start.veh.push(rc);
+            if i >= first && i - first < slots {
+                slot_rects[i - first] = rc;
+            }
         }
+        self.text.alpha = alpha0;
+        self.start.veh.extend(slot_rects);
         if n > vis {
             let track = [a[2] - 6.0 * u, a[1], a[2], a[1] + vis as f32 * row_h];
             self.text.rounded(r, scene, track, 3.0 * u, OPT_TRACK);
             let th = ((vis as f32 / n as f32) * (track[3] - track[1])).max(24.0 * u);
-            let ty = track[1] + (track[3] - track[1] - th) * first as f32 / (n - vis) as f32;
+            let ty = track[1] + (track[3] - track[1] - th) * (i0 as f32 + frac) / (n - vis) as f32;
             self.text.rounded(r, scene, [track[0], ty, track[2], ty + th], 3.0 * u, [255, 255, 255, 60]);
         }
         vis
