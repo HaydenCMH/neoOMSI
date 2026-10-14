@@ -1,7 +1,9 @@
+mod drivers;
 mod frame;
 mod key;
 pub(crate) mod minimap;
 mod mouse;
+mod profile;
 mod route;
 mod update;
 
@@ -109,6 +111,7 @@ impl App {
             Some(StartPage::Start) => {}
             Some(StartPage::Multiplayer) => self.start_set_page(StartPage::Start),
             Some(StartPage::Options) => self.start_options_close(),
+            Some(StartPage::Profile) => self.start_set_page(StartPage::Start),
             _ => {}
         }
     }
@@ -133,6 +136,11 @@ impl App {
     }
 
     fn start_set_page(&mut self, page: StartPage) {
+        if let Some(m) = self.menu.as_mut() {
+            m.drv_open = false;
+            m.drv_new = None;
+            m.drv_confirm = None;
+        }
         if self.start_page() == Some(StartPage::Options) && page != StartPage::Options {
             self.start_options_leave();
         }

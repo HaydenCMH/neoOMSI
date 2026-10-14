@@ -173,8 +173,19 @@ impl App {
         };
         let (addr_state, addr_note) = probe_text(m.probe_of(&m.address), false);
         let server_state: Vec<(u8, String)> = m.servers.iter().map(|s| probe_text(m.probe_of(&s.1), true)).collect();
+        let profile = profile::load(m.page == StartPage::Profile);
+        let drivers = ui::DriverMenu {
+            open: m.drv_open,
+            names: m.drv_names.clone(),
+            current: m.drv_names.iter().position(|n| n.eq_ignore_ascii_case(&profile.name)),
+            new: m.drv_new.clone(),
+            confirm: m.drv_confirm,
+            note: m.drv_note.clone(),
+        };
         let view = StartView {
             update: &update,
+            profile: &profile,
+            drivers: &drivers,
             page: m.page,
             sel: m.sel,
             can_continue: m.continue_sit.is_some(),

@@ -11,6 +11,9 @@ impl App {
         }
         let ctrl = self.keys.contains(&K::ControlLeft) || self.keys.contains(&K::ControlRight);
         let enter = matches!(code, K::Enter | K::NumpadEnter);
+        if self.drv_key(code) {
+            return;
+        }
         match page {
             StartPage::Start => {
                 if self.menu.as_ref().is_some_and(|m| m.edit != 0) {
@@ -254,6 +257,11 @@ impl App {
             StartPage::Options => {
                 if !repeat {
                     self.lab_key(event_loop, code);
+                }
+            }
+            StartPage::Profile => {
+                if code == K::Escape {
+                    self.start_back();
                 }
             }
         }

@@ -27,7 +27,7 @@ mod view;
 mod widgets;
 
 pub use self::pause_menu::{Dialog, Fmt, OptGroup, OptKind, OptRow, OptShow, PauseState, WorldDrop, WorldGroup, WorldRow, ADMIN_PAGE, OPTIONS_PAGE, OPTION_GROUPS, PAGE_COUNT, PAUSE_ENTRIES, VEHICLE_PAGE, VOICE_SUB, WORLD_PAGE};
-pub use self::start_menu::{LineRow, StartPage, StartUi, StartUpdate, StartView, TourRow, VehRow};
+pub use self::start_menu::{DriveRow, DriverMenu, LineRow, ProfileView, StartPage, StartUi, StartUpdate, StartView, TourRow, VehRow};
 pub use self::view::*;
 #[allow(unused_imports)]
 use self::{style::*, text::*};

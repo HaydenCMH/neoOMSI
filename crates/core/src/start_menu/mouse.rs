@@ -3,6 +3,9 @@ use super::*;
 impl App {
     pub(crate) fn start_text(&mut self, text: &str) {
         let ctrl = self.keys.contains(&KeyCode::ControlLeft) || self.keys.contains(&KeyCode::ControlRight);
+        if !ctrl && self.drv_text(text) {
+            return;
+        }
         if let Some(m) = self.menu.as_mut().filter(|m| m.page == StartPage::Multiplayer && m.mp_tab == 0 && !ctrl) {
             let clean: String = text.chars().filter(|c| !c.is_control()).collect();
             if !clean.is_empty() && m.addr_sel {
@@ -94,6 +97,9 @@ impl App {
                 }
                 return;
             }
+            if self.drv_click(cursor) {
+                return;
+            }
             if self.ui.as_ref().is_some_and(|u| hit(&[u.start.quit], cursor).is_some()) {
                 crate::platform::exit(event_loop);
                 return;
@@ -111,6 +117,9 @@ impl App {
                 m.drag = None;
                 m.slider = None;
             }
+            return;
+        }
+        if self.drv_click(cursor) {
             return;
         }
         let Some(u) = self.ui.as_ref() else {
@@ -488,7 +497,7 @@ impl App {
                     self.start_join_server(event_loop, k);
                 }
             }
-            StartPage::Options => {}
+            StartPage::Options | StartPage::Profile => {}
         }
     }
 }

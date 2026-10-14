@@ -4,6 +4,7 @@ use super::pause_menu::{Metrics, inside, out};
 use super::*;
 
 mod bar;
+mod drivers;
 mod pages;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -11,7 +12,8 @@ pub enum StartPage {
     #[default]
     Start,
     Multiplayer,
-    Options
+    Options,
+    Profile,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -36,6 +38,39 @@ pub struct TourRow {
 }
 
 #[derive(Clone, Debug, Default)]
+pub struct DriveRow {
+    pub title: String,
+    pub sub: String,
+    pub secs: i64,
+    pub meters: i64,
+    pub ago: String,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct DriverMenu {
+    pub open: bool,
+    pub names: Vec<String>,
+    pub current: Option<usize>,
+    pub new: Option<String>,
+    pub confirm: Option<usize>,
+    pub note: String,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ProfileView {
+    pub name: String,
+    pub level: u32,
+    pub xp_to_next: u32,
+    pub xp_frac: f32,
+    pub secs: i64,
+    pub meters: i64,
+    pub stops: i64,
+    pub on_time: Option<u32>,
+    pub ratings: [Option<u32>; 3],
+    pub drives: Vec<DriveRow>,
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct StartUpdate {
     pub kind: u8,
     pub label: String,
@@ -44,6 +79,8 @@ pub struct StartUpdate {
 
 pub struct StartView<'a> {
     pub update: &'a StartUpdate,
+    pub profile: &'a ProfileView,
+    pub drivers: &'a DriverMenu,
     pub page: StartPage,
     pub sel: usize,
     pub can_continue: bool,
@@ -129,6 +166,17 @@ pub struct StartUi {
     pub sect_tabs: Vec<[f32; 4]>,
     pub close: [f32; 4],
     pub quit: [f32; 4],
+    pub profile_btn: [f32; 4],
+    pub drv_box: [f32; 4],
+    pub drv_btn: [f32; 4],
+    pub drv_open_now: bool,
+    pub drv_items: Vec<[f32; 4]>,
+    pub drv_dels: Vec<[f32; 4]>,
+    pub drv_first: usize,
+    pub drv_new_row: [f32; 4],
+    pub drv_create: [f32; 4],
+    pub driver: String,
+    pub bare: bool,
     pub next: [f32; 4],
     pub cont: [f32; 4],
     pub veh: Vec<[f32; 4]>,
@@ -194,6 +242,14 @@ impl StartUi {
         self.items.clear();
         self.tabs.clear();
         self.quit = [0.0; 4];
+        self.profile_btn = [0.0; 4];
+        self.drv_box = [0.0; 4];
+        self.drv_btn = [0.0; 4];
+        self.drv_items.clear();
+        self.drv_dels.clear();
+        self.drv_new_row = [0.0; 4];
+        self.drv_create = [0.0; 4];
+        self.bare = false;
         self.maps.clear();
         self.rows.clear();
         self.arrows.clear();
@@ -262,6 +318,8 @@ impl Ui {
         self.start.t = (self.start.t + self.anim_dt / 0.35).min(1.0);
         self.start.clear();
         self.start.update = v.update.clone();
+        self.start.driver = v.profile.name.clone();
+        self.start.drv_open_now = v.drivers.open;
         let at = |rs: &[[f32; 4]]| rs.iter().any(|rc| inside(*rc, f.cursor));
         match v.page {
             StartPage::Start => {
@@ -291,21 +349,29 @@ impl Ui {
                     || at(&self.start.sliders)
                     || at(&self.start.icao_picks)
                     || at(&[self.start.icao_field, self.start.foot])
-                    || at(&self.start.tabs) || at(&[self.start.go, self.start.quit, self.start.update_btn]);
+                    || at(&self.start.tabs) || at(&[self.start.go, self.start.quit, self.start.update_btn, self.start.profile_btn]);
             }
             StartPage::Multiplayer => {
                 self.draw_start_join(r, scene, f, m, v);
                 self.hand = at(&self.start.mp_tabs)
                     || at(&self.start.servers)
                     || at(&self.start.tabs)
-                    || at(&[self.start.go, self.start.field, self.start.host_row, self.start.quit, self.start.update_btn]);
+                    || at(&[self.start.go, self.start.field, self.start.host_row, self.start.quit, self.start.update_btn, self.start.profile_btn]);
             }
             StartPage::Options => {
                 self.text.rounded(r, scene, [0.0, 0.0, m.w, m.h], 0.0, [10, 12, 16, 255]);
                 self.draw_pause(r, scene, f, PauseState { page: Some(OPTIONS_PAGE), sel: 0 });
-                self.hand |= at(&self.start.tabs) || at(&[self.start.quit]);
+                self.hand |= at(&self.start.tabs) || at(&[self.start.quit, self.start.profile_btn]);
+            }
+            StartPage::Profile => {
+                self.draw_start_profile(r, scene, f, m, v);
+                self.hand = at(&self.start.tabs) || at(&[self.start.quit, self.start.update_btn, self.start.profile_btn]);
             }
         }
+        self.draw_driver_menu(r, scene, f, m, v);
+        self.hand |= at(&self.start.drv_items)
+            || at(&self.start.drv_dels)
+            || at(&[self.start.drv_btn, self.start.drv_new_row, self.start.drv_create]);
         self.start.hand = self.hand;
         self.text.flat = false;
         self.text.end_frame(r, scene);

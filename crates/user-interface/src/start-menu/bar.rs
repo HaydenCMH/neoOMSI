@@ -26,7 +26,33 @@ impl Ui {
         self.text.rounded(r, scene, qrc, 6.0 * u, qbg);
         ql.place(scene, qrc[0] + (qw - ql.w as f32) * 0.5, qrc[1] + (qh - ql.h as f32) * 0.5);
         self.start.quit = qrc;
-        self.start_update_chip(r, scene, f, qrc[0] - 14.0 * u, bar_h * 0.5, u);
+        let drv = self.start.driver.clone();
+        let ppx = (15.0 * u) as u32;
+        let shown = clip_to(&self.text, &drv, ppx as f32, 150.0 * u);
+        let pl = self.text.label(r, scene, &shown, ppx, WHITE);
+        let av = qh;
+        let cw = (qh - 6.0 * u).round();
+        let pw = 6.0 * u + av + 4.0 * u + pl.w as f32 + 4.0 * u + cw + 3.0 * u;
+        let px0 = (qrc[0] - 10.0 * u - pw).round();
+        let prc = [px0, qy, px0 + pw, qy + qh];
+        let pv = self.ease((217, "profile", 0), if inside(prc, f.cursor) || self.start.bare { 1.0 } else { 0.0 }, 8.0);
+        self.text.rounded(r, scene, prc, qh * 0.5, mix([36, 36, 40, 255], [58, 58, 64, 255], pv));
+        let ac = [prc[0] + 4.0 * u, qy + 4.0 * u, prc[0] + 4.0 * u + av - 8.0 * u, qy + qh - 4.0 * u];
+        self.text.rounded(r, scene, ac, (ac[3] - ac[1]) * 0.5, ACCENT);
+        let ini = drv.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_else(|| "D".into());
+        let il = self.text.label(r, scene, &ini, (12.0 * u) as u32, ON_ACCENT);
+        il.place(scene, ac[0] + (ac[2] - ac[0] - il.w as f32) * 0.5, ac[1] + (ac[3] - ac[1] - il.h as f32) * 0.5);
+        pl.place(scene, prc[0] + 6.0 * u + av + 4.0 * u, qy + (qh - pl.h as f32) * 0.5);
+        self.start.profile_btn = prc;
+        let dbt = [prc[2] - 3.0 * u - cw, qy + 3.0 * u, prc[2] - 3.0 * u, qy + qh - 3.0 * u];
+        let dv = self.ease((217, "driver", 0), if inside(dbt, f.cursor) || self.start.drv_open_now { 1.0 } else { 0.0 }, 8.0);
+        self.text.rounded(r, scene, dbt, cw * 0.5, fade([255, 255, 255, 30], dv));
+        let isz = (cw - 6.0 * u).round();
+        if let Some(ic) = self.text.icon(r, scene, "expand_more", isz as u32, WHITE) {
+            ic.place(scene, dbt[0] + (cw - isz) * 0.5, dbt[1] + (dbt[3] - dbt[1] - isz) * 0.5);
+        }
+        self.start.drv_btn = dbt;
+        self.start_update_chip(r, scene, f, prc[0] - 14.0 * u, bar_h * 0.5, u);
         self.ensure_logo();
         if let Some((tex, iw, ih)) = self.logo_at(r, scene, (bar_h * 0.46).round()) {
             let top = ((bar_h - ih as f32) * 0.5).round();
@@ -58,7 +84,7 @@ impl Ui {
             let rc = [lefts[i], 0.0, lefts[i] + widths[i], bar_h];
             let hot = inside(rc, f.cursor);
             let hv = self.ease((217, "hover", i), if hot && i != tab { 1.0 } else { 0.0 }, 8.0);
-            let tv = self.easeq((217, "tab", i), if i == tab { 1.0 } else { 0.0 }, 7.0);
+            let tv = self.easeq((217, "tab", i), if i == tab && !self.start.bare { 1.0 } else { 0.0 }, 7.0);
             if hv > 0.0 {
                 self.text.rounded(r, scene, rc, 0.0, fade([255, 255, 255, 8], hv));
             }
@@ -74,7 +100,9 @@ impl Ui {
         let sm = fr * fr * (3.0 - 2.0 * fr);
         let ul = lefts[i0] + (lefts[i1] - lefts[i0]) * sm;
         let uw = widths[i0] + (widths[i1] - widths[i0]) * sm;
-        self.text.rounded(r, scene, [ul, bar_h - 3.0 * u, ul + uw, bar_h], 0.0, ACCENT);
+        if !self.start.bare {
+            self.text.rounded(r, scene, [ul, bar_h - 3.0 * u, ul + uw, bar_h], 0.0, ACCENT);
+        }
         bar_h
     }
 
