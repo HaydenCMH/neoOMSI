@@ -30,6 +30,7 @@ fn entry_icon(id: &str) -> Option<&'static str> {
         "save-slot" => "sd_card",
         "load" => "folder_open",
         "admin" => "badge",
+        "mainmenu" => "home",
         "quit" => "logout",
         _ => return None,
     })
@@ -193,7 +194,7 @@ mod tests {
     fn entry_icons_exist() {
         let ids = [
             "resume", "screenshot", "tobus", "options", "vehicle", "world", "copycode", "map",
-            "duty", "end-duty", "save", "save-slot", "load", "admin", "quit",
+            "duty", "end-duty", "save", "save-slot", "load", "admin", "mainmenu", "quit",
         ];
         for id in ids {
             let name = entry_icon(id).unwrap_or_else(|| panic!("{id} has no icon"));

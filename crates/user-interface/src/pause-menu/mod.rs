@@ -52,12 +52,13 @@ pub struct WorldGroup {
     pub subs: Vec<WorldGroup>,
 }
 
-pub const PAUSE_ENTRIES: [&str; 6] = [
+pub const PAUSE_ENTRIES: [&str; 7] = [
     "pause.entry.resume",
     "pause.entry.save",
     "pause.entry.options",
     "pause.entry.world",
     "pause.entry.vehicle",
+    "pause.entry.mainmenu",
     "pause.entry.quit",
 ];
 

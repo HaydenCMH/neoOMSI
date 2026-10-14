@@ -11,12 +11,13 @@ pub(crate) fn route_char(code: KeyCode) -> Option<char> {
     (chars.next().is_none() && ch.is_ascii_alphanumeric()).then(|| ch.to_ascii_uppercase())
 }
 
-pub(crate) const SERVER_GAME_MENU: [(&str, &str); 6] = [
+pub(crate) const SERVER_GAME_MENU: [(&str, &str); 7] = [
     ("resume", "pause.entry.resume"),
     ("options", "pause.entry.options"),
     ("vehicle", "pause.entry.vehicle"),
     ("world", "pause.entry.world"),
     ("map", "pause.entry.map"),
+    ("mainmenu", "pause.entry.mainmenu"),
     ("quit", "pause.entry.quit_server"),
 ];
 
@@ -35,7 +36,7 @@ pub(crate) fn game_menu_for(args: &Args) -> &'static [(&'static str, &'static st
     }
 }
 
-pub(crate) const GAME_MENU: [(&str, &str); 11] = [
+pub(crate) const GAME_MENU: [(&str, &str); 12] = [
     ("resume", "pause.entry.resume"),
     ("options", "pause.entry.options"),
     ("vehicle", "pause.entry.vehicle"),
@@ -46,6 +47,7 @@ pub(crate) const GAME_MENU: [(&str, &str); 11] = [
     ("save", "pause.entry.save"),
     ("save-slot", "pause.entry.saveslot"),
     ("load", "pause.entry.load"),
+    ("mainmenu", "pause.entry.mainmenu"),
     ("quit", "pause.entry.quit"),
 ];
 
@@ -1279,6 +1281,7 @@ impl App {
                     platform::exit(event_loop);
                 }
             }
+            "mainmenu" => self.back_to_main_menu(),
             "quit" => {
                 self.game_menu = None;
                 self.finish_session();
