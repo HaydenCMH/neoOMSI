@@ -66,10 +66,6 @@ const KEPT: usize = 4;
 static BUILT: Mutex<Vec<(String, Minimap)>> = Mutex::new(Vec::new());
 static BUILDING: Mutex<()> = Mutex::new(());
 
-pub(crate) fn wait_idle() {
-    drop(BUILDING.lock().unwrap_or_else(|e| e.into_inner()));
-}
-
 fn kept(key: &str) -> Option<Minimap> {
     let built = BUILT.lock().unwrap_or_else(|e| e.into_inner());
     built.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())

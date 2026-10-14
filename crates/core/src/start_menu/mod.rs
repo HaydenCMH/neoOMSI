@@ -163,7 +163,6 @@ impl App {
     }
 
     fn start_launch(&mut self, event_loop: &ActiveEventLoop, situation: Option<String>, join: Option<String>) {
-        minimap::wait_idle();
         let Some(m) = self.menu.as_ref() else {
             return;
         };
