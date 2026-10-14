@@ -35,7 +35,8 @@ fn view_rows(rows: &[(String, String)]) -> Vec<WorldRow> {
             let meter = p.next().and_then(|m| m.parse::<f32>().ok());
             let meter_one_sided = p.next() == Some("u");
             let lit = p.next() == Some("1");
-            WorldRow { name: tr(name), kind, value: value.to_string(), desc: tr(desc), frac, tag, meter, meter_one_sided, lit }
+            let alt = p.next().unwrap_or("").to_string();
+            WorldRow { name: tr(name), kind, value: value.to_string(), desc: tr(desc), frac, tag, meter, meter_one_sided, lit, alt }
         })
         .collect()
 }
@@ -247,6 +248,20 @@ impl App {
             }
             return;
         }
+        let alt = self.ui.as_ref().and_then(|u| {
+            let r = u.world_alt.iter().find(|(_, r)| hit(&[*r]).is_some())?;
+            Some((r.0, u.world_group, u.world_sub))
+        });
+        if let Some((k, g, sub)) = alt {
+            let groups = self.lab_world_raw();
+            if let Some((row, _)) = pick_row(&groups, g, sub, k) {
+                let id = row.split('\u{1f}').nth(10).unwrap_or("").to_string();
+                if !id.is_empty() {
+                    self.lab_open_drop(k, &id);
+                }
+            }
+            return;
+        }
         let Some(u) = self.ui.as_mut() else {
             return;
         };
@@ -309,36 +324,41 @@ impl App {
                     self.lab_world_set(x);
                 }
             }
-            'o' => match crate::game_lists::dropdown_for(self, k, &id) {
-                Some(d) => {
-                    let sel = d.current.unwrap_or(0).min(d.items.len().saturating_sub(1));
-                    let vis = self.ui.as_ref().map_or(8, |u| u.world_drop_vis).max(1);
-                    if let Some(u) = self.ui.as_mut() {
-                        let labels: Vec<String> = d.items.iter().map(|i| i.0.clone()).collect();
-                        let actions: Vec<String> = d.items.iter().map(|i| i.1.clone()).collect();
-                        let searchable = !d.search.is_empty();
-                        u.world_drop = Some(WorldDrop {
-                            k,
-                            all_labels: if searchable { labels.clone() } else { Vec::new() },
-                            all_actions: if searchable { actions.clone() } else { Vec::new() },
-                            hay: d.search.clone(),
-                            filter: String::new(),
-                            labels,
-                            actions,
-                            sel,
-                            top: sel.saturating_sub(vis / 2),
-                            current: d.current,
-                        });
-                    }
-                }
-                None => {
+            'o' => {
+                if !self.lab_open_drop(k, &id) {
                     crate::game_lists::run(self, &list, &id);
                 }
-            },
+            }
             _ => {
                 crate::game_lists::run(self, &list, &id);
             }
         }
+    }
+
+    fn lab_open_drop(&mut self, k: usize, id: &str) -> bool {
+        let Some(d) = crate::game_lists::dropdown_for(self, k, id) else {
+            return false;
+        };
+        let sel = d.current.unwrap_or(0).min(d.items.len().saturating_sub(1));
+        let vis = self.ui.as_ref().map_or(8, |u| u.world_drop_vis).max(1);
+        if let Some(u) = self.ui.as_mut() {
+            let labels: Vec<String> = d.items.iter().map(|i| i.0.clone()).collect();
+            let actions: Vec<String> = d.items.iter().map(|i| i.1.clone()).collect();
+            let searchable = !d.search.is_empty();
+            u.world_drop = Some(WorldDrop {
+                k,
+                all_labels: if searchable { labels.clone() } else { Vec::new() },
+                all_actions: if searchable { actions.clone() } else { Vec::new() },
+                hay: d.search.clone(),
+                filter: String::new(),
+                labels,
+                actions,
+                sel,
+                top: sel.saturating_sub(vis / 2),
+                current: d.current,
+            });
+        }
+        true
     }
 
     fn lab_world_drop_click(&mut self) {

@@ -1188,6 +1188,13 @@
       },
       "axis": {
         "desc": "What this axis does.",
+        "shape": {
+          "linear": "Linear",
+          "degressive": "Degressive",
+          "progressive": "Progressive",
+          "bi_degressive": "Bi-degressive",
+          "bi_progressive": "Bi-progressive"
+        },
         "invert": {
           "name": "Invert",
           "desc": "Reverses this axis, even before a function is assigned."
@@ -1601,7 +1608,7 @@
       "filter": "Filter...",
       "nolines": "No lines on this map",
       "notours": "No tours",
-      "trip": "TRIP",
+      "trip": "FIRST TRIP",
       "autotrip": "By start time",
       "mappreview": "Loading map...",
       "autoentry": "Automatic (nearest to the first stop)",
