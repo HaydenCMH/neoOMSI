@@ -71,7 +71,7 @@ pub(crate) fn button_label(n: usize, gamepad: bool) -> String {
     const PAD: [&str; 6] = ["X", "A", "B", "Y", "LB", "RB"];
     const DIRS: [&str; 4] = ["up", "right", "down", "left"];
     let hats = controllers::HAT_BUTTONS..controllers::HAT_BUTTONS + 16;
-    if cfg!(windows) && hats.contains(&n) {
+    if hats.contains(&n) {
         let (hat, dir) = ((n - hats.start) / 4, (n - hats.start) % 4);
         let dir = tl(&format!("pause.controls.hat.{}", DIRS[dir]));
         return if gamepad && hat == 0 {
@@ -409,6 +409,15 @@ fn device_rows(root: &Path, d: &DeviceCfg, dev: Option<&Connected>, search: &Key
         }
     }
     let n = shown_buttons(d, dev.map_or(0, |c| c.buttons));
+    let hat_rows: Vec<usize> = if cfg!(target_os = "linux") && dev.is_some() {
+        (controllers::HAT_BUTTONS..controllers::HAT_BUTTONS + 4)
+            .filter(|h| *h >= n)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let list: Vec<usize> = (0..n).chain(hat_rows).collect();
+    let n = list.len();
     if n > 0 {
         let names = names_of(root);
         let gamepad = dev.is_some_and(|c| c.gamepad);
@@ -436,7 +445,7 @@ fn device_rows(root: &Path, d: &DeviceCfg, dev: Option<&Connected>, search: &Key
             ));
         }
         let before = out.len();
-        for b in 0..n {
+        for b in list {
             let act = d.buttons.get(b).map(|x| x.0.trim()).unwrap_or("");
             let v = if act.is_empty() {
                 "-".to_string()
