@@ -828,22 +828,32 @@ impl Menu {
         let Some(map) = self.maps.get(self.map).map(|m| m.1.clone()) else {
             return;
         };
-        if self.lines_for.as_deref() == Some(map.as_str()) {
+        let (y, mo, d) = self.ymd();
+        let date = y * 10000 + mo * 100 + d;
+        let key = format!("{map}|{date}");
+        if self.lines_for.as_deref() == Some(key.as_str()) {
             return;
         }
-        self.lines_for = Some(map.clone());
+        let same_map = self.lines_for.as_deref().and_then(|k| k.rsplit_once('|')).is_some_and(|k| k.0 == map);
+        if !same_map {
+            self.line_query.clear();
+            self.tour_query.clear();
+        }
+        let keep = self.lines.get(self.line).map(|l| l.name.clone()).filter(|_| same_map);
+        let keep_tour = self.chosen_tour().map(|(_, t)| t.number.clone()).filter(|_| same_map);
+        self.lines_for = Some(key);
         self.lines.clear();
         self.line = 0;
         self.tour = 0;
         self.line_top = 0;
         self.tour_top = 0;
-        self.line_query.clear();
-        self.tour_query.clear();
         let cfg = ::mods::resolve_path(root, &map);
         let Some(dir) = cfg.parent() else {
             return;
         };
-        let tt = ::timetable::TimetableData::load(dir);
+        let chrono = ::map::active_chrono_dirs(dir, date);
+        let off = ::map::chrono_deactivated_lines(&chrono);
+        let tt = ::timetable::TimetableData::load_with_chrono(dir, &chrono, &off);
         let mut chosen: Vec<&::timetable::Line> =
             tt.lines.iter().filter(|l| l.user_allowed && !l.tours.is_empty()).collect();
         if chosen.is_empty() {
@@ -893,6 +903,15 @@ impl Menu {
         lines.sort_by(|a, b| natural_cmp(&a.name, &b.name));
         self.lines = lines;
         self.pick_line(0);
+        if let Some(k) = keep {
+            if let Some(l) = self.lines.iter().position(|x| x.name.eq_ignore_ascii_case(&k)) {
+                self.pick_line(l);
+                if let Some(t) = keep_tour.and_then(|n| self.lines[l].tours.iter().position(|x| x.number == n)) {
+                    self.pick_tour(t);
+                }
+            }
+        }
+        self.fix_filters();
         if self.want_route.as_ref().is_some_and(|w| w.0.eq_ignore_ascii_case(&map)) {
             let (_, line, tour, trip) = self.want_route.take().unwrap_or_default();
             if let Some(l) = self.lines.iter().position(|x| x.name.eq_ignore_ascii_case(&line)) {
@@ -946,7 +965,7 @@ impl Menu {
         self.lines
             .iter()
             .enumerate()
-            .filter(|(_, l)| q.is_empty() || format!("{} {}", l.name, l.title).to_lowercase().contains(&q))
+            .filter(|(_, l)| q.is_empty() || format!("{} {}", l.name, l.title).to_lowercase().contains(&q) || l.tours.iter().any(|t| t.runs.iter().any(|r| r.1.to_lowercase().contains(&q))))
             .map(|(i, l)| (i, l.name.clone(), l.title.clone()))
             .collect()
     }
