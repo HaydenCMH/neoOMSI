@@ -168,6 +168,10 @@ impl Showcase {
         let cam = self.view.camera(m.centre, m.radius, w, h, self.focus_now);
         let m = self.model.as_mut()?;
         m.scene.overlays.clear();
+        // the bus's [isshadow] blob has no ground to lie on here
+        for i in m.scene.instances.iter_mut().filter(|i| i.blob) {
+            i.visible = false;
+        }
         matte::render(renderer, &mut m.scene, w, h, &cam, &m.lighting)
     }
 
