@@ -53,6 +53,7 @@ pub(super) fn emit_all(
         vehicle_tests: VEHICLE_TESTS_PER_FRAME,
     };
     let mut mine: Vec<Corona> = Vec::new();
+    let first = scene.lights.len();
 
     for (vi, v) in vehicles.iter().enumerate() {
         if f.dist(v.position) > f.visible_range {
@@ -67,11 +68,22 @@ pub(super) fn emit_all(
         cull_hidden(f, v, vi, hiding, &mut budget, &mut mine);
         scene.coronas.append(&mut mine);
 
-        particle_sprites(&v.particles, true, &mut scene.smoke, &mut scene.coronas);
-        for t in &v.trailers {
-            particle_sprites(&t.particles, true, &mut scene.smoke, &mut scene.coronas);
+        if !v.part_hidden(0) {
+            particle_sprites(&v.particles, true, &mut scene.smoke, &mut scene.coronas);
+        }
+        for (k, t) in v.trailers.iter().enumerate() {
+            if !v.part_hidden(k + 1) {
+                particle_sprites(&t.particles, true, &mut scene.smoke, &mut scene.coronas);
+            }
         }
     }
+    // (as the map's lamps: a light wholly beyond their range lights only a few far pixels)
+    let range = f.light_range();
+    let mut k = 0;
+    scene.lights.retain(|l| {
+        k += 1;
+        k <= first || f.dist(l.position) - (l.radius as f64) < range
+    });
 }
 
 fn cull_hidden(
@@ -170,7 +182,7 @@ fn road_and_lamp_lights(
         &v.light_fade,
     ) {
         let ec = exterior_cfg(owner);
-        if ec.off {
+        if ec.off || v.part_hidden(0) {
             continue;
         }
         c.brightness *= ec.gain;
@@ -185,7 +197,10 @@ fn road_and_lamp_lights(
         c.position += body_rot.transform_vector3(Vec3::from(ec.shift)).as_dvec3();
         coronas.push(c);
     }
-    for t in &v.trailers {
+    for (k, t) in v.trailers.iter().enumerate() {
+        if v.part_hidden(k + 1) {
+            continue;
+        }
         let part_xf = |def_index: usize| -> Mat4 {
             match t.ty.meshes.iter().position(|m| m.def_index == def_index) {
                 Some(i) => t.mesh_local_transform(i),
@@ -196,27 +211,33 @@ fn road_and_lamp_lights(
             &t.ty.model,
             &part_xf,
             t.position,
-            &value_of,
+            &|n| t.value(v, n),
             &t.light_fade,
         ));
     }
 
     let night = f.night.max(fog_darkness() * cfg.weather_night);
-    headlamps(cfg, faders, v, night, lights, coronas);
-    let mut sections = vec![Section {
-        model: &ty.model,
-        rot: body_rot,
-        origin: v.position,
-        owner: super::owner_key(v),
-    }];
-    sections.extend(v.trailers.iter().map(|t| Section {
-        model: &t.ty.model,
-        rot: t.body_rotation(),
-        origin: t.position,
-        owner: super::owner_key(t),
-    }));
-    for s in &sections {
-        spotlights_2(cfg, faders, s, &value_of, night, lights);
+    if !v.part_hidden(0) {
+        headlamps(cfg, faders, v, night, lights, coronas);
+        let section = Section {
+            model: &ty.model,
+            rot: body_rot,
+            origin: v.position,
+            owner: super::owner_key(v),
+        };
+        spotlights_2(cfg, faders, &section, &value_of, night, lights);
+    }
+    for (k, t) in v.trailers.iter().enumerate() {
+        if v.part_hidden(k + 1) {
+            continue;
+        }
+        let section = Section {
+            model: &t.ty.model,
+            rot: t.body_rotation(),
+            origin: t.position,
+            owner: super::owner_key(t),
+        };
+        spotlights_2(cfg, faders, &section, &|n| t.value(v, n), night, lights);
     }
     if spill && cfg.spill.on && night > 0.05 {
         interior_spill(cfg, faders, v, &value_of, night, lights);

@@ -86,6 +86,37 @@ impl LightSwitch {
             LightSwitch::Variable(v.to_string())
         }
     }
+
+    /// The variable of the object's script this switch follows, if the script has it.
+    pub fn script_var(&self, program: Option<&::legacy_script::Program>) -> Option<&str> {
+        match self {
+            LightSwitch::Variable(v) if program.is_some_and(|p| p.var(v).is_some()) => Some(v),
+            _ => None,
+        }
+    }
+}
+
+/// The coronas of a placed object switched by its script, with their variable.
+pub fn script_coronas(ot: &ObjectType, xf: Mat4, pos: DVec3) -> Vec<(::render::Corona, String)> {
+    let switches: Mutex<Vec<LightSwitch>> = Mutex::new(Vec::new());
+    let coronas = model_lights_owned(
+        &ot.model,
+        &|_| xf,
+        pos,
+        &|var| {
+            switches.lock().push(LightSwitch::parse(var));
+            1.0
+        },
+        &[],
+    );
+    let switches = switches.into_inner();
+    coronas
+        .into_iter()
+        .filter_map(|(c, k)| {
+            let var = switches.get(k)?.script_var(ot.program.as_deref())?;
+            Some((c, var.to_string()))
+        })
+        .collect()
 }
 
 pub fn standard_traffic_lamp(
@@ -256,8 +287,9 @@ pub fn model_lights_owned(
                 out.push(glow);
             }
             if flags & 1 != 0 {
+                // rays reach about three lens radii, as measured against OMSI 2.2.032 (#324)
                 out.push(::render::Corona {
-                    size: l.size * 0.5,
+                    size: l.size * 1.5,
                     rotating: 2,
                     flags: 8,
                     texture: crate::lights::star_texture_id(),

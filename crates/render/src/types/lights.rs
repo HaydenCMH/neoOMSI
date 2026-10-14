@@ -82,6 +82,11 @@ pub struct SmokeParticle {
 
 pub const LM_ATLAS_TILES: u32 = 5;
 pub const LM_TILE_PX: u32 = 256;
+/// The cells per side of the cover map ([`crate::Renderer::set_cover_map`]).
+pub const COVER_SIDE: u32 = 192;
+/// The floats ahead of the cover map's cells: corner x, y (render-origin relative), cell
+/// size, cells per side, corner slot (column, row), render origin z, 1 once set.
+pub(crate) const COVER_HEADER: u32 = 8;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Corona {
@@ -215,6 +220,32 @@ impl LightGrid {
     }
 }
 
+/// The half angle a spot lights round its axis, as the shaders cut it; None when it lights all round.
+fn lit_cone(l: &PointLight) -> Option<f32> {
+    if l.direction.length_squared() <= 1e-6 {
+        return None;
+    }
+    let d = l.direction.normalize();
+    let outer = l.cone[1].clamp(-1.0, 1.0).acos();
+    if l.beam >= 199.0 {
+        (d.x * d.x + d.y * d.y > 1e-5)
+            .then(|| (1.45 * outer.max(5f32.to_radians())).min(std::f32::consts::FRAC_PI_2))
+    } else {
+        (l.cone[0] > l.cone[1]).then_some(outer)
+    }
+}
+
+/// How far a light reaches from its position towards +x, -x, +y and -y.
+pub(crate) fn light_reach(l: &PointLight) -> [f32; 4] {
+    let r = l.radius;
+    let Some(half) = lit_cone(l) else {
+        return [r; 4];
+    };
+    let half = half + 1f32.to_radians();
+    let d = l.direction.normalize();
+    [d.x, -d.x, d.y, -d.y].map(|c| r * (c.clamp(-1.0, 1.0).acos() - half).max(0.0).cos().max(0.0))
+}
+
 pub(crate) fn drawn_by(l: &PointLight, enhanced: bool) -> bool {
     l.radius > 0.0
         && l.intensity > 0.0
@@ -245,7 +276,8 @@ pub(crate) fn gpu_light(l: &PointLight, p: Vec3) -> GpuPointLight {
         color: [l.color[0], l.color[1], l.color[2], l.intensity],
         dir,
         extra: [l.cone[0], l.core, l.beam, l.radius],
-        occ: [0.0; 4],
+        // (w: the cosine to the axis at or below which it lights nothing)
+        occ: [0.0, 0.0, 0.0, lit_cone(l).map_or(-2.0, |h| h.cos() - 1e-4)],
     }
 }
 
@@ -267,6 +299,48 @@ mod tests {
             }
         }
         grid
+    }
+
+    #[test]
+    fn a_spot_reaches_only_the_cells_of_its_cone() {
+        let near = |a: [f32; 4], b: [f32; 4]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 0.05);
+        let omni = PointLight {
+            radius: 10.0,
+            ..Default::default()
+        };
+        assert_eq!(light_reach(&omni), [10.0; 4]);
+        let narrow = PointLight {
+            direction: Vec3::X,
+            cone: [0.95, 30f32.to_radians().cos()],
+            ..omni
+        };
+        let side = 10.0 * 31f32.to_radians().sin();
+        assert!(near(light_reach(&narrow), [10.0, 0.0, side, side]));
+        // a dipped headlamp of 20° lights up to 29°, and nothing behind it however wide
+        let dipped = PointLight {
+            cone: [0.98, 20f32.to_radians().cos()],
+            beam: 200.0,
+            ..narrow
+        };
+        let side = 10.0 * 30f32.to_radians().sin();
+        assert!(near(light_reach(&dipped), [10.0, 0.0, side, side]));
+        let wide = PointLight {
+            cone: [0.5, 80f32.to_radians().cos()],
+            ..dipped
+        };
+        let back = 10.0 * 1f32.to_radians().sin();
+        assert!(near(light_reach(&wide), [10.0, back, 10.0, 10.0]));
+        // a headlamp straight down lights all round it
+        let down = PointLight {
+            direction: -Vec3::Z,
+            ..dipped
+        };
+        assert_eq!(light_reach(&down), [10.0; 4]);
+        assert_eq!(gpu_light(&down, Vec3::ZERO).occ[3], -2.0);
+        // the shaders skip a pixel at or below this cosine to the axis
+        let cut = gpu_light(&dipped, Vec3::ZERO).occ[3];
+        assert!((cut - 29f32.to_radians().cos()).abs() < 1e-3);
+        assert_eq!(gpu_light(&omni, Vec3::ZERO).occ[3], -2.0);
     }
 
     #[test]

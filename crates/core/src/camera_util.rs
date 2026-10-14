@@ -313,7 +313,24 @@ fn reverse_z_frustum(left: f32, right: f32, bottom: f32, top: f32, near: f32, fa
 
 #[cfg(test)]
 mod tests {
-    use super::{reverse_z_frustum, triple_screen_projection_for_view};
+    use super::{reflected_angles, reverse_z_frustum, triple_screen_projection_for_view};
+    use glam::Vec3;
+
+    #[test]
+    fn mirror_pitch_is_the_rise_over_the_level_length() {
+        // a face turned straight back at a level ray: the camera looks straight back
+        let (yaw, pitch) = reflected_angles(Vec3::Y, -Vec3::Y);
+        assert!((yaw.abs() - 180.0).abs() < 1e-3, "yaw {yaw}");
+        assert!(pitch.abs() < 1e-3, "pitch {pitch}");
+        // a reflection 30 degrees down: asin(tan 30) = 35.3 degrees, not 30
+        let (s, c) = 15f32.to_radians().sin_cos();
+        let (_, pitch) = reflected_angles(Vec3::Y, Vec3::new(0.0, -c, -s));
+        assert!((pitch + 35.26).abs() < 0.05, "pitch {pitch}");
+        // 45 degrees down and more: straight down
+        let (s, c) = 30f32.to_radians().sin_cos();
+        let (_, pitch) = reflected_angles(Vec3::Y, Vec3::new(0.0, -c, -s));
+        assert!((pitch + 90.0).abs() < 1e-3, "pitch {pitch}");
+    }
 
     #[test]
     fn triple_screen_projection_follows_the_active_camera_mode() {
@@ -334,6 +351,40 @@ mod tests {
 
         assert!((projection.x_axis.x - 2.0).abs() < 1e-5);
         assert!((projection.y_axis.y - 4.0).abs() < 1e-5);
+    }
+
+    /// The enhanced mirror light factor at `hours` on 30 May, stock envir.cfg.
+    fn mirror_light_at(renderer: &::render::Renderer, hours: f64) -> f32 {
+        let clock = ::simulation::clock::SimClock {
+            day_of_year: 150,
+            time: hours * 3600.0,
+            ..Default::default()
+        };
+        let daylight = ::simulation::Daylight::compute(&clock, None);
+        let lighting = crate::lights::lighting_from(&daylight, 50000.0);
+        renderer.enhanced_light_ratio(&lighting)
+    }
+
+    #[test]
+    fn enhanced_mirrors_keep_the_dusk_light() {
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        descriptor.backends = wgpu::Backends::NOOP;
+        descriptor.backend_options.noop = wgpu::NoopBackendOptions::enabled();
+        let instance = wgpu::Instance::new(descriptor);
+        let renderer = pollster::block_on(::render::Renderer::new_with(
+            &instance,
+            None,
+            Some(wgpu::TextureFormat::Rgba8UnormSrgb),
+            ::render::RenderOptions::default(),
+        ))
+        .unwrap();
+        // 03:30 is 3.6 degrees before sunrise: the old ramp gave 0.36 there
+        let day = mirror_light_at(&renderer, 9.0);
+        let night = mirror_light_at(&renderer, 0.0);
+        let dusk = mirror_light_at(&renderer, 3.5);
+        assert!((0.8..1.25).contains(&day), "day {day}");
+        assert!((0.1..0.3).contains(&night), "night {night}");
+        assert!(dusk > 1.5, "dusk {dusk}");
     }
 }
 
@@ -470,12 +521,6 @@ pub(crate) fn follow_camera(traffic: Option<&traffic::Traffic>, id: u64) -> Opti
     })
 }
 
-/// How much of the plain light a mirror loses at full night in enhanced graphics (see
-/// `render_mirrors`): measured in the window at 23:30, the mirrors' street, the bus's own
-/// flank and the sky then match the enhanced picture beside them (0.45 left them 2-3 times
-/// as bright).
-const MIRROR_NIGHT_DIM: f32 = 0.8;
-
 /// The least radius a mirror's camera counts with in the visibility test (m). A mirror's
 /// camera sits in the middle of its glass; with the file's radius 0 (`[add_camera_reflexion]`)
 /// a mirror whose lower half shows at the edge of the picture - the SD200's right mirror
@@ -508,11 +553,11 @@ fn mirror_in_view(eye: DVec3, radius: f32, view: &(Camera, f32)) -> bool {
 /// strip of the bus at its edge and hardly any of the lane beside it.
 const MIRROR_ASPECT: f32 = 1.6;
 
-/// A mirror's camera as Omsi.exe aims it, every frame (0x6f6468 -> 0x7ed0e8): the yaw and
+/// A mirror's camera as Omsi.exe aims it, every frame (0x6f697f -> 0x7ed3d4): the yaw and
 /// pitch of an `[add_camera_reflexion]` are not where it looks but which way the mirror's
 /// face is turned - (cos p sin y, cos p cos y, sin p) in the vehicle's frame (0x7edfd0); the
 /// ray from the eye of the view being drawn to the mirror is reflected in that face, and the
-/// camera looks along the reflection (yaw 90 - atan2(forward, right) and its elevation) from
+/// camera looks along the reflection (see `reflected_angles` for its yaw and pitch) from
 /// the mirror - what a mirror shows whoever looks into it. `off` is the player's own turn of
 /// the mirror (Ctrl+Alt+arrows), which turns the face. (The yaw was turned round instead,
 /// which happened to fit a mirror facing straight back at the driver and no other: the left
@@ -545,12 +590,23 @@ pub(crate) fn mirror_view(
         (c.pitch + off[1]).to_radians(),
     );
     let m = Vec3::new(p.cos() * y.sin(), p.cos() * y.cos(), p.sin());
-    let r = d - m * (2.0 * d.dot(m));
+    let (yaw, pitch) = reflected_angles(d, m);
     legacy_vehicle::Camera {
-        yaw: r.x.atan2(r.y).to_degrees(),
-        pitch: r.z.clamp(-1.0, 1.0).asin().to_degrees(),
+        yaw,
+        pitch,
         ..c.clone()
     }
+}
+
+fn reflected_angles(d: Vec3, m: Vec3) -> (f32, f32) {
+    let r = d - m * (2.0 * d.dot(m));
+    let level = r.x.hypot(r.y);
+    let rise = if level > 0.0 {
+        (r.z / level).clamp(-1.0, 1.0)
+    } else {
+        r.z.signum()
+    };
+    (r.x.atan2(r.y).to_degrees(), rise.asin().to_degrees())
 }
 
 pub(crate) fn publish_camera_info(p: &Player, view: Option<(Camera, f32)>) {
@@ -778,16 +834,11 @@ pub(crate) fn render_mirrors(
     lighting.min_obj_size = lighting.min_obj_size.max((12.0 / px).clamp(0.03, 0.09));
     lighting.shadows = false;
     // Enhanced graphics draw the mirrors with the plain shading (see Renderer::render_inner),
-    // whose light is OMSI's: a night that stays a blue dusk. The window's enhanced night is
-    // far darker, and the mirrors showed the street by daylight beside it. The plain light
-    // is taken down with the night (the lamps keep theirs) to the enhanced picture's level.
-    // (By the sun's darkness, Envir_Brightness's ramp from +6 to -6 degrees: `night` is
-    // whole at sunset already, from +10 degrees on, and rain raises it by day, and the
-    // mirrors were a fifth of the window's light through the whole dusk, #432.)
+    // so its light is brought to the enhanced picture's level (the lamps keep theirs). (Not
+    // by a ramp over the sun's altitude: the enhanced exposure keeps the dusk bright, and
+    // the mirrors went black around sunrise and sunset.)
     if lighting.enhanced && legacy_config::env::var_os("OMSI_MIRROR_ENHANCED").is_none() {
-        let alt = lighting.sun_dir.z.clamp(-1.0, 1.0).asin().to_degrees();
-        let dark = 1.0 - ((alt + 6.0) / 12.0).clamp(0.0, 1.0);
-        let k = 1.0 - MIRROR_NIGHT_DIM * dark;
+        let k = renderer.enhanced_light_ratio(&lighting);
         lighting.ambient *= k;
         lighting.secondary *= k;
         lighting.sun_color *= k;

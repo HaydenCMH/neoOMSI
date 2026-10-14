@@ -353,13 +353,13 @@ fn spline_batches_keep_materials_cells_shadows_and_long_segments_separate() {
         (mesh(1.0, 2.0), ty.clone(), false, DVec3::ZERO),
         (mesh(5.0, 2.0), ty.clone(), false, DVec3::ZERO),
         (mesh(9.0, 2.0), compatible, false, DVec3::ZERO),
-        (mesh(49.0, 2.0), ty.clone(), false, DVec3::ZERO),
+        (mesh(SPLINE_CELL + 1.0, 2.0), ty.clone(), false, DVec3::ZERO),
         (mesh(1.0, 2.0), other, false, DVec3::ZERO),
         (mesh(1.0, 2.0), other_dir, false, DVec3::ZERO),
         (mesh(1.0, 2.0), tested, false, DVec3::ZERO),
         (mesh(1.0, 2.0), ty.clone(), true, DVec3::ZERO),
-        (mesh(1.0, 100.0), ty.clone(), false, DVec3::ZERO),
-        (mesh(1.0, 100.0), ty, false, DVec3::ZERO),
+        (mesh(1.0, 2.0 * SPLINE_CELL), ty.clone(), false, DVec3::ZERO),
+        (mesh(1.0, 2.0 * SPLINE_CELL), ty, false, DVec3::ZERO),
         (
             mesh(1.0, 2.0),
             blended.clone(),
@@ -377,6 +377,71 @@ fn spline_batches_keep_materials_cells_shadows_and_long_segments_separate() {
     assert_eq!(batched[0].0.ranges, vec![(0, 9, 0)]);
     assert_eq!(batched.iter().filter(|b| b.2).count(), 1);
     assert_eq!(batched.iter().map(|b| b.0.indices.len()).sum::<usize>(), 36);
+}
+
+#[test]
+fn spline_batches_draw_a_texture_once_per_batch() {
+    use ::scenery::sli::{SplineProfile, SplineProfilePoint, SplineTexture};
+    // a curb, the road, the other curb: three profiles over two textures
+    let profile = |texture: usize, x0: f32, x1: f32| SplineProfile {
+        texture,
+        points: [x0, x1]
+            .map(|x| SplineProfilePoint {
+                x,
+                v_scale: 0.1,
+                ..Default::default()
+            })
+            .to_vec(),
+    };
+    let def = Spline {
+        textures: vec![SplineTexture::default(), SplineTexture::default()],
+        profiles: vec![
+            profile(0, -4.0, -3.5),
+            profile(1, -3.5, 3.5),
+            profile(0, 3.5, 4.0),
+        ],
+        ..Default::default()
+    };
+    let curve = |x: f64| ::geometry::SplineCurve {
+        start: DVec3::new(x, 0.0, 0.0),
+        heading_deg: 0.0,
+        length: 20.0,
+        radius: 0.0,
+        grad_start: 0.0,
+        grad_end: 0.0,
+        delta_h: None,
+        cant_start: 0.0,
+        cant_end: 0.0,
+        skew_start: 0.0,
+        skew_end: 0.0,
+        tex_offset: 0.0,
+        seed: 0,
+        half_cant_width: ::geometry::DEFAULT_HALF_CANT_WIDTH,
+    };
+    let mesh = |x: f64| {
+        Arc::new(::geometry::build_spline_mesh(
+            &def,
+            &curve(x),
+            false,
+            DVec3::ZERO,
+        ))
+    };
+    assert_eq!(mesh(0.0).ranges.len(), 3);
+    let ty = Arc::new(SplineType {
+        def: def.clone(),
+        dir: PathBuf::new(),
+        surface_maps: None,
+    });
+    let batched = batch_static_splines(vec![
+        (mesh(0.0), ty.clone(), false, DVec3::ZERO),
+        (mesh(10.0), ty, false, DVec3::ZERO),
+    ]);
+    assert_eq!(batched.len(), 1);
+    assert_eq!(
+        batched[0].0.ranges.iter().map(|r| r.2).collect::<Vec<_>>(),
+        vec![0, 1]
+    );
+    assert_eq!(batched[0].0.indices.len(), 2 * mesh(0.0).indices.len());
 }
 
 #[test]
@@ -463,43 +528,7 @@ fn a_light_map_is_laid_on_its_middle_third() {
 }
 
 #[test]
-fn surface_contact_height_matches_the_visible_surface_lift() {
-    let authored = DVec3::new(12.0, 18.0, 3.5);
-    let contact = scenery_draw_position(authored, true);
-    assert!((contact.z - authored.z - OMSI_SURFACE_LIFT as f64).abs() < 1e-8);
-}
-
-#[test]
-fn road_markings_are_lifted_with_the_road_they_lie_on() {
-    let sco = |text: &str| SceneryObject::parse(&::legacy_config::CfgFile::from_str("x.sco", text));
-    // Spandau's VZ_surfmark_arrow_L: a terrain-relative object drawn on the surfaces
-    assert!(drawn_on_surfaces(&sco(
-        "[rendertype]\non_surface\n[mesh]\narrow.o3d\n"
-    )));
-    assert!(drawn_on_surfaces(&sco(
-        "[rendertype]\nsurface\n[mesh]\nplate.o3d\n"
-    )));
-    assert!(drawn_on_surfaces(&sco("[surface]\n[mesh]\nplate.o3d\n")));
-    assert!(!drawn_on_surfaces(&sco("[mesh]\nhouse.o3d\n")));
-    assert!(!drawn_on_surfaces(&sco(
-        "[rendertype]\npresurface\n[mesh]\nground.o3d\n"
-    )));
-}
-
-#[test]
-fn scripted_surface_draw_pose_keeps_the_upload_lift() {
-    let authored = DVec3::new(-2165.1, -2368.8, -0.068);
-    let uploaded = scenery_draw_position(authored, true);
-    for _frame in 0..8 {
-        assert_eq!(scenery_draw_position(authored, true), uploaded);
-    }
-    assert_eq!(scenery_draw_position(authored, false), authored);
-    assert_eq!(uploaded.truncate(), authored.truncate());
-    assert!((uploaded.z - authored.z - 0.08).abs() < 1e-8);
-}
-
-#[test]
-fn spline_attachment_rows_stand_on_the_visible_spline() {
+fn spline_attachment_rows_keep_the_authored_height_above_the_spline() {
     let spline = ::map::MapSpline {
         id: 1,
         pos: [12.0, 18.0, 3.5],
@@ -525,43 +554,10 @@ fn spline_attachment_rows_stand_on_the_visible_spline() {
         let objects = crate::tiles::tile_row_objects(&row, &[spline.clone()], DVec2::ZERO, None);
         assert_eq!(objects.len(), 3);
         for (_, object) in objects {
-            let sco = SceneryObject::default();
-            let pose = spline_attachment_pose(object.pose, &sco);
             let along = 5.0 + object.index as f64 * 10.0;
-            let surface = scenery_draw_position(curve.offset_point(along, 3.0, 0.0), true);
-            let drawn = scenery_draw_position(pose.pos, drawn_on_surfaces(&sco));
-            assert!((drawn.z - surface.z - height).abs() < 1e-8);
-            assert_eq!(pose.pos.truncate(), object.pose.pos.truncate());
-            assert_eq!(pose.rot, object.pose.rot);
-
-            // An attachObj on the row's first object inherits the corrected height.
-            if object.index == 0 {
-                let point = Mat4::from_translation(glam::Vec3::new(0.0, 0.0, 2.0));
-                let child = pose.attached(&point, [0.0; 3]);
-                let old_child = object.pose.attached(&point, [0.0; 3]);
-                assert!((child.pos.z - old_child.pos.z - 0.08).abs() < 1e-8);
-            }
+            let surface = curve.offset_point(along, 3.0, 0.0);
+            assert!((object.pose.pos.z - surface.z - height).abs() < 1e-8);
         }
-    }
-}
-
-#[test]
-fn spline_attachment_surface_objects_receive_the_lift_once() {
-    let authored = Pose {
-        pos: DVec3::new(12.0, 18.0, 3.5),
-        rot: object_rotation([37.0, 10.0, 5.0]),
-    };
-    for text in [
-        "[surface]\n",
-        "[rendertype]\nsurface\n",
-        "[rendertype]\non_surface\n",
-    ] {
-        let sco = SceneryObject::parse(&::legacy_config::CfgFile::from_str("marking.sco", text));
-        let pose = spline_attachment_pose(authored, &sco);
-        let drawn = scenery_draw_position(pose.pos, drawn_on_surfaces(&sco));
-        assert!((drawn.z - authored.pos.z - 0.08).abs() < 1e-8);
-        assert_eq!(pose.rot, authored.rot);
-        assert_eq!(drawn.truncate(), authored.pos.truncate());
     }
 }
 
@@ -744,6 +740,21 @@ fn lights_of_lower_lods_count() {
     );
 }
 
+/// A light's star (effect bit 1) is three times the glow's size, as in OMSI (#324).
+#[test]
+fn a_light_star_reaches_past_its_glow() {
+    let text = "[mesh]\nsignal.o3d\n[light_enh_2]\n0\n0.136\n0.3\n0\n1\n0\n0\n0\n1\n0\n0\n255\n0\n0\n0.25\n20\n50\n1\n1\n0.1\n1\n0\n0\n";
+    let model = Model::parse(&::legacy_config::CfgFile::from_str("signal.sco", text));
+    let coronas = model_lights_faded(&model, &|_| Mat4::IDENTITY, DVec3::ZERO, &|_| 1.0, &[]);
+    let glow = coronas
+        .iter()
+        .find(|c| !c.halo && c.flags & 8 == 0)
+        .unwrap();
+    let star = coronas.iter().find(|c| c.flags & 8 != 0).unwrap();
+    assert!((glow.size - 0.125).abs() < 1e-6);
+    assert!((star.size - 0.375).abs() < 1e-6);
+}
+
 #[test]
 fn small_instrument_lights_keep_their_small_size() {
     let text = "[mesh]\ndash.o3d\n[light_enh]\n0\n0\n0\n255\n0\n0\n0.01\nspeedo_warn\n0\n";
@@ -841,4 +852,100 @@ fn drawn_ground_over_a_buried_road_face_carries_the_wheel() {
     // ground over the wheel (a road under an embankment) is no floor
     let got = probe_over(0.0, 4.0, 1.5, false);
     assert!(near(got, 0.0), "{got:?}");
+}
+
+/// A departure display's lamps glow when its script says so, not all night (#372).
+#[test]
+fn a_scripted_objects_lamp_follows_its_variable() {
+    let root = std::env::temp_dir().join(format!(
+        "neoomsi-script-lamp-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(
+        root.join("global.cfg"),
+        "[name]\nSynthetic display\n[map]\n0\n0\ntile_0_0.map\n",
+    )
+    .unwrap();
+    // one lamp switched by the script's `Due`, one always on
+    std::fs::write(
+        root.join("display.sco"),
+        "[varnamelist]\n1\nvars.txt\n[script]\n1\ndisplay.osc\n[mesh]\ndisplay.x\n\
+[light_enh]\n0\n0\n1\n255\n128\n0\n0.1\nDue\n1\n1\n1\n1\n\
+[light_enh]\n1\n0\n1\n0\n255\n0\n0.1\n1\n1\n1\n1\n1\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("vars.txt"), "Due\n").unwrap();
+    std::fs::write(root.join("display.osc"), "{frame}\n1 (S.L.Due)\n{end}\n").unwrap();
+    std::fs::write(
+        root.join("display.x"),
+        r#"xof 0303txt 0032
+        Mesh display {
+            3; 0;0;0;, 1;0;0;, 0;0;1;;
+            1; 3;0,1,2;;
+        }
+    "#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("tile_0_0.map"),
+        "[version]\n14\n[object]\n0\ndisplay.sco\n1\n100\n100\n0\n0\n0\n0\n0\n",
+    )
+    .unwrap();
+    let world = World::open(&root, &root.join("global.cfg"), 20261014).unwrap();
+    let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
+    desc.backends = wgpu::Backends::NOOP;
+    desc.backend_options.noop = wgpu::NoopBackendOptions::enabled();
+    let renderer = pollster::block_on(Renderer::new_with(
+        &wgpu::Instance::new(desc),
+        None,
+        Some(wgpu::TextureFormat::Rgba8UnormSrgb),
+        ::render::RenderOptions {
+            msaa: 1,
+            ssao: false,
+            no_enhanced: true,
+            shadow_size: 512,
+            ..Default::default()
+        },
+    ))
+    .unwrap();
+    let mut scene = renderer.new_scene();
+    let (mut prepared, _) = world.prepare_tiles(&[(0, 0, root.join("tile_0_0.map"))]);
+    world.upload_tile(
+        &renderer,
+        &mut scene,
+        prepared.pop().unwrap(),
+        &mut LoadStats::default(),
+    );
+    {
+        let states = world.tile_state.lock();
+        let statics = &states[&(0, 0)].coronas;
+        assert_eq!(statics.len(), 1, "the night lights the constant lamp only");
+        assert_eq!(statics[0].switch, LightSwitch::Constant(1.0));
+    }
+    let lit = || {
+        let scripted = world.scripted.lock();
+        assert_eq!(scripted.len(), 1);
+        assert_eq!(scripted[0].coronas.len(), 1);
+        assert_eq!(scripted[0].coronas[0].1, "Due");
+        scripted[0].lit.clone()
+    };
+    assert_eq!(lit(), [0.0], "dark until the script switches it");
+    world.update_scripted(
+        &renderer,
+        &mut scene,
+        0.1,
+        DVec3::new(100.0, 100.0, 0.0),
+        0.0,
+        &|_, _| (-1.0, 0.0),
+        None,
+        false,
+    );
+    assert_eq!(lit(), [1.0]);
+    drop(world);
+    std::fs::remove_dir_all(&root).unwrap();
 }

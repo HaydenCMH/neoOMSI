@@ -547,9 +547,9 @@ fn cloud_texture(root: &Path, kind: &str) -> Option<::texture::Image> {
     for i in 0..lines.len() {
         if lines[i].eq_ignore_ascii_case("[cloudtype]")
             && lines
-                .get(i + 1)
-                .map(|n| n.eq_ignore_ascii_case(kind))
-                .unwrap_or(false)
+            .get(i + 1)
+            .map(|n| n.eq_ignore_ascii_case(kind))
+            .unwrap_or(false)
         {
             file = lines.get(i + 2).map(|s| s.to_string());
             break;
@@ -560,7 +560,7 @@ fn cloud_texture(root: &Path, kind: &str) -> Option<::texture::Image> {
         &::mods::resolve_path(&root, "Texture"),
         &file,
     ))
-    .ok()?;
+        .ok()?;
     if img.has_alpha {
         for px in img.rgba.chunks_mut(4) {
             let a = px[3];
@@ -812,12 +812,7 @@ pub(crate) fn weather_lighting(
         if w.snow { 1.0 } else { 0.0 },
     );
     if let Some(custom) = CustomWeather::parse(&w.path.to_string_lossy()) {
-        let k = custom.brightness;
-        lighting.sun_intensity *= k;
-        lighting.secondary *= k;
-        lighting.ambient *= k;
-        lighting.sky_color *= k;
-        lighting.fog_color *= k;
+        apply_custom_brightness(&mut lighting, custom.brightness);
     }
     lighting.wetness = wetness;
     // Omsi.exe hides the sun under an 'ovc' cloud type (the Overcast ones in clouds.cfg) and
@@ -825,6 +820,19 @@ pub(crate) fn weather_lighting(
     lighting.shadows = shadows && density < 0.85 && w.fog.0 > 350.0;
     lighting.light_shadows = shadows;
     lighting
+}
+
+/// A custom weather's brightness. Enhanced lights the window from its own sky, which only the
+/// sun reaches; the plain light its mirrors and smoke use stays at that level (#232).
+fn apply_custom_brightness(lighting: &mut ::render::Lighting, k: f32) {
+    lighting.sun_intensity *= k;
+    if lighting.enhanced {
+        return;
+    }
+    lighting.secondary *= k;
+    lighting.ambient *= k;
+    lighting.sky_color *= k;
+    lighting.fog_color *= k;
 }
 
 /// Push the weather into a vehicle's script host.
@@ -838,12 +846,15 @@ pub(crate) fn precip_of(w: &::content::weather::Weather) -> (i32, f32) {
     (kind, rate)
 }
 
+/// `sheltered`: the vehicle stands under a roof and nothing falls on its glass (#137).
 pub(crate) fn apply_weather(
     v: &mut ::simulation::VehicleInstance,
     w: &::content::weather::Weather,
     wetness: f32,
+    sheltered: bool,
 ) {
     let (kind, rate) = precip_of(w);
+    let rate = if sheltered { 0.0 } else { rate };
     v.host.precip_type = kind as f32;
     v.host.precip_rate = rate;
     v.host.wind = rain::weather_wind(w);
@@ -890,47 +901,6 @@ pub(crate) fn initial_wetness(w: &::content::weather::Weather) -> f32 {
     (w.ground_wet[0] / 255.0).clamp(0.0, 1.0).max(falling)
 }
 
-/// The airports OMSI's METAR list (`Weather/ICAO.txt`) offers: (ICAO, "ICAO - name").
-pub(crate) fn metar_airports(root: &Path) -> Vec<(String, String)> {
-    static CACHE: std::sync::OnceLock<
-        std::sync::Mutex<std::collections::HashMap<PathBuf, Vec<(String, String)>>>,
-    > = std::sync::OnceLock::new();
-    let cache = CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
-    if let Some(v) = cache
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .get(root)
-        .cloned()
-    {
-        return v;
-    }
-    let text = std::fs::read(::mods::resolve_path(root, "Weather/ICAO.txt"))
-        .map(|b| ::legacy_config::codepage::decode(&b))
-        .unwrap_or_default();
-    let mut v: Vec<(String, String)> = text
-        .lines()
-        .filter_map(|l| {
-            l.split_once(" - ").map(|(c, n)| {
-                (
-                    c.trim().to_ascii_uppercase(),
-                    format!("{} - {}", c.trim(), n.trim()),
-                )
-            })
-        })
-        .filter(|(c, _)| c.len() == 4 && c.chars().all(|x| x.is_ascii_alphabetic()))
-        .collect();
-    if !v.iter().any(|a| a.0 == "EDDB") {
-        v.push(("EDDB".into(), "EDDB - Berlin Brandenburg".into()))
-    }
-    v.sort_by(|a, b| a.0.cmp(&b.0));
-    v.dedup_by(|a, b| a.0 == b.0);
-    cache
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(root.to_path_buf(), v.clone());
-    v
-}
-
 /// The weather of an airport's METAR report (aviationweather.gov), or a clear day when it
 /// cannot be had (no network, an unknown station).
 pub(crate) fn fetch_metar(icao: &str) -> ::content::weather::Weather {
@@ -945,15 +915,16 @@ pub(crate) fn fetch_metar(icao: &str) -> ::content::weather::Weather {
     }
 }
 
-/// The weather of an airport's METAR report, None when it cannot be had.
-pub(crate) fn try_metar(icao: &str) -> Option<::content::weather::Weather> {
+/// The raw METAR report of an airport (aviationweather.gov), None when the station is unknown
+/// or the service cannot be reached.
+pub(crate) fn metar_text(icao: &str) -> Option<String> {
     // (Tegel, OMSI's Berlin default, closed in 2020: Berlin's airport now reports)
     let icao = match icao.to_ascii_uppercase().as_str() {
         "EDDT" | "EDDI" | "" => "EDDB".to_string(),
         other => other.to_string(),
     };
     let url = format!("https://aviationweather.gov/api/data/metar?ids={icao}&format=raw");
-    let text = ureq::get(&url)
+    ureq::get(&url)
         .header("User-Agent", AVIATION_WEATHER_USER_AGENT)
         .config()
         .timeout_global(Some(std::time::Duration::from_secs(6)))
@@ -962,8 +933,16 @@ pub(crate) fn try_metar(icao: &str) -> Option<::content::weather::Weather> {
         .ok()
         .and_then(|r| r.into_body().read_to_string().ok())
         .map(|t| t.lines().next().unwrap_or("").trim().to_string())
-        .filter(|t| !t.is_empty());
-    let t = text?;
+        .filter(|t| !t.is_empty())
+}
+
+/// The weather of an airport's METAR report, None when it cannot be had.
+pub(crate) fn try_metar(icao: &str) -> Option<::content::weather::Weather> {
+    let icao = match icao.to_ascii_uppercase().as_str() {
+        "EDDT" | "EDDI" | "" => "EDDB".to_string(),
+        other => other.to_string(),
+    };
+    let t = metar_text(&icao)?;
     log::info!("current weather at {icao}: {t}");
     let mut w = ::content::weather::from_metar(&icao, &t);
     w.path = PathBuf::from(format!("metar:{icao}"));
@@ -1038,7 +1017,7 @@ fn parse_metar_station_info(icao: &str, text: &str) -> Option<MetarStationInfo> 
 /// intentionally return None so the launcher can show that the code cannot be used.
 pub(crate) fn metar_station_info(icao: &str) -> Option<MetarStationInfo> {
     let icao = icao.trim().to_ascii_uppercase();
-    if icao.len() != 4 || !icao.chars().all(|character| character.is_ascii_alphabetic()) {
+    if !(3..=4).contains(&icao.len()) || !icao.chars().all(|character| character.is_ascii_alphanumeric()) {
         return None;
     }
     let url = format!("https://aviationweather.gov/api/data/stationinfo?ids={icao}&format=json");
@@ -1053,6 +1032,54 @@ pub(crate) fn metar_station_info(icao: &str) -> Option<MetarStationInfo> {
         .read_to_string()
         .ok()?;
     parse_metar_station_info(&icao, &text)
+}
+
+#[derive(serde::Deserialize)]
+struct StationListEntry {
+    #[serde(rename = "icaoId")]
+    icao: Option<String>,
+    site: Option<String>,
+}
+
+/// All airports with a METAR report (aviationweather.gov), sorted by code: (code, "code - name").
+/// The world is fetched in tiles (in parallel) so no single answer is cut off or capped.
+pub(crate) fn metar_station_list() -> Vec<(String, String)> {
+    let mut jobs = Vec::new();
+    for lat in (-90..90).step_by(30) {
+        for lon in (-180..180).step_by(60) {
+            jobs.push(std::thread::spawn(move || metar_station_tile(lat, lon, lat + 30, lon + 60)));
+        }
+    }
+    let mut out: Vec<(String, String)> = jobs.into_iter().flat_map(|j| j.join().unwrap_or_default()).collect();
+    out.sort();
+    out.dedup_by(|a, b| a.0 == b.0);
+    out
+}
+
+fn metar_station_tile(lat0: i32, lon0: i32, lat1: i32, lon1: i32) -> Vec<(String, String)> {
+    let url = format!("https://aviationweather.gov/api/data/stationinfo?bbox={lat0},{lon0},{lat1},{lon1}&format=json");
+    for _ in 0..2 {
+        let text = ureq::get(&url)
+            .header("User-Agent", AVIATION_WEATHER_USER_AGENT)
+            .config()
+            .timeout_global(Some(std::time::Duration::from_secs(40)))
+            .build()
+            .call()
+            .ok()
+            .and_then(|r| r.into_body().with_config().limit(256 * 1024 * 1024).read_to_string().ok());
+        let Some(text) = text else { continue };
+        let Ok(list) = serde_json::from_str::<Vec<StationListEntry>>(&text) else { continue };
+        return list
+            .into_iter()
+            .filter_map(|e| {
+                let code = e.icao?.trim().to_ascii_uppercase();
+                let name = e.site.unwrap_or_default().trim().to_string();
+                ((3..=4).contains(&code.len()) && code.chars().all(|c| c.is_ascii_alphanumeric()))
+                    .then(|| (code.clone(), if name.is_empty() { code } else { format!("{code} - {name}") }))
+            })
+            .collect();
+    }
+    Vec::new()
 }
 
 #[cfg(test)]
@@ -1072,8 +1099,39 @@ mod metar_mode_tests {
             "EGNX",
             r#"[{"icaoId":"EGNX","site":"Nottingham/E Midlands Arpt"}]"#,
         )
-        .unwrap();
+            .unwrap();
         assert_eq!(station.icao, "EGNX");
         assert_eq!(station.name, "Nottingham/E Midlands Arpt");
+    }
+}
+
+#[cfg(test)]
+mod brightness_tests {
+    use super::apply_custom_brightness;
+
+    #[test]
+    fn plain_graphics_take_all_the_light_down() {
+        let mut l = ::render::Lighting::default();
+        apply_custom_brightness(&mut l, 0.0);
+        assert_eq!(l.sun_intensity, 0.0);
+        assert_eq!(l.ambient, glam::Vec3::ZERO);
+        assert_eq!(l.secondary, glam::Vec3::ZERO);
+        assert_eq!(l.sky_color, glam::Vec3::ZERO);
+        assert_eq!(l.fog_color, glam::Vec3::ZERO);
+    }
+
+    #[test]
+    fn enhanced_graphics_keep_the_mirrors_light_at_zero_brightness() {
+        let mut l = ::render::Lighting {
+            enhanced: true,
+            ..Default::default()
+        };
+        let before = l.clone();
+        apply_custom_brightness(&mut l, 0.0);
+        assert_eq!(l.sun_intensity, 0.0);
+        assert_eq!(l.ambient, before.ambient);
+        assert_eq!(l.secondary, before.secondary);
+        assert_eq!(l.sky_color, before.sky_color);
+        assert_eq!(l.fog_color, before.fog_color);
     }
 }

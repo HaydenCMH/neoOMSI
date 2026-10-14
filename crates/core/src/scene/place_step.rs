@@ -260,7 +260,7 @@ impl World {
                                 scene,
                                 id,
                                 p.origin,
-                                Mat4::from_translation(glam::Vec3::Z * OMSI_SURFACE_LIFT),
+                                Mat4::IDENTITY,
                                 vec![mat]
                             ));
                             if let Some(inst) = scene.instances.get_mut(si) {
@@ -387,7 +387,7 @@ impl World {
                                 scene,
                                 gid,
                                 p.origin,
-                                Mat4::from_translation(glam::Vec3::Z * OMSI_SURFACE_LIFT),
+                                Mat4::IDENTITY,
                                 vec![mat],
                             ));
                             if let Some(inst) = scene.instances.get_mut(terrain_instance) {
@@ -404,7 +404,7 @@ impl World {
                         scene,
                         id,
                         p.origin,
-                        Mat4::from_translation(glam::Vec3::Z * OMSI_SURFACE_LIFT),
+                        Mat4::IDENTITY,
                         mats
                     ));
                     if let Some(inst) = scene.instances.get_mut(si) {
@@ -524,7 +524,7 @@ impl World {
                     };
                     let surface = ot.sco.render_type.is_ground_layer() || ot.sco.surface;
                     let render_phase = scenery_render_phase(ot.sco.render_type);
-                    let draw_pos = scenery_draw_position(pos, drawn_on_surfaces(&ot.sco));
+                    let draw_pos = pos;
                     let has_lower = !type_lods.is_empty();
                     let mut lamp_instances = Vec::new();
                     let mut lamp_slots = Vec::new();
@@ -685,8 +685,8 @@ impl World {
                         if let Some(inst) = scene.instances.get_mut(inst) {
                             inst.render_phase = render_phase;
                             if surface {
-                                // The authored OMSI phase and fixed `[surface]` lift replace
-                                // camera-angle-sensitive bias for these road-layer meshes.
+                                // Ordered surface phases use the authored geometry; moving
+                                // it upward creates steps where it meets the terrain.
                                 inst.decal = true;
                                 inst.surface_bias = false;
                             }
@@ -836,8 +836,8 @@ impl World {
                                     // a script's string variable (the stock bus stop display's
                                     // departures): a texture of the object's own, drawn by
                                     // `update_scripted` whenever the script refreshes it
-                                    let scripted_text = lamp.is_none()
-                                        && tt.variable.trim().parse::<usize>().is_err()
+                                    // (a lamp's by `Traffic::sync`)
+                                    let scripted_text = tt.variable.trim().parse::<usize>().is_err()
                                         && ot
                                         .program
                                         .as_ref()
@@ -1205,6 +1205,7 @@ impl World {
                             variants: object_variants,
                             pos,
                             script,
+                            texts: Arc::new(Mutex::new(script_texts)),
                             coronas,
                             corona_mesh,
                             lit,
@@ -1212,6 +1213,7 @@ impl World {
                             animated,
                             sound,
                             sounds: Default::default(),
+                            shown: None,
                         });
                     } else if let Some(inst) = object_script.take() {
                         let texture_selection = scenery_texture_selection(&ot, &inst);
@@ -1252,14 +1254,20 @@ impl World {
                                 }
                             }
                         }
+                        let coronas = script_coronas(&ot, xf, pos);
                         if inst.is_dynamic()
                             || !object_variants.is_empty()
                             || ot.sco.sound.is_some()
                             || !script_texts.is_empty()
                             || !html_pages.is_empty()
                             || !ot.dynamic_textures.is_empty()
+                            || !coronas.is_empty()
                         {
                             let arrivals = inst.wants_arrivals();
+                            let lit = coronas
+                                .iter()
+                                .map(|(_, v)| inst.var(v).unwrap_or(0.0))
+                                .collect();
                             // (a scripted object with [terrainmapping] slots had more instances
                             // than its script has meshes: "index out of bounds", #111)
                             all_instances.truncate(mesh_instances);
@@ -1281,6 +1289,8 @@ impl World {
                                 htmls: html_pages,
                                 last_tex_selection: None,
                                 dynamic_materials: HashMap::new(),
+                                coronas,
+                                lit,
                             });
                         }
                     }

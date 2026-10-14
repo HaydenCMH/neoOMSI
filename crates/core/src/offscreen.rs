@@ -210,8 +210,13 @@ pub(crate) fn run_offscreen(
             .passenger_density((parse_time(&args.time) / 3600.0) as f32)
             * ::config::get_float("passengers", "density").unwrap_or(1.0) as f32;
         h.time_of_day = parse_time(&args.time);
-        h.stop_targets = schedule.as_ref().map(|s| s.stop_targets());
-        h.stop_names = schedule.as_ref().map(|s| s.stop_names());
+        if let Some(schedule) = schedule.as_ref() {
+            h.set_timetable_targets(
+                &world,
+                schedule.stop_targets_within(parse_time(&args.time), 5.0 * 60.0),
+                schedule.stop_names(),
+            );
+        }
         h.populate(&world, &renderer, &mut scene, center);
         if let Some(p) = player.as_ref() {
             if args.riders > 0 {
@@ -227,7 +232,10 @@ pub(crate) fn run_offscreen(
     let weather = load_weather(args);
     setup_sky(args, &renderer, &mut scene, envir.as_ref(), Some(&weather));
     if let Some(p) = player.as_mut() {
-        apply_weather(&mut p.vehicle, &weather, initial_wetness(&weather));
+        let sheltered = crate::shelter::windscreen_top(&p.vehicle)
+            .and_then(|top| crate::shelter::roof_at(&world, top.x, top.y).map(|r| top.z < r))
+            .unwrap_or(false);
+        apply_weather(&mut p.vehicle, &weather, initial_wetness(&weather), sheltered);
     }
     // the workshop's waiting time moves the clock on, so the sky has to follow it
     let mut service_seconds = 0.0f64;
@@ -723,6 +731,7 @@ pub(crate) fn run_offscreen(
                 .as_ref()
                 .and_then(|p| p.vehicle.var("TrafficPriority"))
                 .is_some_and(|v| v > 0.5);
+            t.rail_ahead = rail_ahead(t, &world, player.as_ref(), &remotes_off);
             t.tick(dt, player.as_ref().map(|p| player_outline(p)));
             world.set_switches(&t.switch_requests());
             world.set_signals(&t.signal_aspects(&world.signal_routes, None));
@@ -3001,6 +3010,9 @@ pub(crate) fn run_offscreen(
         lights::upload_corona_textures(&mut renderer);
         world.update_light_map_atlas(&renderer, camera.position);
         lights::collect(&world, &mut scene, &daylight, camera.position, &vehicles);
+        let mut shelter = crate::shelter::Shelter::new();
+        shelter.update(&world, camera.position, None);
+        shelter.upload(&renderer);
         let (kind, rate) = precip_of(&weather);
         let mut rn = rain::Rain::new();
         rn.set(kind, rate);
@@ -3018,6 +3030,7 @@ pub(crate) fn run_offscreen(
                     .or(player.as_ref())
                     .map(|p| rain::vehicle_boxes(&p.vehicle))
                     .unwrap_or_default(),
+                &shelter,
             );
         }
         // a moving player's wheels through the puddles the enhanced renderer paints on wet

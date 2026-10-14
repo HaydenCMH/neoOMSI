@@ -1,4 +1,9 @@
 {
+  "splash": {
+    "compile-shaders": "Compile shaders..",
+    "loading": "Loading..",
+    "load-map": "Loading {map}.."
+  },
   "ingame": {
     "navigator": {
       "kmh": "km/h",
@@ -46,6 +51,7 @@
       "screenshot": "Screenshot mode",
       "tobus": "Back to my bus",
       "options": "Options",
+      "mainmenu": "Main menu",
       "quit": "Quit",
       "resume": "Resume",
       "save": "Save",
@@ -486,7 +492,9 @@
         "interface": "Interface",
         "keybinds": "Key bindings",
         "map": "Map",
+        "mods": "Mods",
         "sound": "Sound",
+        "game": "Game & Updates",
         "vr": "VR",
         "head_tracking": "Head tracking",
         "general": "General",
@@ -524,6 +532,66 @@
         "delay": {
           "desc": "Shows the deviation from the timetable",
           "name": "Delay"
+        }
+      },
+      "mods": {
+        "folder": "Folder",
+        "install": {
+          "button": "Choose",
+          "desc": "Select an archive to install as a mod.\n\nSupported formats:\n- Zip\n- Rar\n- 7Zip",
+          "name": "Install a mod from an archive",
+          "title": "Select a mod archive to install"
+        },
+        "list": {
+          "desc": "All loaded mods and whether data is missing",
+          "name": "Active mods"
+        },
+        "none": "No mods active",
+        "none_desc": "No mods were found. Please note that OMSI 2 folder content is not counted as mods.\n\nYou can install mods in the Mods folder as archives or folders.",
+        "open": {
+          "button": "Open",
+          "desc": "Opens the Mods folder",
+          "name": "Mods folder"
+        },
+        "status": {
+          "empty": "Data missing",
+          "empty_desc": "No OMSI Content found (e.g. Vehicles or maps)",
+          "ok": "OK",
+          "unreadable": "Data missing",
+          "unreadable_desc": "The folder cannot be read",
+          "zip_error": "Data missing",
+          "zip_error_desc": "The ZIP archive cannot be read"
+        },
+        "zip": "ZIP"
+      },
+      "game": {
+        "root": {
+          "button": "Change",
+          "desc": "The folder with Omsi.exe, maps and Vehicles in it",
+          "name": "OMSI 2 installation",
+          "title": "The OMSI 2 folder (with maps and Vehicles in it)",
+          "exe_title": "Select the Omsi.exe of your OMSI 2 installation",
+          "incomplete": "{path} is not a complete OMSI 2 installation.\n\nMissing: {missing}"
+        },
+        "root_none": "Not chosen yet",
+        "root_restart": "takes effect after a restart",
+        "update_auto": {
+          "desc": "Installs a new version as soon as it is found",
+          "name": "Install updates automatically"
+        },
+        "update_available": "{version} is available",
+        "update_check": {
+          "desc": "Looks for a new version when the game starts",
+          "name": "Check for updates automatically"
+        },
+        "update_checking": "Looking for updates...",
+        "update_current": "Current version: {version}",
+        "update_failed": "The last check failed",
+        "update_latest": "{version} is the latest version",
+        "update_now": {
+          "button": "Check now",
+          "desc": "Looks for a new version of neoOMSI",
+          "name": "Check for updates"
         }
       },
       "interface": {
@@ -1126,6 +1194,13 @@
       },
       "axis": {
         "desc": "What this axis does.",
+        "shape": {
+          "linear": "Linear",
+          "degressive": "Degressive",
+          "progressive": "Progressive",
+          "bi_degressive": "Bi-degressive",
+          "bi_progressive": "Bi-progressive"
+        },
         "invert": {
           "name": "Invert",
           "desc": "Reverses this axis, even before a function is assigned."
@@ -1486,6 +1561,177 @@
       "mute": "Mute {name}'s microphone",
       "unmute": "Let {name} speak again",
       "voice": "Voice chat: {state}"
+    }
+  },
+  "start": {
+    "maps": {
+      "nav": "Start",
+      "head": "Choose a map",
+      "note": "Pick the map and how the drive starts.",
+      "list": "MAPS",
+      "settings": "SETTINGS",
+      "vehicle": "VEHICLE",
+      "mode": "START",
+      "free": "Free drive",
+      "t1": "Map & route",
+      "t2": "Vehicles",
+      "t3": "Time & weather",
+      "h1": "Where do you drive?",
+      "h2": "Choose your vehicle",
+      "h3": "When and in what weather?",
+      "next": "Next:",
+      "drive": "Drive",
+      "cont": "Continue where you left off",
+      "map": "MAP",
+      "buses": "ALL VEHICLES",
+      "sw": "Winter",
+      "sp": "Spring",
+      "su": "Summer",
+      "sa": "Autumn",
+      "route": "Route",
+      "go": "Start",
+      "none": "No maps found",
+      "livery": "Livery",
+      "details": "Vehicle details",
+      "auto": "Automatic",
+      "depot": "Depot file",
+      "fleet": "Fleet number",
+      "plate": "Number plate",
+      "search": "Search vehicles...",
+      "nobuses": "No vehicles found",
+      "unknown": "Unknown manufacturer",
+      "loading": "Loading preview...",
+      "nopreview": "No preview",
+      "line": "LINE",
+      "tour": "TOUR",
+      "filter": "Filter...",
+      "nolines": "No lines on this map",
+      "notours": "No tours",
+      "trip": "FIRST TRIP",
+      "autotrip": "By start time",
+      "mappreview": "Loading map...",
+      "autoentry": "Automatic (nearest to the first stop)",
+      "entry": "START POINT",
+      "noentries": "No start points on this map",
+      "linetour": "Line {line}, tour {tour}",
+      "linetourtrip": "Line {line}, tour {tour}, trip {trip}",
+      "time": "TIME",
+      "date": "DATE",
+      "now": "Now",
+      "season": "SEASON",
+      "today": "Today",
+      "close": "Close",
+      "sd": "By date",
+      "weather": "WEATHER",
+      "presets": "PRESETS",
+      "icao": "AIRPORT (ICAO)",
+      "onfoot": "Start on foot (no bus)",
+      "onfoot_short": "On foot",
+      "icao_ph": "ICAO code, e.g. EDDB",
+      "icao_auto": "Empty: nearest airport to the map",
+      "icao_live": "Live updates (every 10 minutes)",
+      "icao_lookup": "Looking up airport…",
+      "noair": "No matching airport",
+      "icao_checking": "Checking station..."
+    },
+    "profile": {
+      "ago_d": "{n} d ago",
+      "ago_h": "{n} h ago",
+      "ago_m": "{n} min ago",
+      "comfort": "Comfort",
+      "comfort_note": "The share of passengers who got on and had nothing to complain about.",
+      "default_name": "Driver",
+      "delete_confirm": "Delete?",
+      "distance": "Distance",
+      "driving": "Driving",
+      "driving_note": "Speeding, harsh braking and crashes lower it.",
+      "hm": "{h} h {m} min",
+      "hours": "Hours driven",
+      "level": "Level {level} · {xp} XP to level {next}",
+      "min": "{m} min",
+      "new": "New driver",
+      "new_hint": "Name of the new driver",
+      "no_drives": "No drives yet.",
+      "ontime": "On time",
+      "ratings": "Ratings",
+      "recent": "Recent drives",
+      "stops": "Stops served",
+      "tickets": "Ticket selling",
+      "tickets_note": "Right ticket, right change, without keeping anyone waiting."
+    },
+    "join": {
+      "nav": "Multiplayer",
+      "note": "Drive with friends by a session code, or join a server.",
+      "tab_join": "Join & host",
+      "tab_servers": "Server list",
+      "label": "SESSION CODE OR SERVER ADDRESS",
+      "placeholder": "Session code or server address",
+      "hint": "Paste a code from a friend, or an IP / address with port. Leave empty to search the local network.",
+      "go": "Join",
+      "checking": "Checking...",
+      "online": "Server online  -  {map}  -  {players}/{max} players",
+      "offline": "Server not reachable: {error}",
+      "offline_short": "Offline",
+      "game": "YOUR GAME",
+      "host": "Host my next drive",
+      "host_note": "Friends can join your session as soon as you start it.",
+      "servers_note": "Only servers that answer can be joined.",
+      "no_servers": "No saved servers yet."
+    },
+    "row": {
+      "vehicle": "Vehicle",
+      "time": "Time",
+      "traffic": "Traffic",
+      "passengers": "Passengers",
+      "timetable": "Timetable",
+      "weather": "Weather",
+      "date": "Date",
+      "situation": "Situation",
+      "season": "Season"
+    },
+    "value": {
+      "on": "on",
+      "off": "off",
+      "default": "default",
+      "vehicles": "{n} vehicles",
+      "hour": "{h}:00"
+    },
+    "season": {
+      "winter": "winter",
+      "spring": "spring",
+      "summer": "summer",
+      "autumn": "autumn"
+    },
+    "cal": {
+      "m1": "January",
+      "m2": "February",
+      "m3": "March",
+      "m4": "April",
+      "m5": "May",
+      "m6": "June",
+      "m7": "July",
+      "m8": "August",
+      "m9": "September",
+      "m10": "October",
+      "m11": "November",
+      "m12": "December",
+      "d1": "Mo",
+      "d2": "Tu",
+      "d3": "We",
+      "d4": "Th",
+      "d5": "Fr",
+      "d6": "Sa",
+      "d7": "Su"
+    },
+    "weather": {
+      "default": "Map default",
+      "cycle": "Weather cycle",
+      "real": "Real weather",
+      "custom": "Custom weather",
+      "vis": "Visibility",
+      "clouds": "Clouds",
+      "precip": "Precipitation",
+      "temp": "Temperature"
     }
   }
 }

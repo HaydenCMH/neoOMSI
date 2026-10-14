@@ -176,6 +176,7 @@ impl KeyboardCfg {
             ("indicator_right", 46, 0),
             ("saloon_lights", 23, 0),
             ("bus_startup", 22, KEY_SHIFT),
+            ("doors_release", 0, 0),
             ("radio_next", 19, KEY_SHIFT),
             ("voice_talk", 58, 0),
             ("voice_radio", 58, KEY_SHIFT),

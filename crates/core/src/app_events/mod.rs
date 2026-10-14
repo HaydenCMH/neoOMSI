@@ -40,6 +40,14 @@ impl ApplicationHandler for App {
                 }
             }
         }
+        if self.boot.is_some() {
+            match event {
+                WindowEvent::CloseRequested => platform::exit(event_loop),
+                WindowEvent::RedrawRequested => self.poll_boot(event_loop),
+                _ => {}
+            }
+            return;
+        }
         match event {
             WindowEvent::CloseRequested => {
                 self.finish_vr_nav_edit();
@@ -56,6 +64,7 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::Focused(false) => self.on_focus_lost(),
+            WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
             WindowEvent::KeyboardInput { event, .. } => self.on_window_key(event_loop, event),
             WindowEvent::MouseInput {
                 state,
@@ -147,6 +156,10 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if self.boot.is_some() {
+            self.poll_boot(event_loop);
+            return;
+        }
         game_lists::flush_settings(false);
         if self.mouse_edge != 0.0 && !self.mouse_drive {
             self.mouse_edge = 0.0;

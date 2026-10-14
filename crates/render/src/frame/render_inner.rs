@@ -241,7 +241,7 @@ impl Renderer {
         stage(self, "setup", "mirror.setup");
         let grid = self.prepare_lights(scene, cam_rel, enhanced_frame, spot_plan);
         stage(self, "setup.lights", "mirror.setup.lights");
-        self.prepare_coronas(scene, lighting.night);
+        self.prepare_coronas(scene, lighting.night, enhanced);
         self.prepare_smoke(scene, camera.position);
         stage(self, "setup.coronas", "mirror.setup.coronas");
         let ao_on = with_overlays
@@ -458,6 +458,19 @@ impl Renderer {
             ];
             self.write_buffer(&self.lm_uniform, 0, bytemuck::cast_slice(&v));
         }
+        if let Some((cx, cy, cell, slot)) = self.cover_place.get() {
+            let v: [f32; COVER_HEADER as usize] = [
+                (cx - ro.x) as f32,
+                (cy - ro.y) as f32,
+                cell,
+                COVER_SIDE as f32,
+                slot.0 as f32,
+                slot.1 as f32,
+                ro.z as f32,
+                1.0,
+            ];
+            self.write_buffer(&self.cover_buf, 0, bytemuck::cast_slice(&v));
+        }
         let (spot_vp, spot_info) = {
             let st = self.spot_state.borrow();
             let mut m = [[[0.0f32; 4]; 4]; SPOT_SLOTS];
@@ -602,6 +615,7 @@ impl Renderer {
             spot_vp,
             spot_info,
             tune: [lighting.nightmap_gain, lighting.lightmap_gain, 0.0, 0.0],
+            trailers: trailer_fog_boxes(lighting.inside, &lighting.puddle_parts, ro),
         };
         self.write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&cu));
         let probe_redraw = enhanced
@@ -677,7 +691,7 @@ impl Renderer {
             .unwrap_or(3.0);
         let casters = |span: std::ops::Range<usize>| -> [Vec<DrawItem>; SHADOW_SETS] {
             let mut out: [Vec<DrawItem>; SHADOW_SETS] = std::array::from_fn(|_| Vec::new());
-            let mut ranges: Vec<(u8, u32, u32, usize)> = Vec::new();
+            let mut ranges: Vec<(u8, u32, u32, usize, u32)> = Vec::new();
             for inst in &scene.instances[span] {
                 if !inst.visible
                     || !inst.casts_shadow
@@ -769,7 +783,7 @@ impl Renderer {
                     if cut_body {
                         kind = PIPE_ALPHA_TEST;
                     }
-                    ranges.push((kind, ri as u32, *slot, mat_id));
+                    ranges.push((kind, ri as u32, *slot, mat_id, mat.look));
                 }
                 if dbg_shadow && receives[0] && r >= dbg_r {
                     log::info!(
@@ -782,12 +796,14 @@ impl Renderer {
                     if !keep {
                         continue;
                     }
-                    for &(kind, ri, slot, mat_id) in &ranges {
+                    for &(kind, ri, slot, mat_id, look) in &ranges {
+                        let (material, look) = depth_only_material(kind, mat_id, look);
                         out[cascade].push(DrawItem {
                             pipe: kind,
                             mesh: inst.mesh as u32,
                             range: ri,
-                            material: depth_only_material(kind, mat_id),
+                            material,
+                            look,
                             entry: inst.base + slot,
                         });
                     }
@@ -1177,11 +1193,13 @@ impl Renderer {
                         continue;
                     }
                     if let Some(pre_kind) = depth_prepass_kind(kind, mat, inst.presurface) {
+                        let (material, look) = depth_only_material(pre_kind, mat_id, mat.look);
                         items.push(DrawItem {
                             pipe: pre_kind * 2 + cull as u8,
                             mesh: inst.mesh as u32,
                             range: ri as u32,
-                            material: depth_only_material(pre_kind, mat_id),
+                            material,
+                            look,
                             entry: inst.base + *slot,
                         });
                     }
@@ -1240,6 +1258,7 @@ impl Renderer {
                                 mesh: inst.mesh as u32,
                                 range: ri as u32,
                                 material: mat_id as u32,
+                                look: mat.look,
                                 entry: inst.base + *slot,
                             });
                         }
@@ -1273,6 +1292,7 @@ impl Renderer {
                             mesh: inst.mesh as u32,
                             range: ri as u32,
                             material: mat_id as u32,
+                            look: mat.look,
                             entry: inst.base + *slot,
                         });
                     }
@@ -1385,6 +1405,7 @@ impl Renderer {
                             mesh: inst.mesh as u32,
                             range: ri as u32,
                             material: mat_id as u32,
+                            look: mat.look,
                             entry: inst.base + *slot,
                         };
                         if after_rain && kind == PIPE_BLEND_NO_WRITE {

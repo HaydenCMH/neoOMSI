@@ -25,6 +25,7 @@ struct Camera {
     spot_vp: array<mat4x4<f32>, 32>, // the spot light shadow maps' matrices (see `spot_shadow`)
     spot_info: vec4<f32>,    // x tile width, y tile height (uv of the far map's texture), z the far cascade's share of its height, w tile pixels
     tune: vec4<f32>,
+    trailers: array<vec4<f32>, 9>, // the player vehicle's trailer boxes, laid out as inside_a..c
 };
 
 const PUDDLE_SPREAD: f32 = 0.45;
@@ -90,47 +91,55 @@ fn near_player_vehicle(world: vec3<f32>) -> f32 {
 // away) took the fog of that distance and in thick ground fog the interior went milky, the
 // door panes nearly opaque - outside the bus there was nothing of the kind. The box is the
 // one `inside_vehicle` uses; the part of the ray inside it is taken off the fogged distance.
+// An articulated bus's rear car (a trailer) has its own box, taken off as well (#309).
 fn fog_distance(world: vec3<f32>) -> f32 {
     let full = distance(world, camera.cam_pos.xyz);
     if (camera.inside_c.w < 0.5) {
         return full;
     }
-    let sh = camera.inside_a.w;
-    let ch = camera.inside_b.x;
-    let to_local = fn_box_local(camera.cam_pos.xyz);
-    let p1 = fn_box_local(world);
-    let d = p1 - to_local;
-    let h = camera.inside_b.yzw;
-    // slab test of the segment against the box (x, y the plan, z height)
+    var inside = segment_in_box(world, camera.inside_a, camera.inside_b, camera.inside_c);
+    for (var i = 0; i < 3; i = i + 1) {
+        if (camera.trailers[3 * i + 2].w > 0.5) {
+            inside += segment_in_box(world, camera.trailers[3 * i], camera.trailers[3 * i + 1], camera.trailers[3 * i + 2]);
+        }
+    }
+    return max(full * (1.0 - inside), 0.0);
+}
+
+// How far the fog's box reaches above a `[boundingbox]`: the O530 G's ends 2.38 m up, below
+// its ceiling, and the ceiling took the fog of the way above it.
+const FOG_ROOF: f32 = 0.6;
+
+// The share (0..1) of the way from the camera to `world` inside a box laid out as
+// `inside_a`..`inside_c`, FOG_ROOF taller (slab test).
+fn segment_in_box(world: vec3<f32>, a: vec4<f32>, b: vec4<f32>, c: vec4<f32>) -> f32 {
+    let up = vec3<f32>(0.0, 0.0, FOG_ROOF * 0.5);
+    let o = box_local(camera.cam_pos.xyz, a, b, c) - up;
+    let d = box_local(world, a, b, c) - up - o;
+    let h = b.yzw + up;
     var t0 = 0.0;
     var t1 = 1.0;
     for (var k = 0; k < 3; k = k + 1) {
-        let o = to_local[k];
-        let dk = d[k];
-        let hk = h[k];
-        if (abs(dk) < 1e-6) {
-            if (abs(o) > hk) {
-                return full;
+        if (abs(d[k]) < 1e-6) {
+            if (abs(o[k]) > h[k]) {
+                return 0.0;
             }
         } else {
-            let a = (-hk - o) / dk;
-            let b = (hk - o) / dk;
-            t0 = max(t0, min(a, b));
-            t1 = min(t1, max(a, b));
+            let lo = (-h[k] - o[k]) / d[k];
+            let hi = (h[k] - o[k]) / d[k];
+            t0 = max(t0, min(lo, hi));
+            t1 = min(t1, max(lo, hi));
         }
     }
-    if (t1 <= t0) {
-        return full;
-    }
-    return max(full * (1.0 - (t1 - t0)), 0.0);
+    return max(t1 - t0, 0.0);
 }
 
-// A point in the player's vehicle box frame (centred, x across, y along, z up).
-fn fn_box_local(world: vec3<f32>) -> vec3<f32> {
-    let d = world - camera.inside_a.xyz;
-    let sh = camera.inside_a.w;
-    let ch = camera.inside_b.x;
-    return vec3<f32>(d.x * ch - d.y * sh - camera.inside_c.x, d.x * sh + d.y * ch - camera.inside_c.y, d.z - camera.inside_c.z);
+// A point in a vehicle box's frame (centred, x across, y along, z up).
+fn box_local(world: vec3<f32>, a: vec4<f32>, b: vec4<f32>, c: vec4<f32>) -> vec3<f32> {
+    let d = world - a.xyz;
+    let sh = a.w;
+    let ch = b.x;
+    return vec3<f32>(d.x * ch - d.y * sh - c.x, d.x * sh + d.y * ch - c.y, d.z - c.z);
 }
 
 // 1 where the weather reaches the point. The cab test above reaches 0.6 m below the
@@ -241,6 +250,26 @@ fn ao_at(frag: vec2<f32>, world: vec3<f32>) -> f32 {
 // they lie: x, y the south-west corner (render-origin relative), z the side, w 1 when set
 @group(0) @binding(18) var t_lmap: texture_2d<f32>;
 @group(0) @binding(19) var<uniform> lmap: vec4<f32>;
+// The roofs around the camera (`Renderer::set_cover_map`): the `COVER_HEADER` floats, then
+// per cell the world height of its roof.
+@group(0) @binding(20) var<storage, read> roofs: array<f32>;
+
+// 1 under a roof, where neither rain nor snow reaches (#137); 0 elsewhere.
+fn sheltered(p: vec3<f32>) -> f32 {
+    if (roofs[7] < 0.5) {
+        return 0.0;
+    }
+    let n = roofs[3];
+    let rel = (p.xy - vec2<f32>(roofs[0], roofs[1])) / roofs[2];
+    if (any(rel < vec2<f32>(0.0)) || any(rel >= vec2<f32>(n))) {
+        return 0.0;
+    }
+    let ni = u32(n);
+    let cx = (u32(rel.x) + u32(roofs[4])) % ni;
+    let cy = (u32(rel.y) + u32(roofs[5])) % ni;
+    // (the roof's own top is under the sky)
+    return select(0.0, 1.0, p.z + roofs[6] < roofs[8u + cy * ni + cx] - 0.3);
+}
 
 // The sRGB curve both ways (the textures are sampled through it, the target writes through
 // it): the classic picture multiplies on the encoded values, as Omsi.exe does.
@@ -493,9 +522,9 @@ fn vs_main(in: VsIn) -> VsOut {
     let m = model_matrix(e);
     let wp = m * vec4<f32>(in.pos, 1.0);
     var out: VsOut;
-    // Legacy surfaces are pulled towards the eye along the line of sight. OMSI splines and
-    // [surface] objects use a fixed 8 cm world lift; ordered scenery phases use their authored
-    // world positions. Both use code 0.9 to keep weather classification without view-space pull.
+    // Legacy surfaces are pulled towards the eye along the line of sight. Ordered spline
+    // and scenery phases use their authored world positions and code 0.9 to keep weather
+    // classification without view-space pull
     // Painted ground (0.75) stays put.
     let surf = inst_params[e * 2u + 1u].w;
     var cp = wp.xyz;
@@ -1916,7 +1945,11 @@ fn shade_vanilla(in: FsIn, puddle_weight: ptr<function, f32>, capture: bool) -> 
         // it glows whenever that is on, by day as well; the others fade in with the night
         let night = select(camera.sun_color.w, 1.0, material.extra.w > 1.5);
         let glow = night * select(clamp(in.params2.y, 0.0, 1.0), 1.0, material.extra.w > 1.5);
-        lit = lit + nm.rgb * glow * camera.tune.x;
+        if (material.extra.w > 1.5) {
+            lit = lit + nm.rgb * (vec3<f32>(1.0) - clamp(lit, vec3<f32>(0.0), vec3<f32>(1.0)));
+        } else {
+            lit = lit + nm.rgb * glow * camera.tune.x;
+        }
     }
     if (material.params2.y > 0.0 && !screen_unlit) {
         // [matl_envmap]: sphere map reflection, masked by the diffuse alpha like the original
@@ -1985,7 +2018,9 @@ fn shade_vanilla(in: FsIn, puddle_weight: ptr<function, f32>, capture: bool) -> 
     // wet road: a surface whose texture carries [moisture] darkens under rain and starts
     // to mirror the sky, strongest where you look along it (the Fresnel sheen that makes a
     // wet street read as wet)
-    let outside = weather_outside_n(in.world, n, material.extra.x > 0.5, in.params2.w);
+    // (not under a roof - Vanilla+ only: OMSI 2 wets [moisture] surfaces everywhere)
+    let unroofed = select(1.0 - sheltered(in.world), 1.0, camera.sky_color.w > 0.5);
+    let outside = weather_outside_n(in.world, n, material.extra.x > 0.5, in.params2.w) * unroofed;
     let wet = camera.shadow.w * material.params2.z * outside;
     if (wet > 0.0) {
         let vdir = normalize(in.world - camera.cam_pos.xyz);

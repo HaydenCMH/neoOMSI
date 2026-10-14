@@ -1011,6 +1011,12 @@ pub struct VehicleInstance {
     pub ai_visuals: bool,
     ai_visuals_missed: f32,
     pub ai_lights: bool,
+    /// A train's hidden parts (see [`VehicleInstance::part_hidden`]): from the front, those
+    /// run off the end of its track; from the back, those not yet in over its start.
+    pub parts_gone: usize,
+    pub parts_waiting: usize,
+    /// The last frame ran `{frame_ai}` (so do the coupled cars' scripts).
+    ai_frame: bool,
     var_index: HashMap<String, ::legacy_script::VarId>,
     /// Where each mesh's material properties come from, resolved against `var_index`
     /// (rebuilt when the vehicle gains engine variables).
@@ -1304,6 +1310,9 @@ impl VehicleInstance {
             ai_visuals: true,
             ai_visuals_missed: 0.0,
             ai_lights: false,
+            parts_gone: 0,
+            parts_waiting: 0,
+            ai_frame: false,
             var_index,
             props_plan: PropsPlan::default(),
         }
@@ -2181,6 +2190,14 @@ impl VehicleInstance {
             .map(|(n, _)| n.as_str())
     }
 
+    /// The trigger the `doors_release` action fires now (see [`door_release_trigger`]).
+    pub fn door_release_trigger(&self) -> Option<&'static str> {
+        door_release_trigger(
+            |t| self.ty.program.trigger(t).is_some(),
+            self.var("C2_CP_Tuerfreigabe").is_some_and(|x| x > 0.5),
+        )
+    }
+
     pub fn set_var(&mut self, name: &str, v: f32) -> bool {
         match lookup_var_index(&self.var_index, name) {
             Some(&i) => {
@@ -2257,19 +2274,22 @@ impl VehicleInstance {
         self.set_engine_var("PrecipRate", rate);
         // the state of the road, for the tyre sounds and the wheel spray
         self.set_engine_var("StreetCond", self.host.street_cond);
-        // what is coupled to this vehicle (the train scripts light their ends by it: a head
-        // lamp only where nothing is coupled, the tail lamps at the last car)
+        self.set_train_vars();
+        // and for the tyres' grip
+        let mu = road_grip(self.host.street_cond, self.host.temperature);
+        if let Some(rb) = self.rigid.as_mut() {
+            rb.friction = mu;
+        }
+    }
+
+    /// The `TRAIN_VARS` of the leading car (the coupled cars': [`PartScript`]).
+    fn set_train_vars(&mut self) {
         self.set_engine_var("train_frontcoupling", 0.0);
         self.set_engine_var(
             "train_backcoupling",
             if self.trailers.is_empty() { 0.0 } else { 1.0 },
         );
         self.set_engine_var("train_me_reverse", 0.0);
-        // and for the tyres' grip
-        let mu = road_grip(self.host.street_cond, self.host.temperature);
-        if let Some(rb) = self.rigid.as_mut() {
-            rb.friction = mu;
-        }
     }
 
     /// The engine's own vehicle variables that OMSI binds to fields of the vehicle
@@ -2461,6 +2481,7 @@ impl VehicleInstance {
         self.driven_km += (self.physics.velocity_kmh() as f64 / 3600.0) * dt as f64;
         self.update_engine_vars(dt);
         let p = self.ty.program.clone();
+        self.ai_frame = false;
         self.vm.run_frame(&p, &mut self.state, &mut self.host);
         self.clear_pax_requests();
         self.update_visuals(dt);
@@ -2635,10 +2656,12 @@ impl VehicleInstance {
         ] {
             self.set_var(name, v);
         }
+        self.set_train_vars();
         for &(id, v) in inputs.iter().chain(pinned) {
             self.put(Some(id), v);
         }
         let p = self.ty.program.clone();
+        self.ai_frame = true;
         if p.frame_ai.is_empty() {
             self.vm.run_frame(&p, &mut self.state, &mut self.host);
         } else {
@@ -2771,33 +2794,57 @@ impl VehicleInstance {
     fn update_trailers(&mut self, dt: f32) {
         let mut trailers = std::mem::take(&mut self.trailers);
         let mut lead: Option<(DVec3, Mat4, f64)> = None;
-        for t in &mut trailers {
-            t.update(self, dt, lead);
+        let n = trailers.len();
+        for (k, t) in trailers.iter_mut().enumerate() {
+            t.update(self, dt, lead, k + 1 < n);
             lead = Some((t.position, t.body_rotation(), t.heading));
         }
         self.trailers = trailers;
     }
 
+    /// How far behind the vehicle's origin each coupled part's coupling lies with the train
+    /// laid out straight (m; negative ahead of it).
+    fn couplings_behind(&self) -> Vec<f64> {
+        // the origin of the part in front (forward positive) and which way its body faces
+        let (mut y, mut sign) = (0.0f64, 1.0f64);
+        self.trailers
+            .iter()
+            .map(|t| {
+                let (back, front) = t.couplings();
+                let at_coupling = y + sign * back.y as f64;
+                sign = if t.reversed { -1.0 } else { 1.0 };
+                y = at_coupling - sign * front.y as f64;
+                -at_coupling
+            })
+            .collect()
+    }
+
+    /// Put the coupled parts' couplings over a track (`at_behind` as for `retrail`) rather
+    /// than where the part in front puts them.
+    pub fn couple_on_track(&mut self, at_behind: &dyn Fn(f64) -> Option<DVec3>) {
+        let behind = self.couplings_behind();
+        for (t, d) in self.trailers.iter_mut().zip(behind) {
+            if let Some(p) = at_behind(d) {
+                t.place_coupling_on_track(p);
+            }
+        }
+    }
+
     /// Put the coupled parts on a track: `at_behind(d)` is the point of the track `d` metres
     /// behind the vehicle's origin (None: not known, the part follows as it does on a road).
-    /// Each part's turning axle is placed there, and the part follows its coupling.
+    /// Each part's turning axle is placed there and the part follows its coupling (see
+    /// `couple_on_track`). The track is asked once per part, front to back.
     pub fn retrail(&mut self, dt: f32, at_behind: &dyn Fn(f64) -> Option<DVec3>) {
+        let behind = self.couplings_behind();
         let mut trailers = std::mem::take(&mut self.trailers);
         let mut lead: Option<(DVec3, Mat4, f64)> = None;
-        let (mut prev_c, mut b_prev) = (self.position, 0.0f64);
-        for t in &mut trailers {
-            let (lp, lr) = lead
-                .map(|(p, r, _)| (p, r))
-                .unwrap_or((self.position, self.body_rotation()));
-            let c = t.coupling_point(lp, lr);
-            let b_c = b_prev + (c - prev_c).truncate().length();
-            if let Some(p) = at_behind(b_c + t.pivot_length() as f64) {
+        let n = trailers.len();
+        for (k, (t, b_c)) in trailers.iter_mut().zip(behind).enumerate() {
+            if let Some(p) = at_behind(b_c + t.pivot_reach() as f64) {
                 t.place_on_track(p);
             }
-            t.update(self, dt, lead);
+            t.update(self, dt, lead, k + 1 < n);
             lead = Some((t.position, t.body_rotation(), t.heading));
-            prev_c = c;
-            b_prev = b_c;
         }
         self.trailers = trailers;
     }
@@ -2889,7 +2936,7 @@ impl VehicleInstance {
                 .or_else(|| self.var(n.trim()))
                 .unwrap_or(0.0)
         };
-        let fade = |model: &Model, fades: &mut Vec<f32>| {
+        let fade = |model: &Model, value: &dyn Fn(&str) -> f32, fades: &mut Vec<f32>| {
             let mut k = 0;
             for md in &model.meshes {
                 for l in &md.light_enh_2 {
@@ -2914,9 +2961,10 @@ impl VehicleInstance {
                 }
             }
         };
-        fade(&self.ty.model, &mut lf);
+        fade(&self.ty.model, &value, &mut lf);
         for (t, f) in self.trailers.iter().zip(part_fades.iter_mut()) {
-            fade(&t.ty.model, f);
+            let value = |n: &str| t.value(self, n);
+            fade(&t.ty.model, &value, f);
         }
         self.light_fade = lf;
         for (t, f) in self.trailers.iter_mut().zip(part_fades) {
@@ -3490,11 +3538,110 @@ pub fn fit_plane(points: &[Vec3]) -> [f32; 3] {
 }
 
 /// A vehicle coupled behind another (articulated bus rear section, trailer, train car).
-/// It has no script state of its own: meshes animate from the leading vehicle's
-/// variables, and it is towed at the coupling point with trailer kinematics.
+/// It has no script state of its own (except [`PartScript`]): meshes animate from the
+/// leading vehicle's variables, and it is towed at the coupling point with trailer kinematics.
 /// Sign of `articulation_<n>_alpha` relative to (heading in front − own heading), clockwise
 /// degrees: settled with the GN92's joint dummies (see the vehicle tests).
 const ARTICULATION_SIGN: f64 = 1.0;
+
+/// Written per car of a train: turned round (its `.zug` flag), and coupled at its own
+/// front and back.
+const TRAIN_VARS: [&str; 3] = [
+    "train_me_reverse",
+    "train_frontcoupling",
+    "train_backcoupling",
+];
+
+/// The own scripts of a coupled car that reads the `TRAIN_VARS` (head and tail lamps):
+/// with the leading car's values a turned head car at the back lit its head lamps (#318).
+/// What its scripts only read comes from the leading car.
+struct PartScript {
+    state: State,
+    vm: Vm,
+    initialised: bool,
+    /// (own variable, leading car's variable, stored by its scripts)
+    shared: Vec<(::legacy_script::VarId, usize, bool)>,
+    /// The leading car's variable count `shared` was made for.
+    shared_for: usize,
+    train: [Option<::legacy_script::VarId>; 3],
+    /// The leading car's variables with this car's own laid over them.
+    view: Vec<f32>,
+}
+
+impl PartScript {
+    fn new(program: &Program) -> Option<Box<PartScript>> {
+        let train = TRAIN_VARS.map(|n| program.var(n).filter(|&v| program.reads(v)));
+        train.iter().any(Option::is_some).then(|| {
+            Box::new(PartScript {
+                state: State::new(program),
+                vm: Vm::new(),
+                initialised: false,
+                shared: Vec::new(),
+                shared_for: usize::MAX,
+                train,
+                view: Vec::new(),
+            })
+        })
+    }
+
+    /// One frame (`{init}` first). Its sounds and messages are dropped.
+    fn run(&mut self, program: &Program, main: &mut VehicleInstance, reversed: bool, behind: bool) {
+        if self.shared_for != main.var_index.len() {
+            self.shared_for = main.var_index.len();
+            self.shared = program
+                .var_names
+                .iter()
+                .enumerate()
+                .filter_map(|(i, n)| {
+                    let id = i as ::legacy_script::VarId;
+                    let m = *lookup_var_index(&main.var_index, n)? as usize;
+                    Some((id, m, program.stores(id)))
+                })
+                .collect();
+        }
+        for &(own, m, stored) in &self.shared {
+            if !stored {
+                self.state.vars[own as usize] = main.state.vars[m];
+            }
+        }
+        // something is always coupled ahead of it
+        let (front, back) = if reversed {
+            (behind, true)
+        } else {
+            (true, behind)
+        };
+        for (id, v) in self.train.iter().zip([reversed, front, back]) {
+            if let Some(id) = id {
+                self.state.vars[*id as usize] = v as i32 as f32;
+            }
+        }
+        let host = &mut main.host;
+        let (fired_sounds, fired_vars, messages, time_written) = (
+            host.fired_sounds.len(),
+            host.fired_trigger_vars.len(),
+            host.messages.len(),
+            host.time_written,
+        );
+        if !self.initialised {
+            self.initialised = true;
+            self.vm.run_init(program, &mut self.state, host);
+        }
+        if main.ai_frame && !program.frame_ai.is_empty() {
+            self.vm.run_frame_ai(program, &mut self.state, host);
+        } else {
+            self.vm.run_frame(program, &mut self.state, host);
+        }
+        host.fired_sounds.truncate(fired_sounds);
+        host.fired_trigger_vars.truncate(fired_vars);
+        host.messages.truncate(messages);
+        host.time_written = time_written;
+        self.view.clear();
+        self.view.extend_from_slice(&main.state.vars);
+        for &(own, m, _) in &self.shared {
+            self.view[m] = self.state.vars[own as usize];
+        }
+    }
+}
 
 pub struct TrailerPart {
     pub ty: Arc<VehicleType>,
@@ -3511,6 +3658,9 @@ pub struct TrailerPart {
     pivot: Option<DVec3>,
     /// Coupling → rear axle distance.
     length: f32,
+    /// How far the coupling lies ahead of that axle as the part travels (m): negative for
+    /// the BR 481's bogies, coupled behind the car body they run under (#342).
+    reach: f32,
     coupling_front: Vec3,
     coupling_back: Vec3,
     axle_long: f32,
@@ -3552,6 +3702,8 @@ pub struct TrailerPart {
     /// The track under its turning axle, when it runs on rails (`VehicleInstance::retrail`):
     /// it stands at the track's height, not on whatever the ground probe finds there.
     track: Option<DVec3>,
+    /// The track point under its coupling (`VehicleInstance::couple_on_track`).
+    track_coupling: Option<DVec3>,
     held: Option<DVec3>,
     /// Mesh property sources, resolved against the leading vehicle's variables.
     props_plan: PropsPlan,
@@ -3561,6 +3713,8 @@ pub struct TrailerPart {
     /// variables (`[scriptshare]`: the rear section of an articulated bus shows the
     /// number and the destination the front's scripts set).
     pub text_textures: Vec<crate::texttex::TextTextureState>,
+    /// Its own scripts, see [`PartScript`].
+    script: Option<Box<PartScript>>,
 }
 
 /// OMSI's frames, a thirtieth of a second (`[maxFPS]` 30 in its options.cfg and every option
@@ -3609,6 +3763,10 @@ impl OmsiFrames {
 fn scripts_acceleration(accel_body: Vec3, orientation: Quat) -> Vec3 {
     accel_body - orientation.inverse().mul_vec3(Vec3::new(0.0, 0.0, 9.81))
 }
+
+/// How near the track point must be to where the part in front has the coupling (m): a
+/// stale one is ignored.
+const TRACK_COUPLING_REACH: f64 = 5.0;
 
 impl TrailerPart {
     /// Pitch (degrees, nose up), eased axle height and the track point it stands on (for
@@ -3783,6 +3941,7 @@ impl TrailerPart {
             frame_brakes: Vec::new(),
             joint_angles: None,
             track: None,
+            track_coupling: None,
             held: None,
             v_alpha: program.var(&format!("articulation_{joint}_alpha")),
             v_beta: program.var(&format!("articulation_{joint}_beta")),
@@ -3790,10 +3949,16 @@ impl TrailerPart {
             mesh_transforms: vec![Mat4::IDENTITY; n],
             mesh_props: vec![MeshProps::default(); n],
             props_plan: PropsPlan::default(),
+            script: PartScript::new(&ty.program),
             position: DVec3::ZERO,
             heading: 0.0,
             pivot: None,
             length: (coupling_front.y - axle_long).abs(),
+            reach: if reversed {
+                axle_long - coupling_front.y
+            } else {
+                coupling_front.y - axle_long
+            },
             coupling_front,
             coupling_back,
             axle_long,
@@ -3916,7 +4081,7 @@ impl TrailerPart {
         let c = position + rot.transform_point3(self.coupling_front).as_dvec3();
         let h = heading.to_radians();
         let ahead = DVec3::new(h.sin(), h.cos(), 0.0);
-        let pivot = c - ahead * self.length as f64;
+        let pivot = c - ahead * self.reach as f64;
         // (the follow step after this one sees the pivot standing still: the wheels roll
         // as far as the pose moved)
         if let Some(d) = self.pivot.map(|p| pivot - p).filter(|d| d.length() < 25.0) {
@@ -3944,6 +4109,7 @@ impl TrailerPart {
         self.held = None;
         self.axle_z = None;
         self.track = None;
+        self.track_coupling = None;
         self.rigid = None;
         self.joint_angles = None;
     }
@@ -3960,6 +4126,12 @@ impl TrailerPart {
         self.length
     }
 
+    /// How far behind the coupling the axle the part turns about lies along the way
+    /// (negative: ahead of it).
+    pub fn pivot_reach(&self) -> f32 {
+        self.reach
+    }
+
     /// Put the part's turning axle at `pivot` (a point on the road behind the coupling):
     /// a bus placed on a bend stands with its rear section following the bend rather than
     /// straight behind it.
@@ -3974,11 +4146,46 @@ impl TrailerPart {
         self.track = Some(p);
     }
 
-    fn update(&mut self, main: &mut VehicleInstance, dt: f32, lead: Option<(DVec3, Mat4, f64)>) {
+    /// Put the part's coupling over the track at `p` (keeping its height).
+    pub fn place_coupling_on_track(&mut self, p: DVec3) {
+        self.track_coupling = Some(p);
+    }
+
+    /// Variable `name` as this part's meshes and lamps see it.
+    pub fn var(&self, main: &VehicleInstance, name: &str) -> Option<f32> {
+        let i = *lookup_var_index(&main.var_index, name)? as usize;
+        let own = self.script.as_ref().and_then(|s| s.view.get(i));
+        Some(*own.unwrap_or(&main.state.vars[i]))
+    }
+
+    /// A number or [`TrailerPart::var`] (0 when unknown).
+    pub fn value(&self, main: &VehicleInstance, source: &str) -> f32 {
+        let t = source.trim();
+        t.parse::<f32>()
+            .ok()
+            .or_else(|| self.var(main, t))
+            .unwrap_or(0.0)
+    }
+
+    /// `behind`: another part is coupled behind this one.
+    fn update(
+        &mut self,
+        main: &mut VehicleInstance,
+        dt: f32,
+        lead: Option<(DVec3, Mat4, f64)>,
+        behind: bool,
+    ) {
         // coupling point in the world: on the leading part (the vehicle or the previous trailer)
         let (lead_pos, lead_rot, lead_heading) =
             lead.unwrap_or((main.position, main.body_rotation(), main.heading));
         let c = lead_pos + lead_rot.transform_point3(self.coupling_back).as_dvec3();
+        // (kept, not taken: `update_trailers` steps the part again in the same frame)
+        let c = match self.track_coupling {
+            Some(p) if (p - c).truncate().length() < TRACK_COUPLING_REACH => {
+                DVec3::new(p.x, p.y, c.z)
+            }
+            _ => c,
+        };
         // the height its axle had (the new one eases from it; nothing after a move)
         let (lift, sag, ground_z) = if let Some(rb) = &self.rigid {
             self.position = rb.origin();
@@ -4004,10 +4211,12 @@ impl TrailerPart {
                 None => {
                     // start straight behind the leading vehicle
                     let h = main.heading.to_radians();
-                    c - DVec3::new(h.sin(), h.cos(), 0.0) * self.length as f64
+                    c - DVec3::new(h.sin(), h.cos(), 0.0) * self.reach as f64
                 }
             };
-            let mut dir = (c - pivot).truncate();
+            // (forward: from the axle to the coupling, the other way where the axle leads)
+            let ahead = if self.reach < 0.0 { -1.0 } else { 1.0 };
+            let mut dir = (c - pivot).truncate() * ahead;
             if dir.length() < 1e-3 {
                 let h = main.heading.to_radians();
                 dir = glam::DVec2::new(h.sin(), h.cos());
@@ -4029,7 +4238,7 @@ impl TrailerPart {
                 }
             }
             self.heading = heading;
-            let new_pivot = c - DVec3::new(dir.x, dir.y, 0.0) * self.length as f64;
+            let new_pivot = c - DVec3::new(dir.x, dir.y, 0.0) * self.reach as f64;
             let ds = (new_pivot - pivot).truncate().length() as f32;
             self.odometer +=
                 ds * (main.physics.velocity_kmh().signum().max(0.0) * 2.0 - 1.0).max(-1.0);
@@ -4154,8 +4363,9 @@ impl TrailerPart {
             // a crest the joint came apart by a hand's breadth or more). It leans as the vehicle
             // it is coupled to does.
             let rise = c.z - (axle_z + self.coupling_front.z as f64);
-            self.pitch =
-                (rise.atan2(self.length.max(0.5) as f64).to_degrees() as f32).clamp(-15.0, 15.0);
+            // (with the axle ahead, a raised coupling tips the nose down)
+            let run = self.length.max(0.5).copysign(self.reach) as f64;
+            self.pitch = ((rise / run).atan().to_degrees() as f32).clamp(-15.0, 15.0);
             self.bank = main.bank;
             // the trailer origin: coupling_front sits at c
             let rot = self.body_rotation();
@@ -4260,14 +4470,23 @@ impl TrailerPart {
                 }
             }
         }
+        if let Some(script) = self.script.as_mut() {
+            script.run(&self.ty.program, main, self.reversed, behind);
+        }
         self.props_plan.refresh(&self.ty, &main.var_index);
-        self.props_plan
-            .apply(&main.state.vars, &mut self.mesh_props);
+        let vars = self.script.as_ref().map_or(&main.state.vars, |s| &s.view);
+        self.props_plan.apply(vars, &mut self.mesh_props);
         let _ = self.axle_long;
     }
 }
 
 impl VehicleInstance {
+    /// Is part `k` (0 = the vehicle itself, `k` = trailer `k - 1`) off its track, past
+    /// its end or not yet over its start (see `parts_gone`)?
+    pub fn part_hidden(&self, k: usize) -> bool {
+        k < self.parts_gone || k + self.parts_waiting > self.trailers.len()
+    }
+
     /// Rotation of the vehicle body (model frame → world, without translation).
     pub fn body_rotation(&self) -> Mat4 {
         if let Some(rb) = &self.rigid {
@@ -4482,9 +4701,159 @@ pub fn skin_vertices(
     Some((pos, nrm))
 }
 
+/// The door release of a bus, whatever its script calls it: its own release trigger
+/// (`bus_doorall`, the Iveco's `CG_active`, the C2's `C2_CP_doorall_1`), the C2's release
+/// switch turned over (`C2_CP_Tuerfreigabe_1` / `_0`, by `switch_on`), else `bus_dooraft`.
+pub fn door_release_trigger(has: impl Fn(&str) -> bool, switch_on: bool) -> Option<&'static str> {
+    if let Some(t) = ["bus_doorall", "CG_active", "C2_CP_doorall_1"]
+        .into_iter()
+        .find(|t| has(t))
+    {
+        return Some(t);
+    }
+    if has("C2_CP_Tuerfreigabe_1") && has("C2_CP_Tuerfreigabe_0") {
+        return Some(if switch_on {
+            "C2_CP_Tuerfreigabe_0"
+        } else {
+            "C2_CP_Tuerfreigabe_1"
+        });
+    }
+    has("bus_dooraft").then_some("bus_dooraft")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A three-car train with its last car turned round, lamps as `BR243.osc` (#318).
+    #[test]
+    fn each_car_of_a_train_sees_how_it_stands_in_the_train() {
+        let dir = std::env::temp_dir().join(format!("omsi-train-vars-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("car.ovh"),
+            "[model]\nmodel.cfg\n\n[varnamelist]\n1\nvars.txt\n\n[script]\n1\ncar.osc\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("model.cfg"), "").unwrap();
+        std::fs::write(
+            dir.join("vars.txt"),
+            "train_me_reverse\ntrain_frontcoupling\ntrain_backcoupling\nAI_Engine\n\
+             Lights_white_front\nLights_white_rear\nLights_red_front\nLights_red_rear\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("car.osc"),
+            "{frame}\n\
+             (L.L.train_Me_reverse)\n\
+             {if}\n\
+             (L.L.AI_Engine) 0.5 > (S.L.Lights_white_rear)\n\
+             (L.L.train_frontcoupling) ! (S.L.Lights_red_front)\n\
+             0 (S.L.Lights_white_front) (S.L.Lights_red_rear)\n\
+             {else}\n\
+             (L.L.AI_Engine) 0.5 > (S.L.Lights_white_front)\n\
+             (L.L.train_backcoupling) ! (S.L.Lights_red_rear)\n\
+             0 (S.L.Lights_white_rear) (S.L.Lights_red_front)\n\
+             {endif}\n\
+             {end}\n",
+        )
+        .unwrap();
+        let ty = VehicleType::load(&dir, &dir.join("car.ovh"));
+        std::fs::remove_dir_all(&dir).ok();
+        let ty = Arc::new(ty.unwrap());
+        let mut v = VehicleInstance::new(ty.clone(), VehicleHost::new(crate::SimClock::default()));
+        v.attach_trailer_ex(ty.clone(), false);
+        v.attach_trailer_ex(ty, true);
+        v.set_var("AI_Engine", 1.0);
+        v.update(0.02);
+        let lamps = |var: &dyn Fn(&str) -> Option<f32>| {
+            [
+                "Lights_white_front",
+                "Lights_white_rear",
+                "Lights_red_front",
+                "Lights_red_rear",
+            ]
+            .map(|n| var(n).unwrap())
+        };
+        assert_eq!(lamps(&|n| v.var(n)), [1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(lamps(&|n| v.trailers[0].var(&v, n)), [1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(lamps(&|n| v.trailers[1].var(&v, n)), [0.0, 1.0, 1.0, 0.0]);
+        assert_eq!(v.trailers[1].value(&v, "train_me_reverse"), 1.0);
+    }
+
+    /// `Gerolstein_BR425.zug` in AI service: white at the head, red at the tail (#318).
+    #[test]
+    fn an_et425_lights_its_head_and_its_tail() {
+        let root = ::legacy_config::env::var_os("OMSI_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("../../../OMSI 2 Original"));
+        let dir = root.join("Vehicles/DB_BR425");
+        if !dir.join("Kopf.ovh").exists() || !root.join("Vehicles/BR145_146").exists() {
+            eprintln!("skipped: no {}", dir.display());
+            return;
+        }
+        let load = |n: &str| Arc::new(VehicleType::load(&root, &dir.join(n)).expect(n));
+        let (kopf, gelenk) = (load("Kopf.ovh"), load("Gelenk.ovh"));
+        let mut v =
+            VehicleInstance::new(kopf.clone(), VehicleHost::new(crate::SimClock::default()));
+        for (ty, reversed) in [
+            (gelenk.clone(), false),
+            (load("Panto.ovh"), false),
+            (gelenk.clone(), false),
+            (load("Basis.ovh"), false),
+            (gelenk, false),
+            (kopf, true),
+        ] {
+            v.attach_trailer_ex(ty, reversed);
+        }
+        let ai = AiFrame {
+            lights: true,
+            ..Default::default()
+        };
+        for _ in 0..3 {
+            v.update_ai(0.05, &ai);
+        }
+        let tail = v.trailers.last().unwrap();
+        let lamps = |var: &dyn Fn(&str) -> Option<f32>| {
+            [
+                "Lights_white_front",
+                "Lights_white_rear",
+                "Lights_red_front",
+                "Lights_red_rear",
+            ]
+            .map(|n| var(n).unwrap())
+        };
+        assert_eq!(lamps(&|n| v.var(n)), [1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(lamps(&|n| tail.var(&v, n)), [0.0, 1.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn the_door_release_is_the_bus_own_trigger() {
+        let with = |names: &'static [&'static str]| move |t: &str| names.contains(&t);
+        assert_eq!(
+            door_release_trigger(with(&["bus_doorall", "bus_dooraft"]), false),
+            Some("bus_doorall")
+        );
+        assert_eq!(
+            door_release_trigger(with(&["CG_active"]), false),
+            Some("CG_active")
+        );
+        let c2 = with(&[
+            "C2_CP_Tuerfreigabe_1",
+            "C2_CP_Tuerfreigabe_0",
+            "bus_dooraft",
+        ]);
+        assert_eq!(
+            door_release_trigger(c2, false),
+            Some("C2_CP_Tuerfreigabe_1")
+        );
+        assert_eq!(door_release_trigger(c2, true), Some("C2_CP_Tuerfreigabe_0"));
+        assert_eq!(
+            door_release_trigger(with(&["bus_dooraft"]), false),
+            Some("bus_dooraft")
+        );
+        assert_eq!(door_release_trigger(with(&[]), false), None);
+    }
 
     #[test]
     fn script_speed_reports_tiny_resting_motion_as_stopped() {
@@ -5224,6 +5593,69 @@ mod tests {
         assert!(!full.is_empty(), "the F90 has no animated wheels");
         assert_eq!(report(ai), full);
     }
+
+    /// Parts coupled on ahead of their own axle, each ahead of the one before (the BR 481's
+    /// bogies, #342), stand on the track in a bend.
+    #[test]
+    fn parts_coupled_ahead_of_their_axle_stand_on_the_track_in_a_bend() {
+        let dir = std::env::temp_dir().join(format!("omsi-retrail-ahead-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("model.cfg"), "").unwrap();
+        let part = |name: &str, front: f32, back: f32| {
+            std::fs::write(
+                dir.join(name),
+                format!(
+                    "[model]\nmodel.cfg\n[coupling_front]\n0\n{front}\n1\n[coupling_back]\n0\n{back}\n1\n"
+                ),
+            )
+            .unwrap();
+            Arc::new(VehicleType::load(&dir, &dir.join(name)).unwrap())
+        };
+        let lead = part("lead.ovh", 5.0, -30.0);
+        // origin 10 m behind the lead's, its axle (none given) 0.5 m behind that
+        let a = part("a.ovh", -20.0, -3.0);
+        // origin 5 m behind the lead's: ahead of the part it hangs on
+        let b = part("b.ovh", -8.0, -1.0);
+        let mut v = VehicleInstance::new(lead, VehicleHost::new(crate::SimClock::default()));
+        v.attach_trailer_ex(a, false);
+        v.attach_trailer_ex(b, false);
+        // a bend of 150 m radius, the lead's origin on it heading north (+y)
+        let r = 150.0f64;
+        let on_track = |d: f64| {
+            let t = d / r;
+            Some(DVec3::new(r - r * t.cos(), -r * t.sin(), 0.0))
+        };
+        v.position = DVec3::ZERO;
+        v.heading = 0.0;
+        for _ in 0..3 {
+            v.couple_on_track(&on_track);
+            v.retrail(0.0, &on_track);
+        }
+        // (once per part: the traffic counts the queries)
+        let asked = std::cell::Cell::new(0);
+        v.retrail(0.0, &|d| {
+            asked.set(asked.get() + 1);
+            on_track(d)
+        });
+        assert_eq!(asked.get(), v.trailers.len());
+        for (k, (t, behind)) in v.trailers.iter().zip([10.5, 5.5]).enumerate() {
+            let axle = t
+                .world_transform()
+                .transform_point3(Vec3::new(0.0, -0.5, 0.0))
+                .as_dvec3();
+            let off = ((axle - DVec3::new(r, 0.0, 0.0)).truncate().length() - r).abs();
+            assert!(
+                off < 0.05,
+                "part {k}: axle {axle:?} {off:.2} m off the track"
+            );
+            let want = on_track(behind).unwrap();
+            assert!(
+                (axle - want).truncate().length() < 0.1,
+                "part {k}: axle {axle:?}, the track {behind} m behind the lead is at {want:?}"
+            );
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }
 
 /// The relative humidity (a fraction, 1 = saturated) of air at `t` °C holding `abs_hum` g/m³,
@@ -5410,5 +5842,33 @@ mod grip_tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod part_hidden_tests {
+    use super::*;
+
+    /// A locomotive and three coaches: the parts that ran off the end are hidden from the
+    /// front, those not yet in over the start from the back.
+    #[test]
+    fn hidden_parts_count_from_either_end() {
+        let dir = std::env::temp_dir().join(format!("neoomsi-parts-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("test.bus"), "[model]\nmodel.cfg\n").unwrap();
+        std::fs::write(dir.join("model.cfg"), "").unwrap();
+        let ty = Arc::new(VehicleType::load(&dir, &dir.join("test.bus")).unwrap());
+        let mut v = VehicleInstance::new(ty.clone(), VehicleHost::new(Default::default()));
+        for _ in 0..3 {
+            v.attach_trailer(ty.clone());
+        }
+        let hidden = |v: &VehicleInstance| (0..4).map(|k| v.part_hidden(k)).collect::<Vec<_>>();
+        assert_eq!(hidden(&v), [false; 4]);
+        v.parts_waiting = 2;
+        assert_eq!(hidden(&v), [false, false, true, true]);
+        v.parts_waiting = 0;
+        v.parts_gone = 1;
+        assert_eq!(hidden(&v), [true, false, false, false]);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

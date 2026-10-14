@@ -16,6 +16,26 @@ type Rows = Vec<(String, String)>;
 
 const LONG_LIST: usize = 8;
 
+const SHAPES: [i32; 5] = [0, 4, 8, 0x14, 0x18];
+const SHAPE_KEYS: [&str; 5] = [
+    "linear",
+    "degressive",
+    "progressive",
+    "bi_degressive",
+    "bi_progressive",
+];
+
+fn shape_index(flags: i32) -> usize {
+    SHAPES.iter().position(|s| *s == flags & 0x1c).unwrap_or(0)
+}
+
+fn shape_text(flags: i32) -> String {
+    tl(&format!(
+        "pause.controls.axis.shape.{}",
+        SHAPE_KEYS[shape_index(flags)]
+    ))
+}
+
 fn connected(pads: Option<&Controllers>) -> Vec<Connected> {
     let Ok(mut g) = LIVE.lock() else {
         return Vec::new();
@@ -71,7 +91,7 @@ pub(crate) fn button_label(n: usize, gamepad: bool) -> String {
     const PAD: [&str; 6] = ["X", "A", "B", "Y", "LB", "RB"];
     const DIRS: [&str; 4] = ["up", "right", "down", "left"];
     let hats = controllers::HAT_BUTTONS..controllers::HAT_BUTTONS + 16;
-    if cfg!(windows) && hats.contains(&n) {
+    if hats.contains(&n) {
         let (hat, dir) = ((n - hats.start) / 4, (n - hats.start) % 4);
         let dir = tl(&format!("pause.controls.hat.{}", DIRS[dir]));
         return if gamepad && hat == 0 {
@@ -226,14 +246,10 @@ pub(crate) fn rows(pads: Option<&Controllers>) -> Rows {
     let mut out: Rows = Vec::new();
     let mut tab = 2;
     for c in live.iter() {
-        if let Some(i) = devices
+        if devices
             .iter()
-            .position(|d| controllers::names_match(&d.name, &c.name))
+            .any(|d| controllers::names_match(&d.name, &c.name))
         {
-            out.push((
-                row(&c.name, 'o', "", "pause.controls.use.desc", None),
-                format!("pad_open {i}"),
-            ));
             tab += 1;
         } else {
             out.push((
@@ -327,6 +343,8 @@ fn device_rows(root: &Path, d: &DeviceCfg, dev: Option<&Connected>, search: &Key
             labels[a].as_str()
         };
         let mut r = row(name, 'o', &v, "pause.controls.axis.desc", None);
+        let mut meter = String::new();
+        let mut one_sided = "";
         if let Some((_, x)) = dev.and_then(|c| c.axes.iter().find(|(k, _)| *k == a)) {
             let pedal = d.axes[a]
                 .is_some_and(|(f, _)| matches!(f, Func::Throttle | Func::Brake | Func::Clutch));
@@ -340,14 +358,21 @@ fn device_rows(root: &Path, d: &DeviceCfg, dev: Option<&Connected>, search: &Key
                 } else {
                     cal
                 }
-                .clamp(-1.0, 1.0)
+                    .clamp(-1.0, 1.0)
             };
-            r = if pedal {
-                format!("{r}\u{1f}\u{1f}{:.3}\u{1f}u", (v + 1.0) * 0.5)
+            if pedal {
+                meter = format!("{:.3}", (v + 1.0) * 0.5);
+                one_sided = "u";
             } else {
-                format!("{r}\u{1f}\u{1f}{:.3}", v)
-            };
+                meter = format!("{:.3}", v);
+            }
         }
+        let alt = if d.axes[a].is_some_and(|(f, _)| !matches!(f, Func::LookX | Func::LookY)) {
+            format!("{}\u{1f}pad_shape {a}", shape_text(d.axis_flags[a]))
+        } else {
+            "\u{1f}".to_string()
+        };
+        r = format!("{r}\u{1f}\u{1f}{meter}\u{1f}{one_sided}\u{1f}\u{1f}{alt}");
         out.push((r, format!("pad_axis {a}")));
         #[cfg(target_os = "linux")]
         out.push((
@@ -413,6 +438,15 @@ fn device_rows(root: &Path, d: &DeviceCfg, dev: Option<&Connected>, search: &Key
         }
     }
     let n = shown_buttons(d, dev.map_or(0, |c| c.buttons));
+    let hat_rows: Vec<usize> = if cfg!(target_os = "linux") && dev.is_some() {
+        (controllers::HAT_BUTTONS..controllers::HAT_BUTTONS + 4)
+            .filter(|h| *h >= n)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let list: Vec<usize> = (0..n).chain(hat_rows).collect();
+    let n = list.len();
     if n > 0 {
         let names = names_of(root);
         let gamepad = dev.is_some_and(|c| c.gamepad);
@@ -440,7 +474,7 @@ fn device_rows(root: &Path, d: &DeviceCfg, dev: Option<&Connected>, search: &Key
             ));
         }
         let before = out.len();
-        for b in 0..n {
+        for b in list {
             let act = d.buttons.get(b).map(|x| x.0.trim()).unwrap_or("");
             let v = if act.is_empty() {
                 "-".to_string()
@@ -520,6 +554,16 @@ pub(crate) fn dropdown(root: &Path, row_k: usize, id: &str) -> Option<Dropdown> 
                         format!("pad_set_axis {a} {c} {}", inv as u8),
                     ));
                 }
+            }
+        }
+        "pad_shape" => {
+            let a: usize = arg.parse().ok().filter(|a| *a < 8)?;
+            current = Some(shape_index(d.axis_flags[a]));
+            for (i, key) in SHAPE_KEYS.iter().enumerate() {
+                items.push((
+                    tl(&format!("pause.controls.axis.shape.{key}")),
+                    format!("pad_set_shape {a} {i}"),
+                ));
             }
         }
         "pad_dz" => {
@@ -651,6 +695,18 @@ fn apply_inner(pads: Option<&mut Controllers>, verb: &str, arg: &str) {
                 let inv = it.next() == Some("1");
                 devices[i].axes[a as usize] = Func::from_code(c).map(|f| (f, inv));
             }
+        }
+        "pad_set_shape" => {
+            let (Some(a), Some(s)) = (
+                n.filter(|a| (0..8).contains(a)),
+                it.next()
+                    .and_then(|x| x.parse::<usize>().ok())
+                    .and_then(|s| SHAPES.get(s).copied()),
+            ) else {
+                return;
+            };
+            let flags = &mut devices[i].axis_flags[a as usize];
+            *flags = (*flags & !0x1c) | s;
         }
         "pad_set_dz" => {
             let Some(v) = n else {

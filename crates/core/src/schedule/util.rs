@@ -65,10 +65,9 @@ pub(super) fn norm_vehicle_path(p: &str) -> String {
     p.trim().replace('\\', "/").to_ascii_lowercase()
 }
 
-/// The tour mask bits `clock`'s date selects: (the weekday's or public holiday's, the school
-/// holidays' or school days'). the original: bit 8 = runs in the school holidays,
-/// bit 9 = runs on school days.
-pub(super) fn day_bits(calendar: &::map::Calendar, clock: &::simulation::SimClock) -> (i32, i32) {
+/// The tour mask bits `clock`'s date selects: (weekday or public holiday, bit 8 school day
+/// or bit 9 school holidays).
+pub(crate) fn day_bits(calendar: &::map::Calendar, clock: &::simulation::SimClock) -> (i32, i32) {
     let date = clock.date_code();
     let day_bit = if calendar.is_holiday(date) {
         1 << 7
@@ -76,11 +75,33 @@ pub(super) fn day_bits(calendar: &::map::Calendar, clock: &::simulation::SimCloc
         1 << clock.weekday()
     };
     let school_bit = if calendar.in_holiday_range(date) {
-        1 << 8
-    } else {
         1 << 9
+    } else {
+        1 << 8
     };
     (day_bit, school_bit)
+}
+
+/// `clock`'s date a day earlier (its time of day is kept).
+pub(super) fn day_before(clock: &::simulation::SimClock) -> ::simulation::SimClock {
+    let mut c = clock.clone();
+    if c.day_of_year > 1 {
+        c.day_of_year -= 1;
+    } else {
+        c.year -= 1;
+        c.day_of_year = ::simulation::clock::days_in_year(c.year);
+    }
+    c
+}
+
+/// `tour_available` for a day's `day_bits` and the next weekday's bit.
+pub(crate) fn tour_runs(tour: &::timetable::Tour, (day_bit, school_bit): (i32, i32), next_day_bit: i32) -> bool {
+    let m = tour.extra.trim().parse::<i32>().unwrap_or(1023);
+    if m & day_bit != 0 && m & school_bit != 0 {
+        return true;
+    }
+    let night = tour.trips.iter().any(|t| t.departure >= 24.0 * 60.0);
+    night && m & next_day_bit != 0 && m & school_bit != 0
 }
 
 /// GetTTTerminusIndex as Omsi.exe answers it: the first depot terminus whose name is the

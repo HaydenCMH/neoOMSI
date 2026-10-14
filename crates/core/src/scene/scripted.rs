@@ -385,7 +385,7 @@ impl World {
                             .map(|(line, terminus, t)| ::simulation::host::Arrival {
                                 line: line.clone(),
                                 terminus: terminus.clone(),
-                                due: (t - now) as f32,
+                                due: ::simulation::host::Arrival::due_at(*t, now),
                             })
                             .collect()
                     })
@@ -430,42 +430,17 @@ impl World {
                 continue;
             };
             let dist = (o.pos - center).length();
+            for ((_, var), lit) in o.coronas.iter().zip(&mut o.lit) {
+                *lit = o.inst.var(var).unwrap_or(0.0);
+            }
             // text textures from the script's strings whenever they change (`update` leaves
             // an unchanged one alone): read only on `Refresh_Strings`, a board whose string
             // was still empty at its first frame stayed blank for good (#367)
             if !o.texts.is_empty() && dist < 250.0 {
-                let _ = o.inst.take_refresh_strings();
-                for (tex, st) in o.texts.iter_mut() {
-                    let text = o.inst.str_var(st.def.variable.trim());
-                    if st.update(text) {
-                        let (w, h) = (st.def.width.max(1) as u32, st.def.height.max(1) as u32);
-                        if let Some(rgba) = st.pending.take() {
-                            // OMSI_DUMP_SCENERY_TEXT=<dir>: the pictures as drawn
-                            if let Some(dir) = ::legacy_config::env::var_os("OMSI_DUMP_SCENERY_TEXT") {
-                                let path = std::path::Path::new(&dir)
-                                    .join(format!("text_{}.png", o.map_id));
-                                log::info!(
-                                    "scenery text of object {}: {text:?} -> {}",
-                                    o.map_id,
-                                    path.display()
-                                );
-                                if let Some(img) = image::RgbaImage::from_raw(w, h, rgba.clone()) {
-                                    let _ = img.save(&path);
-                                }
-                            }
-                            renderer.update_texture_mips(
-                                scene,
-                                *tex,
-                                &Image {
-                                    width: w,
-                                    height: h,
-                                    rgba,
-                                    has_alpha: true,
-                                },
-                            );
-                        }
-                    }
-                }
+                let id = o.map_id;
+                draw_script_texts(renderer, scene, &mut o.inst, &mut o.texts, || {
+                    id.to_string()
+                });
             }
             // [htmltexture] pages: only near the listener (a page is a whole browser frame)
             if !o.htmls.is_empty() && dist > HTML_OBJECT_NEAR * 2.5 {
@@ -589,12 +564,11 @@ impl World {
                 .zip(&o.inst.mesh_transforms)
                 .zip(&o.inst.mesh_visible)
             {
-                // Scripted tram switches keep the same world-space lift as on upload.
-                // `o.pos` is the authored pose used by scripts/physics, not the draw pose.
+                // Keep the authored pose, matching upload and the ground queries :O
                 renderer.set_transform(
                     scene,
                     *inst,
-                    scenery_draw_position(o.pos, drawn_on_surfaces(&o.ty.sco)),
+                    o.pos,
                     o.xf * *xf,
                 );
                 let p = &mut scene.instances[*inst];
@@ -755,6 +729,47 @@ impl World {
             // scenery triggers carry no fire-time snapshot (its host keeps none): the
             // fallback to the current variable is the previous behavior
             ss.update_events(a, var, &xf, events, &|_| None);
+        }
+    }
+}
+
+/// Redraw the script texts whose string changed; `OMSI_DUMP_SCENERY_TEXT=<dir>` saves
+/// them as `text_<name>.png`.
+pub(crate) fn draw_script_texts(
+    renderer: &Renderer,
+    scene: &mut Scene,
+    inst: &mut ::simulation::scenery::SceneryInstance,
+    texts: &mut [(TextureId, ::simulation::texttex::TextTextureState)],
+    name: impl Fn() -> String,
+) {
+    let _ = inst.take_refresh_strings();
+    for (tex, st) in texts.iter_mut() {
+        let text = inst.str_var(st.def.variable.trim());
+        if st.update(text) {
+            let (w, h) = (st.def.width.max(1) as u32, st.def.height.max(1) as u32);
+            if let Some(rgba) = st.pending.take() {
+                if let Some(dir) = ::legacy_config::env::var_os("OMSI_DUMP_SCENERY_TEXT") {
+                    let name = name();
+                    let path = std::path::Path::new(&dir).join(format!("text_{name}.png"));
+                    log::info!(
+                        "scenery text of object {name}: {text:?} -> {}",
+                        path.display()
+                    );
+                    if let Some(img) = image::RgbaImage::from_raw(w, h, rgba.clone()) {
+                        let _ = img.save(&path);
+                    }
+                }
+                renderer.update_texture_mips(
+                    scene,
+                    *tex,
+                    &Image {
+                        width: w,
+                        height: h,
+                        rgba,
+                        has_alpha: true,
+                    },
+                );
+            }
         }
     }
 }

@@ -1,22 +1,17 @@
 use super::*;
 
-pub(crate) fn route_char(code: KeyCode) -> Option<char> {
-    let name = format!("{code:?}");
-    let c = name
-        .strip_prefix("Digit")
-        .or_else(|| name.strip_prefix("Numpad"))
-        .or_else(|| name.strip_prefix("Key"))?;
-    let mut chars = c.chars();
-    let ch = chars.next()?;
-    (chars.next().is_none() && ch.is_ascii_alphanumeric()).then(|| ch.to_ascii_uppercase())
+/// OMSI's route number field takes any text: only control characters are dropped.
+pub(crate) fn push_route_text(route: &mut String, text: &str) {
+    route.extend(text.chars().filter(|c| !c.is_control()));
 }
 
-pub(crate) const SERVER_GAME_MENU: [(&str, &str); 6] = [
+pub(crate) const SERVER_GAME_MENU: [(&str, &str); 7] = [
     ("resume", "pause.entry.resume"),
     ("options", "pause.entry.options"),
     ("vehicle", "pause.entry.vehicle"),
     ("world", "pause.entry.world"),
     ("map", "pause.entry.map"),
+    ("mainmenu", "pause.entry.mainmenu"),
     ("quit", "pause.entry.quit_server"),
 ];
 
@@ -35,7 +30,7 @@ pub(crate) fn game_menu_for(args: &Args) -> &'static [(&'static str, &'static st
     }
 }
 
-pub(crate) const GAME_MENU: [(&str, &str); 11] = [
+pub(crate) const GAME_MENU: [(&str, &str); 12] = [
     ("resume", "pause.entry.resume"),
     ("options", "pause.entry.options"),
     ("vehicle", "pause.entry.vehicle"),
@@ -46,6 +41,7 @@ pub(crate) const GAME_MENU: [(&str, &str); 11] = [
     ("save", "pause.entry.save"),
     ("save-slot", "pause.entry.saveslot"),
     ("load", "pause.entry.load"),
+    ("mainmenu", "pause.entry.mainmenu"),
     ("quit", "pause.entry.quit"),
 ];
 
@@ -248,8 +244,23 @@ impl App {
         self.refresh_list();
     }
 
-    /// A key while a route number is typed in the destination list (#836): letters and
-    /// digits ("5E", "N41"), Backspace, Enter sets it, Escape drops it.
+    pub(crate) fn route_editing(&self) -> bool {
+        use game_lists::ListKind;
+        self.menu_edit.is_some()
+            && !self.menu_edit_icao
+            && (matches!(self.list_kind, Some(ListKind::RouteNumbers))
+                || matches!(self.lab_list.as_ref().map(|l| &l.1), Some(ListKind::RouteNumbers)))
+    }
+
+    /// Typed text, not key codes, so the characters follow the keyboard layout.
+    pub(crate) fn route_edit_text(&mut self, text: &str) {
+        if let Some(t) = self.menu_edit.as_mut() {
+            push_route_text(t, text);
+        }
+        self.refresh_list();
+    }
+
+    /// A key while a route number is typed (#836): Backspace, Enter sets it, Escape drops it.
     pub(crate) fn route_edit_key(&mut self, code: KeyCode) {
         match code {
             KeyCode::Escape => self.menu_edit = None,
@@ -265,13 +276,7 @@ impl App {
                 }
                 return;
             }
-            _ => {
-                if let (Some(c), Some(t)) = (route_char(code), self.menu_edit.as_mut()) {
-                    if t.chars().count() < 8 {
-                        t.push(c);
-                    }
-                }
-            }
+            _ => {}
         }
         self.refresh_list();
     }
@@ -1279,6 +1284,7 @@ impl App {
                     platform::exit(event_loop);
                 }
             }
+            "mainmenu" => self.back_to_main_menu(),
             "quit" => {
                 self.game_menu = None;
                 self.finish_session();

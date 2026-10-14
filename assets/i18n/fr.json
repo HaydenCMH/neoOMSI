@@ -34,17 +34,17 @@
       "admin": "Administration",
       "continue": "Continuer",
       "quit_server": "Quitter le serveur",
-      "report_current": "Évaluation de la course en cours",
-      "report_last": "Évaluation de la dernière course",
-      "report_save": "Enregistrer en texte",
+      "report_current": "Évaluation du service actuel",
+      "report_last": "Évaluation du service précédent",
+      "report_save": "Enregistrer en tant que fichier texte",
       "copycode": "Copier le code du serveur",
       "duty": "Ligne et service",
       "end-duty": "Terminer le service",
       "load": "Charger la sauvegarde rapide",
       "map": "Carte",
       "saveslot": "Enregistrer (nouvel emplacement)",
-      "screenshot": "Mode capture d'écran",
-      "tobus": "Retour à mon bus",
+      "screenshot": "Mode Capture d'écran",
+      "tobus": "Retour au bus",
       "options": "Options",
       "quit": "Quitter",
       "resume": "Reprendre",
@@ -59,12 +59,12 @@
       },
       "camera": {
         "alt_view": {
-          "desc": "Activé : le clic droit tourne la vue et Maj + clic droit zoome. Désactivé : comme dans OMSI, le clic droit zoome et le clic du milieu tourne la vue",
-          "name": "Le clic droit tourne la vue"
+          "desc": "Activé : le clic droit tourne la caméra et Maj + clic droit zoome. Désactivé : comme dans OMSI, le clic droit zoome et le clic du milieu tourne la caméra",
+          "name": "Le clic droit tourne la caméra"
         },
         "cam_smooth": {
           "desc": "Passe en douceur d'une perspective de caméra à l'autre",
-          "name": "Changements de vue en douceur"
+          "name": "Transitions de caméra fluides"
         },
         "camcoll": {
           "desc": "La caméra extérieure ne peut pas traverser les objets",
@@ -80,10 +80,10 @@
         },
         "hands_in_cab": {
           "desc": "Affiche les mains du conducteur sur le volant (vue cabine seulement)",
-          "name": "Mains du conducteur dans la vue cabine"
+          "name": "Mains du conducteur visible dans la vue cockpit"
         },
         "head": {
-          "desc": "La vue bouge avec l'accélération du véhicule",
+          "desc": "La caméra bouge avec l'accélération du véhicule",
           "name": "Mouvement de la tête"
         },
         "head_pitch": {
@@ -100,39 +100,39 @@
           "desc_port": "Suivi de la tête avec opentrack (port UDP {port})"
         },
         "look_sens": {
-          "desc": "La vitesse à laquelle la vue tourne quand vous regardez autour à la souris (100 % est la vitesse d'OMSI)",
-          "name": "Sensibilité du regard à la souris"
+          "desc": "Vitesse de rotation de la caméra à la souris (100 % = vitesse d’OMSI)",
+          "name": "Sensibilité de la souris"
         },
         "seat_0": {
-          "desc": "Règle la position latérale du siège du conducteur",
-          "name": "Siège gauche et droite"
+          "desc": "Ajuste la position du siège conducteur de gauche à droite",
+          "name": "Position latérale du siège"
         },
         "seat_1": {
-          "desc": "Avance ou recule le siège du conducteur",
-          "name": "Siège avant et arrière"
+          "desc": "Ajuste la position du siège conducteur vers l'avant ou vers l'arrière",
+          "name": "Position avant / arrière du siège"
         },
         "seat_2": {
-          "desc": "Règle la hauteur du siège du conducteur",
+          "desc": "Ajuster la hauteur du siège du conducteur",
           "name": "Hauteur du siège"
         },
         "seat_reset": {
-          "desc": "Remet le siège à la position par défaut du véhicule",
+          "desc": "Replace le siège à la position par défaut du véhicule",
           "name": "Réinitialiser la position du siège"
         },
         "steer_look": {
-          "desc": "La caméra tourne avec le volant (vue cabine seulement)",
-          "name": "La vue suit la direction"
+          "desc": "La caméra tourne avec le volant (vue cockpit uniquement)",
+          "name": "La caméra tourne avec le volant"
         },
         "steer_look_angle": {
-          "desc": "De combien la vue tourne quand le volant est tourné à fond",
-          "name": "Angle de vue en virage"
+          "desc": "De combien la caméra tourne lorsque le volant est braqué à fond",
+          "name": "Angle de vue de la direction"
         },
         "steer_look_response": {
-          "desc": "La vitesse à laquelle la vue suit la direction",
-          "name": "Réactivité de la vue en virage"
+          "desc": "À quelle vitesse la caméra suit le volant",
+          "name": "Réactivité de la caméra au volant"
         },
         "head_tracking_port": {
-          "name": "Port du suivi de la tête",
+          "name": "Port pour le suivi de la tête",
           "desc": "Le port UDP vers lequel opentrack envoie"
         },
         "head_tracking_invert": {
@@ -140,7 +140,7 @@
           "desc": "Quels axes du suivi de la tête sont inversés"
         },
         "free_look": {
-          "desc": "Configurer le regard libre, le réticule et les noms des commandes"
+          "desc": "Configurer la caméra libre, le réticule et les noms des commandes"
         }
       },
       "controls": {
@@ -158,14 +158,14 @@
         },
         "keybinds": {
           "desc": "Définir les touches du bus et du jeu",
-          "name": "Attribution des touches"
+          "name": "Raccourcis clavier"
         },
         "mouse": {
-          "desc": "Diriger et actionner les pédales à la souris",
+          "desc": "Tourner le volant et contrôler les pédales en utilisant la souris",
           "name": "Direction à la souris"
         },
         "mouse_right": {
-          "desc": "Activé (comme dans OMSI) : le clic droit arrête la direction à la souris. Désactivé : le clic droit ne fait que tourner la vue",
+          "desc": "Activé (comme dans OMSI) : le clic droit arrête la direction à la souris. Désactivé : le clic droit ne fait que tourner la caméra",
           "name": "Le clic droit arrête la direction à la souris"
         },
         "mouse_sens": {
@@ -177,11 +177,11 @@
           "name": "Manettes"
         },
         "pedal_b": {
-          "desc": "L'effet de la pédale sur le frein",
+          "desc": "Intensité avec laquelle l’appui sur la pédale agit sur le frein",
           "name": "Force de la pédale de frein"
         },
         "pedal_t": {
-          "desc": "L'effet de la pédale sur l'accélérateur",
+          "desc": "Intensité avec laquelle l’appui sur la pédale agit sur l'accélérateur",
           "name": "Force de la pédale d'accélérateur"
         },
         "steer_center": {
@@ -193,17 +193,17 @@
           "name": "Sensibilité de la direction à la manette"
         },
         "wheel_lock": {
-          "desc": "De combien votre volant tourne quand les roues du véhicule sont braquées au maximum",
+          "desc": "De combien le volant tourne quand les roues du véhicule sont braquées au maximum",
           "name": "Angle du volant au braquage maximal"
         },
         "wheel_range": {
-          "desc": "La rotation totale de votre volant, d'une butée à l'autre",
-          "name": "Rotation du volant"
+          "desc": "Rotation totale du volant, de butée à butée",
+          "name": "Plage de rotation du volant"
         }
       },
       "display": {
         "fps": {
-          "desc": "Affiche les images par seconde en haut à droite",
+          "desc": "Affiche les images par seconde dans le coin supérieur droit",
           "name": "Afficher les images par seconde"
         },
         "fullscreen": {
@@ -212,18 +212,18 @@
         },
         "max_fps": {
           "desc": "Limite le nombre d'images par seconde",
-          "name": "Limite d'images"
+          "name": "Limite d'images par seconde"
         },
         "vsync": {
-          "desc": "Synchronise les images avec la fréquence de rafraîchissement de l'écran",
+          "desc": "Synchronise les images avec la fréquence de rafraichissement de l'écran (NVIDIA G-Sync & AMD FreeSync)",
           "name": "Synchronisation verticale"
         },
         "window_mode": {
           "name": "Mode d'affichage",
-          "desc": "Comment le jeu occupe votre écran"
+          "desc": "Comment la fenêtre de jeu s'affiche sur votre écran"
         },
         "triple_screen": {
-          "name": "Projection sur trois écrans",
+          "name": "Affichage sur trois écrans",
           "desc": "Calibre la vue pour trois écrans autour de votre poste de conduite"
         },
         "triple_screen_span": {
@@ -231,7 +231,7 @@
           "desc": "Ouvre une fenêtre sans bordure sur trois écrans alignés quand c'est possible"
         },
         "triple_screen_hud": {
-          "name": "Interface sur l'écran central",
+          "name": "Interface (HUD) sur l'écran central",
           "desc": "Garde l'interface du jeu sur l'écran du milieu"
         },
         "triple_screen_width_mm": {
@@ -270,11 +270,11 @@
         },
         "blinker_cancel": {
           "desc": "Activé : le script du bus coupe le clignotant après un virage. Désactivé : le clignotant reste allumé jusqu'à ce que vous l'éteigniez",
-          "name": "Les clignotants s'arrêtent seuls"
+          "name": "Les clignotants se désactivent tout seul"
         },
         "brake_hold": {
-          "desc": "Garde le frein serré jusqu'à ce que vous accélériez",
-          "name": "Le frein au clavier reste serré"
+          "desc": "Garde le frein serré jusqu’à ce que vous accélériez (clavier uniquement)",
+          "name": "Le frein reste serré (clavier)"
         },
         "momentary_gears": {
           "name": "Boutons de vitesse à maintenir",
@@ -286,7 +286,7 @@
         },
         "red_steer_spd": {
           "desc": "Les touches de direction agissent plus lentement à vitesse élevée (redSteerSpd d'OMSI)",
-          "name": "Direction au clavier selon la vitesse"
+          "name": "Direction au clavier dépendante de la vitesse"
         },
         "steering_linear": {
           "desc": "La direction au clavier tourne à vitesse constante, comme dans OMSI",
@@ -298,15 +298,15 @@
       },
       "free_look": {
         "crosshair": {
-          "desc": "Affiche un petit cercle au milieu de l'écran (pas dans les vues F2 et F3)",
+          "desc": "Affiche un réticule au milieu de l'écran (en vue libre F4)",
           "name": "Réticule"
         },
         "free_look": {
-          "desc": "La souris tourne la vue et le centre de l'écran actionne les commandes ; maintenez Alt gauche pour afficher le curseur",
-          "name": "Regard libre"
+          "desc": "La souris tourne la caméra et le réticule actionne les contrôles ; maintenez ALT gauche pour afficher le réticule",
+          "name": "Caméra libre"
         },
         "tooltips": {
-          "desc": "Affiche le nom de la commande visée par le curseur ou le centre de l'écran",
+          "desc": "Affiche le nom de la commande visée par le réticule ou le centre de l'écran",
           "name": "Noms des commandes"
         }
       },
@@ -315,17 +315,17 @@
           "name": "Véhicules garés"
         },
         "ai_max_scheduled": {
-          "name": "Circulation des horaires"
+          "name": "Trafic planifié"
         },
         "ai_unsched_factor": {
-          "name": "Circulation hors horaires"
+          "name": "Trafic non planifié"
         },
         "auto_ibis": {
-          "desc": "Le service choisi est saisi automatiquement dans l'IBIS",
+          "desc": "Le service sélectionné est automatiquement saisi dans l'IBIS (SAEIV)",
           "name": "IBIS automatique"
         },
         "boarding": {
-          "desc": "Comment les voyageurs obtiennent leur billet",
+          "desc": "Comment les passagers obtiennent leur billet",
           "name": "Montée"
         },
         "coll_objects": {
@@ -341,7 +341,7 @@
           "name": "Collisions avec les piétons"
         },
         "exact_fare": {
-          "desc": "Les voyageurs paient le montant exact, aucune monnaie n'est rendue à la caisse",
+          "desc": "Les passagers paient le montant exact, aucune monnaie n'est à rendre",
           "name": "Les voyageurs paient l'appoint"
         },
         "maintenance": {
@@ -349,15 +349,15 @@
         },
         "pax_ik": {
           "desc": "Utilise des poses procédurales au lieu des poses d'animation d'OMSI 2",
-          "name": "Animation procédurale des voyageurs"
+          "name": "Poses et animations des passagers"
         },
         "pax_models": {
-          "desc": "Quels modèles de voyageurs sont utilisés ; RealisticPax prend effet au prochain lancement du jeu",
-          "name": "Modèles des voyageurs"
+          "desc": "Quel modèle de passagers est utilisé. RealisticPax nécessite un redémarrage du jeu",
+          "name": "Modèle des passagers"
         },
         "pax_motion": {
-          "desc": "Mouvements naturels ou mode de comparaison OMSI 2",
-          "name": "Mouvements des voyageurs"
+          "desc": "Mouvements naturels ou ceux d'OMSI 2",
+          "name": "Mouvement des passagers"
         },
         "pax_prefer_seats": {
           "desc": "Les voyageurs prennent un siège libre en montant et n'utilisent les places debout que lorsque tous les sièges sont pris",
@@ -369,9 +369,9 @@
           "installed": "Installé",
           "installing": "Installation. Utilisé à partir du prochain lancement du jeu",
           "missing": "Pas encore téléchargé ; nécessaire pour les modèles de voyageurs « Réalistes »",
-          "name": "Modèles de voyageurs réalistes",
+          "name": "Modèles de passagers réalistes",
           "next_start": "À jour. Une partie lancée avant le téléchargement garde les anciens voyageurs",
-          "outdated": "Une version plus récente est disponible",
+          "outdated": "Une nouvelle version est disponible",
           "retry": "Réessayer",
           "update": "Mettre à jour"
         }
@@ -388,8 +388,8 @@
           "name": "Nuages"
         },
         "detail_textures": {
-          "desc": "Ajoute des détails fins au sol et aux grands murs quand vous êtes près",
-          "name": "Textures de détail de près"
+          "desc": "Ajoute des détails précis au sol et aux murs lorsque vous êtes près d'eux",
+          "name": "Détail des textures à courte distance"
         },
         "gfxprofile": {
           "desc": "Applique un profil graphique enregistré dans le launcher",
@@ -403,8 +403,8 @@
           "name": "Halo des LED"
         },
         "led_mips": {
-          "desc": "À quel point les points des girouettes à LED se fondent avec la distance ; 0 garde chaque point net",
-          "name": "Douceur des points LED"
+          "desc": "À quel point les points des girouettes à LED deviennent flous avec la distance ; 0 garde chaque point net",
+          "name": "Flou des points LED"
         },
         "map_detail": {
           "name": "Détail de la carte"
@@ -422,12 +422,12 @@
           "name": "Anticrénelage (MSAA)"
         },
         "nightmap_glow": {
-          "desc": "L'intensité de l'éclat des boutons, feux et fenêtres éclairés la nuit",
-          "name": "Éclat des textures de nuit"
+          "desc": "Intensité de la lueur nocturne des boutons, lampes et fenêtres allumés",
+          "name": "Lueur des textures nocturnes"
         },
         "preset": {
           "desc": "Règle la plupart des options graphiques d'un coup",
-          "name": "Préréglage de qualité"
+          "name": "Préréglage des graphismes"
         },
         "reflections": {
           "name": "Cartes de reflets (peinture, chrome, verre)"
@@ -452,10 +452,10 @@
           "name": "Compresser les textures au chargement"
         },
         "texture_memory": {
-          "name": "Mémoire des textures"
+          "name": "Mémoire allouée aux textures"
         },
         "view_distance": {
-          "name": "Distance de vue"
+          "name": "Distance d'affichage"
         },
         "graphics_api": {
           "name": "API graphique",
@@ -466,11 +466,11 @@
           "desc": "Adoucit les contours dans une dernière passe après le rendu"
         },
         "shadow_blobs": {
-          "name": "Taches d'ombre",
+          "name": "Ombres simplifiées (blobs)",
           "desc": "Affiche de simples taches sombres sous les objets qui n'ont pas d'ombre propre"
         },
         "mirror_refresh": {
-          "name": "Rafraîchissement des rétroviseurs",
+          "name": "Fréquence de rafraichissement des rétroviseurs",
           "desc": "À quelle fréquence les rétroviseurs sont redessinés"
         }
       },
@@ -479,7 +479,7 @@
         "controls": "Commandes",
         "display": "Affichage",
         "driving": "Conduite",
-        "free_look": "Regard libre",
+        "free_look": "Caméra libre",
         "gameplay": "Jeu",
         "graphics": "Graphismes",
         "info": "Barre d'informations",
@@ -510,8 +510,8 @@
           "name": "Carburant"
         },
         "pax": {
-          "desc": "Affiche le nombre de voyageurs à bord",
-          "name": "Voyageurs"
+          "desc": "Affiche le nombre de passagers à bord",
+          "name": "Passagers"
         },
         "line": {
           "desc": "Affiche la ligne et sa destination",
@@ -549,7 +549,7 @@
         },
         "notes": {
           "desc": "Affiche des messages comme la raison pour laquelle le véhicule ne peut pas avancer, la monnaie encore due et le résultat d'un service",
-          "name": "Notes en haut à gauche"
+          "name": "Notes dans le coin supérieur gauche"
         },
         "reset": {
           "desc": "Rétablit tous les paramètres par défaut, sauf la langue, l'attribution des touches et le dossier du jeu",
@@ -568,12 +568,12 @@
           "name": "Opacité de l'interface"
         },
         "ui_scale": {
-          "desc": "La taille des textes, du menu, des horaires et du navigateur",
+          "desc": "La taille des textes, du menu, des horaires et du GPS",
           "name": "Taille de l'interface du jeu"
         },
         "ui_scale_window": {
-          "desc": "L'interface grandit avec la fenêtre quand elle dépasse 1080p de haut",
-          "name": "L'interface grandit avec la fenêtre"
+          "desc": "L'interface s'agrandit avec la fenêtre lorsqu'elle est plus grande que 1080p",
+          "name": "L'interface s'agrandit avec la fenêtre"
         },
         "units": {
           "desc": "Affiche la vitesse, la distance et la température en unités métriques ou impériales",
@@ -584,7 +584,7 @@
           "desc": "Affiche sur Discord ce à quoi vous jouez"
         },
         "navigator": {
-          "desc": "Configurer les paramètres du navigateur"
+          "desc": "Configure les paramètres du GPS"
         }
       },
       "later": "Prend effet au prochain lancement du jeu",
@@ -598,16 +598,16 @@
           "name": "Liste des arrêts"
         },
         "nav_stops_ext": {
-          "desc": "Affiche plus d'arrêts sous le prochain arrêt au lieu des seules informations de base",
+          "desc": "Affiche plus d'arrêts sous le prochain arrêt au lieu des informations de base",
           "name": "Liste des arrêts étendue"
         },
         "nav_topbar": {
-          "desc": "Affiche la vitesse, la limitation et l'heure en haut de la carte",
+          "desc": "Affiche la vitesse, la limitation de vitesse et l'heure en haut de la carte",
           "name": "Barre du haut"
         },
         "nav_turn": {
           "desc": "Affiche le prochain virage en haut de la carte",
-          "name": "Indication de direction"
+          "name": "Indication de virage"
         },
         "navigator": {
           "desc": "Active ou désactive la minicarte",
@@ -623,8 +623,8 @@
           "name": "Effet Doppler"
         },
         "pax_voices": {
-          "desc": "Les voyageurs parlent et font du bruit",
-          "name": "Voix des voyageurs"
+          "desc": "Les passagers parlent et font du bruit",
+          "name": "Voix des passagers"
         },
         "vol_ai": {
           "desc": "Le volume des autres véhicules",
@@ -641,59 +641,59 @@
       },
       "vr": {
         "navigator": {
-          "desc": "Position de l'écran du navigateur (ce bus)",
-          "name": "Navigateur"
+          "desc": "Position de l'écran du GPS (ce bus)",
+          "name": "GPS"
         },
         "vr": {
-          "name": "Utiliser un casque OpenXR"
+          "name": "Utiliser un casque VR OpenXR"
         },
         "vr_desktop_mirror": {
-          "name": "Afficher l'image du casque sur l'écran"
+          "name": "Dupliquer l'affichage du casque VR sur l'écran du PC"
         },
         "vr_head_smoothing_ms": {
           "name": "Lissage du suivi de la tête"
         },
         "vr_mirror_rate": {
-          "name": "Rafraîchissement des rétroviseurs du bus"
+          "name": "Fréquence de rafraichissement des rétroviseurs du bus"
         },
         "vr_nav_edit": {
-          "desc": "Placer l'écran du navigateur à la souris (ce bus)",
+          "desc": "Placer l'écran du GPS avec la souris (ce bus)",
           "name": "Déplacer et tourner à la souris..."
         },
         "vr_nav_opacity": {
-          "desc": "L'opacité de l'écran du navigateur (ce bus)",
-          "name": "Opacité du navigateur"
+          "desc": "Opacité de l'écran du GPS (ce bus)",
+          "name": "Opacité du GPS"
         },
         "vr_nav_reset": {
-          "desc": "Remet l'écran du navigateur à sa position par défaut (ce bus)",
-          "name": "Réinitialiser la position du navigateur"
+          "desc": "Réinitialise la position de l'écran du GPS (ce bus)",
+          "name": "Réinitialiser la position du GPS"
         },
         "vr_nav_roll": {
-          "desc": "Roulis de l'écran du navigateur (ce bus)",
-          "name": "Roulis de l'écran"
+          "desc": "Roulis (roll) de l’écran du GPS (ce bus)",
+          "name": "Roulis de l’écran du GPS"
         },
         "vr_nav_tilt": {
-          "desc": "Inclinaison de l'écran du navigateur (ce bus)",
-          "name": "Inclinaison de l'écran"
+          "desc": "Inclinaison (tilt) de l’écran du GPS (ce bus)",
+          "name": "Inclinaison de l'écran du GPS"
         },
         "vr_nav_width": {
-          "desc": "Largeur de l'écran du navigateur (ce bus)",
-          "name": "Largeur de l'écran"
+          "desc": "Largeur de l’écran du GPS (ce bus)",
+          "name": "Largeur de l'écran du GPS"
         },
         "vr_nav_x": {
-          "desc": "Déplace l'écran du navigateur à gauche ou à droite (ce bus)",
+          "desc": "Déplace l’écran du GPS vers la gauche ou la droite (ce bus)",
           "name": "Position gauche / droite"
         },
         "vr_nav_y": {
-          "desc": "Avance ou recule l'écran du navigateur (ce bus)",
+          "desc": "Avance ou recule l'écran du GPS (ce bus)",
           "name": "Position avant / arrière"
         },
         "vr_nav_yaw": {
-          "desc": "Rotation horizontale de l'écran du navigateur (ce bus)",
-          "name": "Rotation de l'écran"
+          "desc": "Rotation horizontale (yaw) de l’écran du GPS (ce bus)",
+          "name": "Rotation de l’écran du GPS"
         },
         "vr_nav_z": {
-          "desc": "Monte ou descend l'écran du navigateur (ce bus)",
+          "desc": "Monte ou descend l'écran du GPS (ce bus)",
           "name": "Position haut / bas"
         },
         "vr_scale": {
@@ -702,7 +702,7 @@
       },
       "value": {
         "boarding": {
-          "auto": "Ils paient et prennent le billet",
+          "auto": "Ils paient et prennent le billet (automatique)",
           "pay": "Le conducteur vend le billet",
           "walk": "Ils montent simplement"
         },
@@ -739,7 +739,7 @@
           "omsi": "OMSI 2"
         },
         "map_detail": {
-          "-1": "Réglage d'OMSI",
+          "-1": "Réglages d'OMSI",
           "0": "Bas",
           "1": "Normal",
           "2": "Complet",
@@ -762,7 +762,7 @@
           "0": "Automatique"
         },
         "max_fps": {
-          "0": "Fréquence de l'écran",
+          "0": "Fréquence de rafraîchissement de l'écran",
           "1000": "Illimité"
         },
         "pax_voices": {
@@ -771,10 +771,10 @@
           "off": "Silencieux"
         },
         "navigator_corner": {
-          "top-left": "En haut à gauche",
-          "top-right": "En haut à droite",
-          "bottom-left": "En bas à gauche",
-          "bottom-right": "En bas à droite"
+          "top-left": "Coin supérieur gauche",
+          "top-right": "Coin supérieur droit",
+          "bottom-left": "Coin inférieur gauche",
+          "bottom-right": "Coin inférieur droit"
         },
         "window_mode": {
           "windowed": "Fenêtré",
@@ -796,17 +796,17 @@
         },
         "head_tracking_invert": {
           "none": "Aucun",
-          "yaw": "Lacet",
-          "pitch": "Tangage",
-          "roll": "Roulis",
-          "yaw pitch": "Lacet et tangage",
-          "yaw roll": "Lacet et roulis",
-          "pitch roll": "Tangage et roulis",
-          "yaw pitch roll": "Lacet, tangage et roulis"
+          "yaw": "Lacet (yaw)",
+          "pitch": "Tangage (pitch)",
+          "roll": "Roulis (roll)",
+          "yaw pitch": "Lacet (yaw) et tangage (pitch)",
+          "yaw roll": "Lacet (yaw) et roulis (roll)",
+          "pitch roll": "Tangage (pitch) et roulis (roll)",
+          "yaw pitch roll": "Lacet (yaw), tangage (pitch) et roulis (roll)"
         },
         "voice_mode": {
           "ptt": "Appuyer pour parler (maintenir la touche)",
-          "auto": "Activation à la voix"
+          "auto": "Activation vocale"
         }
       },
       "voice": {
@@ -829,12 +829,12 @@
           "desc": "Le volume auquel les autres vous entendent"
         },
         "voice_sensitivity": {
-          "name": "Activation à la voix",
-          "desc": "Plus haut : une voix plus faible ouvre aussi le microphone"
+          "name": "Activation vocale",
+          "desc": "Plus haut : une voix plus faible active aussi le micro"
         },
         "voice_denoise": {
           "name": "Suppression du bruit",
-          "desc": "Filtre le moteur, le vent et le clavier de votre microphone"
+          "desc": "Filtre le moteur, le vent et le clavier captés par votre microphone"
         },
         "vol_voice": {
           "name": "Autres joueurs",
@@ -851,7 +851,7 @@
       "admin": {
         "head": "Administration",
         "nav": "Admin",
-        "note": "Gérer les joueurs, l'horloge, la météo et la circulation de cette session.",
+        "note": "Gérer les joueurs, l'horloge, la météo et le trafic de cette session.",
         "run": "Exécuter"
       },
       "map": {
@@ -897,8 +897,8 @@
             "desc": "Placer un véhicule de votre choix dans le monde"
           },
           "swap": {
-            "name": "Remplacer par un autre véhicule",
-            "desc": "Mettre un autre véhicule à la place de celui-ci et le conduire",
+            "name": "Échanger avec un autre véhicule",
+            "desc": "Fait apparaître un autre véhicule à la place de celui-ci puis le conduire",
             "button": "Remplacer"
           },
           "couple": {
@@ -923,7 +923,7 @@
           },
           "dest": {
             "name": "Girouette",
-            "desc": "Changer la destination affichée"
+            "desc": "Change l'affichage de la girouette (ligne et destination)"
           },
           "hof": {
             "name": "Fichier de dépôt (HOF)",
@@ -951,11 +951,11 @@
           "reset_vehicle": {
             "name": "Remettre d'aplomb",
             "desc": "Remet le véhicule sur ses roues",
-            "button": "Réinitialiser"
+            "button": "Débloquer"
           },
           "reload": {
             "name": "Recharger ce véhicule",
-            "desc": "Recharge les fichiers du véhicule (.bus, modèle et configuration sonore, scripts) et le conduit depuis ici",
+            "desc": "Recharge les fichiers du véhicule (.bus, modèle et configuration sonore, scripts)",
             "button": "Recharger"
           },
           "driver": {
@@ -988,7 +988,7 @@
       "text": {
         "enables_disables_the_minimap": "Active ou désactive la minicarte",
         "boarding_at_the_rear_doors": "Montée par les portes arrière",
-        "passengers_who_need_no_ticket_from_the_driver_also_get_on_at_the_rear_doors": "Les voyageurs qui n'ont pas besoin de billet du conducteur montent aussi par les portes arrière",
+        "passengers_who_need_no_ticket_from_the_driver_also_get_on_at_the_rear_doors": "Les passagers qui n'ont pas besoin de billet montent aussi par les portes arrière",
         "enables_disables_collisions_with_other_vehicles": "Active ou désactive les collisions avec les autres véhicules",
         "enables_disabled_shadows": "Active ou désactive les ombres",
         "the_game": "Le jeu"
@@ -997,10 +997,10 @@
         "load_error": "L'attribution des touches n'a pas pu être lue",
         "find": "Rechercher une touche",
         "group_driving": "Conduite et bus",
-        "group_vr": "Casque (VR)",
+        "group_vr": "Casque de réalité virtuelle (VR)",
         "group_scripted": "Scripts (ce véhicule)",
         "press_key": "appuyez sur une touche...",
-        "press_key_desc": "Appuyez sur Échap pour garder la touche actuelle",
+        "press_key_desc": "Appuyez sur Échap pour conserver la touche actuelle",
         "not_set": "Non attribuée",
         "no_match": "Aucun résultat",
         "no_match_desc": "Essayez un autre nom ou une autre touche"
@@ -1009,13 +1009,13 @@
     "world": {
       "automatic": "automatique",
       "dew": "rosée",
-      "typing": "saisie",
+      "typing": "en train d'écrire",
       "vehicles": "véhicules",
       "text": {
         "time": "Heure",
         "weather": "Météo",
         "temperature_and_wind": "Température et vent",
-        "traffic_and_people": "Circulation et personnes",
+        "traffic_and_people": "Trafic et personnes",
         "tools": "Outils",
         "real_time_sync": "Synchronisation en temps réel",
         "the_game_follows_your_device_s_date_and_time": "Le jeu suit la date et l'heure de votre appareil",
@@ -1027,15 +1027,15 @@
         "exact_date": "Date actuelle",
         "change_the_current_date_press_enter_to_change": "Changer la date actuelle (Entrée pour appliquer)",
         "hour": "Heure",
-        "set_the_hour_of_the_day_directly": "Régler directement l'heure du jour",
+        "set_the_hour_of_the_day_directly": "Régler l'heure du jour",
         "minute": "Minute",
-        "set_the_minute_directly": "Régler directement la minute",
+        "set_the_minute_directly": "Régler la minute du jour",
         "day": "Jour",
-        "set_the_day_directly": "Régler directement le jour",
+        "set_the_day_directly": "Régler le jour",
         "month": "Mois",
-        "set_the_month_directly": "Régler directement le mois",
+        "set_the_month_directly": "Régler le mois",
         "year": "Année",
-        "set_the_year_directly": "Régler directement l'année",
+        "set_the_year_directly": "Régler l'année",
         "morning": "Matin",
         "noon": "Midi",
         "evening": "Soir",
@@ -1049,8 +1049,8 @@
         "the_weather_follows_the_real_metar_report": "La météo suit le vrai bulletin METAR",
         "metar_source": "Source METAR",
         "the_airport_used_for_real_weather": "L'aéroport utilisé pour la météo réelle.",
-        "icao": "OACI",
-        "enter_any_4_letter_icao_station": "Saisissez n'importe quelle station OACI de 4 lettres.",
+        "icao": "OACI (ICAO)",
+        "enter_any_4_letter_icao_station": "Saisissez n'importe quelle station OACI (ICAO) de 4 lettres.",
         "metar_report": "Bulletin METAR",
         "refresh_now": "Actualiser maintenant",
         "fetch_the_selected_station_again_without_waiting_for_the_next_automatic_update": "Recharge la station choisie sans attendre la prochaine mise à jour automatique.",
@@ -1095,10 +1095,10 @@
         "object_editor": "Éditeur d'objets",
         "open": "Ouvrir",
         "place_and_move_objects_in_the_world": "Placer et déplacer des objets dans le monde.",
-        "traffic": "Circulation",
+        "traffic": "Trafic",
         "how_many_vehicles_drive_around_the_map": "Combien de véhicules circulent sur la carte.",
-        "passengers": "Voyageurs",
-        "how_many_passengers_wait_at_the_stops_and_ride": "Combien de voyageurs attendent aux arrêts et voyagent.",
+        "passengers": "Passagers",
+        "how_many_passengers_wait_at_the_stops_and_ride": "Combien de passagers attendent aux arrêts et voyagent.",
         "presets": "Préréglages"
       }
     },
@@ -1150,7 +1150,7 @@
         "5": "Gâchette droite"
       },
       "func": {
-        "0": "<aucune>",
+        "0": "<none>",
         "1": "Direction",
         "2": "Accélérateur",
         "3": "Frein",
@@ -1212,12 +1212,12 @@
       },
       "place": {
         "models": "modèles",
-        "random_livery": "Livrée au hasard",
-        "depot_file": "Le fichier de dépôt de la carte",
+        "random_livery": "Livrée aléatoire",
+        "depot_file": "Le fichier de dépôt (HOF) de la carte",
         "model": "Modèle",
         "type": "Type",
         "livery": "Livrée",
-        "hof": "Fichier de dépôt",
+        "hof": "Fichier de dépôt (HOF)",
         "none": "Rien de choisi",
         "create": "Placer"
       },
@@ -1285,21 +1285,21 @@
       "blinker_right_set": "Clignotant droit",
       "blinker_warn_toggle": "Feux de détresse",
       "brake": "Frein",
-      "bus_20h_switch": "Interrupteur 20 h",
-      "bus_dooraft": "Déverrouillage des portes",
+      "bus_20h_switch": "20 h switch (FAE secondaire)",
+      "bus_dooraft": "Déverrouillage des portes (FAE)",
       "bus_doorfront0": "Porte avant 1",
       "bus_doorfront1": "Porte avant 2",
       "bus_doorfront5": "Porte avant 6",
       "bus_linie_minus": "Ligne précédente",
       "bus_linie_plus": "Ligne suivante",
-      "bus_rollband_dn": "Girouette vers le bas",
-      "bus_rollband_dn_step": "Girouette vers le bas (cran)",
+      "bus_rollband_dn": "Faire défiler la girouette vers le bas",
+      "bus_rollband_dn_step": "Faire défiler la girouette vers le bas (cran)",
       "bus_rollband_setl1": "Girouette : ligne 1",
       "bus_rollband_setl2": "Girouette : ligne 2",
       "bus_rollband_setl3": "Girouette : ligne 3",
       "bus_rollband_sett": "Girouette : service",
-      "bus_rollband_up": "Girouette vers le haut",
-      "bus_rollband_up_step": "Girouette vers le haut (cran)",
+      "bus_rollband_up": "Faire défiler la girouette vers le haut",
+      "bus_rollband_up_step": "Faire défiler la girouette vers le haut (cran)",
       "bus_ziel_minus": "Destination précédente",
       "bus_ziel_plus": "Destination suivante",
       "cashdesk_changer_0_05": "Monnaie 0,05",
@@ -1317,16 +1317,16 @@
       "change_give": "Rendre la monnaie",
       "change_take": "Prendre la monnaie",
       "clutch": "Embrayage",
-      "cp_batterietrennschalter_toggle": "Coupe-batterie",
+      "cp_batterietrennschalter_toggle": "Bouton Coupe-circuit",
       "cp_fahrerlicht_toggle": "Éclairage du conducteur",
       "cp_licht_oberdeck_toggle": "Éclairage de l'étage",
       "cp_licht_untenrechts_toggle": "Éclairage en bas à droite",
-      "cp_licht_unterdeck_toggle": "Éclairage du bas",
+      "cp_licht_unterdeck_toggle": "Éclairage du niveau inférieur",
       "cp_microphone": "Microphone",
       "cp_schalter_kinderwagen": "Bouton poussette",
       "cp_wischer_intervall_toggle": "Essuie-glaces en intermittent",
       "cp_wischer_wascher_button": "Lave-glace",
-      "debug_start_bench2": "Lancer le banc d'essai 2",
+      "debug_start_bench2": "Lancer le banc d'essai (benchmark) 2",
       "debug_threadcalc": "Débogage : calcul des threads",
       "debug_window": "Fenêtre de débogage",
       "ego_forward": "Marcher en avant",
@@ -1366,8 +1366,8 @@
       "open_menue": "Ouvrir le menu",
       "parking_brake_toggle": "Frein de stationnement",
       "quicksave": "Sauvegarde rapide",
-      "scendes_aitraffic_deact": "Éditeur de décor : désactiver la circulation IA",
-      "scendes_aitraffic_desel": "Éditeur de décor : désélectionner la circulation IA",
+      "scendes_aitraffic_deact": "Éditeur de décor : désactiver le trafic IA",
+      "scendes_aitraffic_desel": "Éditeur de décor : désélectionner le trafic IA",
       "scendes_cancel": "Éditeur de décor : annuler",
       "scendes_delete": "Éditeur de décor : supprimer",
       "scendes_enter": "Éditeur de décor : valider",
@@ -1387,10 +1387,10 @@
       "taster_nebelschluss": "Feu antibrouillard arrière",
       "throttle": "Accélérateur",
       "throttle_amplify": "Accélération renforcée",
-      "ticket_give": "Délivrer le billet",
+      "ticket_give": "Délivrer le ticket de bus",
       "toggel_ctrler": "Activer/désactiver la manette",
       "toggel_mouse_ctrl": "Activer/désactiver la souris",
-      "toggle_navigator": "Afficher/masquer le navigateur",
+      "toggle_navigator": "Afficher/masquer le GPS",
       "view_interiorcam_minus": "Caméra intérieure : précédente",
       "view_interiorcam_plus": "Caméra intérieure : suivante",
       "view_reset_all_directions": "Réinitialiser toutes les directions de vue",
@@ -1399,9 +1399,9 @@
       "view_set_ego": "Vue : à pied",
       "view_set_map": "Vue : carte",
       "view_set_outside": "Vue : extérieur",
-      "view_set_passenger": "Vue : voyageur",
+      "view_set_passenger": "Vue : passager",
       "view_set_schedule": "Vue : horaires",
-      "view_set_ticketselling": "Vue : vente de billets",
+      "view_set_ticketselling": "Vue : vente de tickets",
       "view_toggle_informationdisplay": "Changer l'affichage d'informations",
       "view_toggle_viewpoint": "Changer de point de vue",
       "voice_talk": "Multijoueur : parler (maintenir)",
@@ -1428,13 +1428,13 @@
       "clock_set": "Heure réglée sur {time}",
       "graphics_missing": "Le profil graphique « {name} » est introuvable",
       "metar_source": "Source METAR : {code}",
-      "icao_invalid": "Saisissez un code OACI valide de 4 lettres",
+      "icao_invalid": "Saisissez un code OACI (ICAO) valide de 4 lettres",
       "free_drive": "Conduite libre : aucun service en cours",
       "no_vehicles": "Il n'y a pas d'autre véhicule à conduire",
       "vehicle_upright": "Le véhicule est de nouveau sur ses roues",
       "no_duty": "Le service n'a pas pu commencer : {error}",
       "duty_started": "Ligne {line}, service {tour} commencé",
-      "depot_file": "Fichier de dépôt : {name}",
+      "depot_file": "Fichier de dépôt (HOF) : {name}",
       "start_point_reached": "Vous êtes au point de départ",
       "start_point_missing": "Ce point de départ est introuvable",
       "destination": "Destination : {name}",
@@ -1461,7 +1461,7 @@
       "clock_noon": "Horloge : midi (12:00)",
       "clock_evening": "Horloge : soir (18:00)",
       "clock_night": "Horloge : nuit (23:00)",
-      "traffic": "Circulation : {value}",
+      "traffic": "Trafic : {value}",
       "hour_plus": "Horloge : 1 heure plus tard",
       "hour_minus": "Horloge : 1 heure plus tôt",
       "now": "(maintenant)",
@@ -1471,16 +1471,16 @@
       "on": "activé",
       "off": "désactivé",
       "weather": "Météo : {name}{mark}",
-      "clear_traffic": "Retirer toute la circulation",
+      "clear_traffic": "Retirer tout le trafic",
       "sent": "Envoyé : {action}",
       "no_bus": "Ce joueur n'a pas de véhicule",
       "speed_fixed": "La vitesse du temps est fixe tant que la synchronisation en temps réel est active",
       "speed_msg": "Vitesse du temps : {speed}x",
       "weather_cycle_msg": "Cycle météo : {state}",
       "brought": "{count} joueurs amenés ici",
-      "traffic_msg": "Circulation : {value}",
+      "traffic_msg": "Trafic : {value}",
       "host_brought": "L'hôte vous a amené ici",
-      "host_service": "L'hôte a effectué un entretien : {kind}",
+      "host_service": "L'hôte a effectué un service : {kind}",
       "host_upright": "L'hôte a remis votre véhicule d'aplomb",
       "wrong_password": "Mot de passe incorrect",
       "mute": "Couper le micro de {name}",

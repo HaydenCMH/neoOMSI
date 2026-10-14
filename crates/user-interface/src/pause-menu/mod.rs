@@ -26,6 +26,7 @@ pub struct WorldRow {
     pub meter_one_sided: bool,
     /// The row's control is pressed now (a controller button): shown highlighted.
     pub lit: bool,
+    pub alt: String,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -51,12 +52,13 @@ pub struct WorldGroup {
     pub subs: Vec<WorldGroup>,
 }
 
-pub const PAUSE_ENTRIES: [&str; 6] = [
+pub const PAUSE_ENTRIES: [&str; 7] = [
     "pause.entry.resume",
     "pause.entry.save",
     "pause.entry.options",
     "pause.entry.world",
     "pause.entry.vehicle",
+    "pause.entry.mainmenu",
     "pause.entry.quit",
 ];
 
@@ -192,6 +194,7 @@ impl Ui {
                     || at(&self.world_sub_rc)
                     || at(&self.world_rows_rc)
                     || self.world_clear.iter().any(|(_, r)| at(&[*r]))
+                    || self.world_alt.iter().any(|(_, r)| at(&[*r]))
                     || at(&self.world_drop_rc)
             }
         };

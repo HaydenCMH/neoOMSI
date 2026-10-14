@@ -842,7 +842,7 @@ fn extract_zip(job: &Job, content: &Path, src: &Path, dest: &Path) -> Result<()>
     for i in 0..z.len() {
         job.check_cancel()?;
         let mut e = z.by_index(i)?;
-        let Some(rel) = safe_rel(e.name()) else { continue };
+        let Some(rel) = safe_rel(&e.name()?) else { continue };
         if is_junk(&rel) {
             continue;
         }

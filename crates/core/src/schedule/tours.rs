@@ -5,7 +5,35 @@ use super::*;
 impl Schedule {
     /// When departure `i` leaves on the traffic's clock.
     pub(super) fn dep_time(&self, i: usize) -> f64 {
-        self.day_base + self.departures[i].time
+        self.departures[i].base + self.departures[i].time
+    }
+
+    /// Whether departure `i` is a trip after 24:00 of a tour that ran the day before.
+    pub(super) fn runs_eve(&self, i: usize) -> bool {
+        let d = &self.departures[i];
+        d.time >= DAY && d.mask & self.eve_bits.0 != 0 && d.mask & self.eve_bits.1 != 0
+    }
+
+    /// The days (`Departure::base`) departure `i` runs on now: today and/or the day before.
+    pub(super) fn run_bases(&self, i: usize) -> impl Iterator<Item = f64> {
+        let today = self.runs(i).then_some(self.day_base);
+        let eve = self.runs_eve(i).then_some(self.day_base - DAY);
+        today.into_iter().chain(eve)
+    }
+
+    /// Whether departure `i`'s run on the day `base` is queued or on the road, or a player's.
+    pub(super) fn taken(&self, i: usize, base: f64) -> bool {
+        let d = &self.departures[i];
+        d.spawned && (d.base == base || self.is_player_tour(i))
+    }
+
+    /// Whether departure `i` runs on the day `base` (`Departure::base`).
+    pub(super) fn runs_on(&self, i: usize, base: f64) -> bool {
+        if base < self.day_base {
+            self.runs_eve(i)
+        } else {
+            self.runs(i)
+        }
     }
 
     /// Past midnight on the traffic's clock: the next day's timetable.
@@ -25,12 +53,7 @@ impl Schedule {
     /// mask has the day (and school day or holiday), or - for a night tour with trips after
     /// 24:00 - the next day's weekday, as the night belongs to both.
     pub(crate) fn tour_available(&self, tour: &::timetable::Tour) -> bool {
-        let m = tour.extra.trim().parse::<i32>().unwrap_or(1023);
-        if m & self.day_bits.0 != 0 && m & self.day_bits.1 != 0 {
-            return true;
-        }
-        let night = tour.trips.iter().any(|t| t.departure >= 24.0 * 60.0);
-        night && m & self.next_day_bit != 0 && m & self.day_bits.1 != 0
+        tour_runs(tour, self.day_bits, self.next_day_bit)
     }
 
     /// Whether departure `i`'s tour runs on the current day.
@@ -50,6 +73,7 @@ impl Schedule {
             return;
         }
         self.day = date;
+        self.eve_bits = self.day_bits;
         self.day_bits = day_bits(&self.calendar, clock);
         self.next_day_bit = 1 << ((clock.weekday() + 1) % 7);
         let busy: HashSet<usize> = self
@@ -68,6 +92,7 @@ impl Schedule {
             }
             let mine = self.is_player_tour(i);
             let d = &mut self.departures[i];
+            d.base = self.day_base;
             if d.spawned && !mine {
                 d.spawned = false;
                 n += 1;
@@ -86,11 +111,13 @@ impl Schedule {
     pub fn refresh_time(&mut self, clock: &::simulation::SimClock, day_time: f64) {
         self.day = clock.date_code();
         self.day_bits = day_bits(&self.calendar, clock);
+        self.eve_bits = day_bits(&self.calendar, &day_before(clock));
         self.next_day_bit = 1 << ((clock.weekday() + 1) % 7);
         self.day_base = day_time - clock.time;
         self.date_clock = clock.clone();
         self.last_tod = clock.time;
         for i in 0..self.departures.len() {
+            self.departures[i].base = self.day_base;
             if !self.is_player_tour(i) {
                 self.departures[i].spawned = false;
             }
@@ -143,15 +170,17 @@ impl Schedule {
             let Some(ci) = traffic.cars.iter().position(|c| c.id == id) else {
                 continue;
             };
-            let next = self.car_departure.get(&id).and_then(|&k| self.tour_next[k]);
+            let k = self.car_departure.get(&id).copied();
+            let next = k.and_then(|k| self.tour_next[k]);
             let mut taken = false;
-            if let Some(j) = next {
+            if let (Some(j), Some(k)) = (next, k) {
+                // the next trip of the same tour runs on the same day
+                let base = self.departures[k].base;
                 let d = &self.departures[j];
-                let open = self.awaiting.contains(&j) || (!d.spawned && self.runs(j));
-                if open
-                    && !self.is_player_tour(j)
-                    && self.day_base + d.time - day_time < TOUR_LAYOVER_MAX
-                {
+                let open =
+                    self.awaiting.contains(&j) || (!self.taken(j, base) && self.runs_on(j, base));
+                if open && !self.is_player_tour(j) && base + d.time - day_time < TOUR_LAYOVER_MAX {
+                    self.departures[j].base = base;
                     if let Placed::Spawned =
                         self.spawn_departure(j, world, traffic, renderer, scene, day_time, Some(ci))
                     {

@@ -536,8 +536,23 @@ pub(crate) fn data_dir() -> Option<PathBuf> {
     Some(PathBuf::from(home).join(".neoomsi"))
 }
 
+/// This game's file `~/.neoomsi/<dir>/<instance id or pid>.json`.
+pub(crate) fn instance_file(dir: &str) -> Option<PathBuf> {
+    let id = legacy_config::env::var("OMSI_INSTANCE")
+        .ok()
+        .filter(|instance| {
+            !instance.is_empty()
+                && instance.len() <= 64
+                && instance
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+        })
+        .unwrap_or_else(|| std::process::id().to_string());
+    Some(data_dir()?.join(dir).join(format!("{id}.json")))
+}
+
 fn status_path() -> Option<PathBuf> {
-    crate::game_link::instance_file("lan")
+    instance_file("lan")
 }
 
 pub struct StatusFileGuard;
@@ -570,18 +585,7 @@ pub fn player_name(args: &Args) -> String {
             return stem;
         }
     }
-    #[cfg(target_os = "macos")]
-    if let Ok(out) = std::process::Command::new("id").arg("-F").output() {
-        let full = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !full.is_empty() {
-            return full;
-        }
-    }
-    std::env::var("USER")
-        .or_else(|_| std::env::var("USERNAME"))
-        .ok()
-        .filter(|u| !u.trim().is_empty())
-        .unwrap_or_else(|| "Driver".into())
+    "Driver".into()
 }
 
 pub fn world_info(args: &Args) -> ::network::WorldInfo {

@@ -426,6 +426,8 @@ fn emit_headlamp(
     let range = vals[9] * h.range_mul.max(0.05);
     let dir_y = facing(raw_dir);
     let mut apex = Vec3::new(vals[0], vals[1], vals[2]);
+    // how far the source stands out in front of the foremost lamp sprite
+    let mut ahead_of_lamps = 0.0;
     if dir_y != 0.0 {
         let nose = h
             .lamps
@@ -439,6 +441,7 @@ fn emit_headlamp(
         } else if let Some(face) = floating_apex(nose, edge, apex.y, dir_y) {
             apex.y = face + dir_y * 0.05;
         }
+        ahead_of_lamps = nose.map_or(0.0, |n| ((apex.y - n) * dir_y).max(0.0));
     }
     let axis_at = |mount_z: f32| -> Vec3 {
         if dir_y != 0.0 {
@@ -539,7 +542,9 @@ fn emit_headlamp(
                 .zip(h.lit)
                 .map(|(l, lit)| (h.body.transform_point3(Vec3::from(*l)), *lit))
                 .collect();
-            if let Some(glare_at) = glare_spot(&near, at, at + d * 0.05) {
+            // (the glare looks for its sprite on the lamps' face, not out at the source)
+            let face = at - h.body.transform_vector3(Vec3::Y) * dir_y * ahead_of_lamps;
+            if let Some(glare_at) = glare_spot(&near, face, face + d * 0.05) {
                 coronas.push(Corona {
                     position: h.origin + glare_at.as_dvec3(),
                     size: 0.15,
@@ -642,6 +647,47 @@ mod tests {
         assert_eq!(floating_apex(Some(1.34), Some(5.65), 6.35, 1.0), Some(5.65));
         // Iveco Urbanway 18: sprites past a short bounding box still count
         assert_eq!(floating_apex(Some(5.92), Some(4.64), 6.35, 1.0), Some(5.92));
+    }
+
+    #[test]
+    fn an_ai_cars_glare_sits_on_its_headlamps() {
+        // GPM Peugeot 208: no [spotlight], a bounding box 0.3 m longer than the body
+        let lamps = [
+            [0.697, 1.657, 0.777],
+            [-0.697, 1.657, 0.777],
+            [0.729, 1.536, 0.833],
+            [-0.729, 1.536, 0.833],
+            [0.639, -1.813, 0.863],
+            [-0.639, -1.813, 0.863],
+        ];
+        let lit = [true; 6];
+        let (mut lights, mut coronas) = (Vec::new(), Vec::new());
+        emit_headlamp(
+            &super::super::config::settings(),
+            &Headlamp {
+                vals: ai_spotlight(&lamps).unwrap(),
+                kind: BeamKind::Dipped,
+                body: Mat4::IDENTITY,
+                origin: DVec3::ZERO,
+                lamps: &lamps,
+                lit: &lit,
+                sources: &[],
+                bounding_box: Some([1.8, 4.55, 1.2, 0.0, 0.0, 0.8]),
+                night: 1.0,
+                level: 1.0,
+                gain: 1.0,
+                range_mul: 1.0,
+                role: LampRole::Beam,
+                side: None,
+            },
+            &mut lights,
+            &mut coronas,
+        );
+        assert_eq!(coronas.len(), 2);
+        for c in &coronas {
+            let p = c.position.as_vec3();
+            assert!(lamps.iter().any(|l| Vec3::from(*l) == p), "glare at {p} is on no lamp");
+        }
     }
 
     #[test]

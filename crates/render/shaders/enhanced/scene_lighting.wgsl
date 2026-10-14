@@ -310,6 +310,10 @@ fn lamp_light(p: vec3<f32>, n: vec3<f32>, v: vec3<f32>, sf: Surface, thin: bool)
             continue;
         }
         let dist = sqrt(dist2);
+        // (outside a spot's cone: nothing, known before its falloff and beam shape)
+        if (dot(-d, l.dir.xyz) <= l.occ.w * dist) {
+            continue;
+        }
         let ld = d / max(dist, 1e-3);
         let fall = light_falloff(dist2, range, l.extra.y);
         let is_spot = l.dir.w > OMNI_DIR_W;
@@ -462,6 +466,12 @@ fn shade_enhanced(in: FsIn, puddle_weight: ptr<function, vec2<f32>>, capture: bo
         alpha = 1.0;
     }
     alpha = alpha * clamp(window_wetness(in), 0.0, 1.0);
+    // (whole 2x2 quads of blended texels that show nothing, most of a terrain layer, are not lit)
+    let seen = alpha + abs(dpdxFine(alpha)) + abs(dpdyFine(alpha));
+    let quad_seen = seen + abs(dpdxFine(seen)) + abs(dpdyFine(seen));
+    if (mode > 1.5 && quad_seen <= 0.0 && material.ambient.w <= 1.5 && material.flags.x <= 0.5 && enh.debug.x <= 0.5) {
+        return vec4<f32>(0.0);
+    }
     let pre = enh.exposure.x;
     let to_cam = eye - in.world;
     let dist = length(to_cam);
@@ -568,8 +578,10 @@ fn shade_enhanced(in: FsIn, puddle_weight: ptr<function, vec2<f32>>, capture: bo
         }
     }
     let dry_snow = 1.0 - clamp(enh.weather.y, 0.0, 1.0);
-    let wet_road = camera.shadow.w * material.params2.z * outside * dry_snow;
-    let wet_any = camera.shadow.w * outside * select(0.35, 0.0, glass || material.emissive.w < -1.5) * dry_snow;
+    // (neither wet nor snowed on under a roof)
+    let unroofed = 1.0 - sheltered(in.world);
+    let wet_road = camera.shadow.w * material.params2.z * outside * unroofed * dry_snow;
+    let wet_any = camera.shadow.w * outside * unroofed * select(0.35, 0.0, glass || material.emissive.w < -1.5) * dry_snow;
     var puddle = 0.0;
     if (wet_road > 0.0) {
         albedo = albedo * mix(1.0, 0.5, wet_road);
@@ -596,7 +608,7 @@ fn shade_enhanced(in: FsIn, puddle_weight: ptr<function, vec2<f32>>, capture: bo
     } else if (wet_any > 0.0 && !terrain) {
         rough = mix(rough, rough * 0.6, wet_any);
     }
-    let snow = enh.weather.y * outside * select(1.0, 0.0, in.params2.w > 1.5 || material.ambient.w > 0.5);
+    let snow = enh.weather.y * outside * unroofed * select(1.0, 0.0, in.params2.w > 1.5 || material.ambient.w > 0.5);
     if (snow > 0.0) {
         let up = clamp(n.z, 0.0, 1.0);
         let ground = select(0.0, 1.0, terrain || material.params2.z > 0.0);
@@ -706,8 +718,11 @@ fn shade_enhanced(in: FsIn, puddle_weight: ptr<function, vec2<f32>>, capture: bo
         let nm = sample_nightmap(nuv).rgb * night * select(clamp(in.params2.y, 0.0, 1.0), 1.0, switched);
         if (terrain) {
             rgb = rgb + sf.albedo / PI * nm * enh.lights.y * 3.0 * pre;
+        } else if (switched) {
+            let shown = clamp(rgb / max(enh.exposure.y, 1e-3), vec3<f32>(0.0), vec3<f32>(1.0));
+            emit = emit + nm * (vec3<f32>(1.0) - shown) * enh.exposure.y;
         } else {
-            emit = emit + nm * camera.tune.x * select(enh.exposure.z, max(enh.exposure.z * 2.0, 0.8), switched);
+            emit = emit + nm * camera.tune.x * enh.exposure.z;
         }
     }
     if (material.params2.x > 0.5 && !terrain) {

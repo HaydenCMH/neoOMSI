@@ -18,7 +18,8 @@ use ::simulation::ai_motion::{
 };
 use ::simulation::collision::Obb;
 pub(crate) use ::simulation::traffic::{
-    AiState, Aspect, LaneKind, Lead, MAX_BRAKE, Network, TrafficLightController, arrival_time,
+    AiState, Aspect, LaneKind, Lead, MAX_BRAKE, Network, RAIL_APPROACH, TrafficLightController,
+    arrival_time,
 };
 use ::simulation::vehicle::AiFrame;
 use ::simulation::{VehicleInstance, VehicleType};
@@ -214,9 +215,13 @@ pub struct AiCar {
     /// A rail vehicle: the track it has come along, (odometer, point), oldest first -
     /// where its rear bogie and its coupled cars and sections run (see `rail_behind`).
     pub rail_trail: std::collections::VecDeque<(f64, DVec3)>,
+    /// A train set down on a track nothing leads into: the odometer at that track's start.
+    pub track_start: Option<f64>,
     /// A train turned round as a whole (its last car leads now): what a trip's
     /// `[trainreverse]` is compared with (Omsi.exe's vehicle +0x4e1).
     pub consist_reversed: bool,
+    /// A `.zug` train (not a tram): asks for a level crossing from afar.
+    pub train: bool,
 }
 
 /// A free parking space beside a lane that a car means to park in: the space of parked car
@@ -639,6 +644,11 @@ pub struct Traffic {
     /// before each `tick`: the cars stop behind them and go round them as round the
     /// player's bus.
     pub others: Vec<(u32, PlayerBox)>,
+    /// Rail lanes ahead of the players' trams and trains (lane, distance, front, train),
+    /// set before each `tick`. A neoOMSI extension: OMSI requests no lights for them.
+    pub rail_ahead: Vec<(usize, f32, f32, bool)>,
+    /// The vehicle files of the map's `.zug` trains (see `train_cars`).
+    train_cars: hashbrown::HashSet<String>,
     /// The drivers at the wheel of the timetable buses near the camera, by car id (see
     /// `driver.rs`; made within `DRIVER_NEAR` m of the camera, let go beyond twice that).
     drivers: HashMap<u64, crate::driver::DriverFigure>,
@@ -818,15 +828,27 @@ fn player_reach_ahead(half_len: f32, speed: f32, horizon: f32, fwd: DVec2, way_d
     }
 }
 
-/// How much track an AI rail vehicle keeps behind it (m): a long train's length.
+/// Least track an AI rail vehicle keeps behind it (m).
 const RAIL_TRAIL: f64 = 400.0;
 
-/// Note where an AI rail vehicle is: `odometer` (m) and the point of its way there. A jump
-/// (put somewhere else, turned round at a terminus) starts the trail afresh.
+/// How much track rail vehicle `v` keeps behind it (m): longer trains keep their length.
+fn rail_trail_length(v: &VehicleInstance) -> f64 {
+    let length = |ty: &VehicleType| {
+        let (front, rear, _) = extents(ty, 4.5);
+        (front + rear) as f64
+    };
+    let train = length(&v.ty) + v.trailers.iter().map(|t| length(&t.ty)).sum::<f64>();
+    RAIL_TRAIL.max(train + 50.0)
+}
+
+/// Note where an AI rail vehicle is: `odometer` (m) and the point of its way there, kept
+/// for `keep` metres. A jump (put somewhere else, turned round at a terminus) starts the
+/// trail afresh.
 fn record_rail_trail(
     trail: &mut std::collections::VecDeque<(f64, DVec3)>,
     odometer: f64,
     here: DVec3,
+    keep: f64,
 ) {
     if let Some(&(u, p)) = trail.back() {
         if (here - p).truncate().length() > (odometer - u).abs() + 2.0 {
@@ -840,7 +862,7 @@ fn record_rail_trail(
         trail.pop_back();
     }
     trail.push_back((odometer, here));
-    while trail.front().is_some_and(|f| odometer - f.0 > RAIL_TRAIL) {
+    while trail.front().is_some_and(|f| odometer - f.0 > keep) {
         trail.pop_front();
     }
 }
@@ -901,7 +923,7 @@ fn open_trace() -> Option<std::io::BufWriter<std::fs::File>> {
 
 /// The vehicle's extent from its origin: (to the front bumper, to the rear bumper, half
 /// the width) from its `[boundingbox]`.
-fn extents(ty: &VehicleType, length: f32) -> (f32, f32, f32) {
+pub(crate) fn extents(ty: &VehicleType, length: f32) -> (f32, f32, f32) {
     match ty.def.bounding_box {
         Some(bb) if bb[1] > 1.0 => (
             bb[1] * 0.5 + bb[4],
@@ -916,6 +938,75 @@ fn extents(ty: &VehicleType, length: f32) -> (f32, f32, f32) {
             }
             _ => (length * 0.5, length * 0.5, 0.9),
         },
+    }
+}
+
+/// Is any part of a vehicle or train (`(origin, radius)`) near or in the view?
+fn any_part_seen(v: &Viewer, mut parts: impl Iterator<Item = (DVec3, f64)>) -> bool {
+    parts.any(|(p, r)| (p - v.pos).length() < UNSEEN_NEAR || v.frames(p, r))
+}
+
+/// What `Traffic::populate_seen` weighs to take a vehicle away. A train's distances are
+/// to its nearest car.
+struct Departure {
+    unloaded: bool,
+    /// A timetable vehicle waiting where the loaded part of its route ends.
+    at_edge: bool,
+    random: bool,
+    /// Standing at the end of the network (the map's edge).
+    at_end: bool,
+    bus: bool,
+    gone: bool,
+    rail: bool,
+    queued: bool,
+    stopped: f32,
+    dist: f64,
+    from_eye: f64,
+    far: f64,
+}
+
+impl Departure {
+    /// Is the vehicle taken away? `hidden` casts rays, so it is asked only when needed.
+    fn remove(&self, mut hidden: impl FnMut() -> bool) -> bool {
+        // a train goes only once none of its cars can be seen (#336)
+        let in_view = !self.rail;
+        let stopped = self.stopped;
+        if self.unloaded {
+            true
+        } else if self.at_edge {
+            // (its trip comes back with the tiles; kept until nobody saw it, a bus stood
+            // with its passengers at the far end of a straight road for good)
+            hidden()
+                || (in_view && ((stopped > 8.0 && self.from_eye > 180.0) || stopped > 150.0))
+        } else if !self.random {
+            false
+        } else if self.at_end
+            && ((in_view && !self.bus)
+                || hidden()
+                || (in_view
+                    && ((stopped > 8.0 && self.from_eye > 180.0)
+                        || stopped > 150.0
+                        || (stopped > 25.0 && self.queued && self.from_eye > 25.0))))
+        {
+            // (and in view too once others wait behind it: a fire engine at the end of a
+            // dead-end street held a queue of fourteen cars for two and a half minutes)
+            // (taken at once it vanished in plain view 300 m ahead; but a car kept
+            // until nobody could see it stood for good at the end of a long straight
+            // road in view, and the queue behind it - timetable buses with their
+            // passengers among them - never moved again)
+            true
+        } else if self.gone || self.dist > self.far {
+            // in plain view a car stays until the renderer leaves it out anyway, and
+            // close by (the mirrors, a turn of the head) it stays in any case
+            // (one that gave up in a gridlock goes after four minutes even in view,
+            // unless right beside the viewer: kept until nobody saw it, a jam at a
+            // junction the player watched never cleared)
+            (self.dist > VISIBLE_RANGE * 1.3 && self.from_eye > NEAR_HIDE)
+                || hidden()
+                || (in_view && self.gone && stopped > 240.0 && self.from_eye > 40.0)
+        } else {
+            false
+        }
     }
 }
 
@@ -938,6 +1029,27 @@ fn personality(state: &mut AiState, seed: u64, heavy: bool) {
     state.accept_gap = 3.0 + 2.5 * r(43);
     state.reaction = 0.4 + 0.8 * r(51);
 }
+
+/// How far a coupled consist laid out straight reaches behind its leading vehicle's
+/// origin (m); `rear` is the leading vehicle's own.
+pub(crate) fn consist_rear(vehicle: &VehicleInstance, rear: f32) -> f32 {
+    // the origin of the part in front along the way, and which way its body faces
+    let (mut y, mut sign) = (0.0f32, 1.0f32);
+    let mut tail = -rear;
+    for t in &vehicle.trailers {
+        let (back, front) = t.couplings();
+        let c = y + sign * back.y;
+        sign = if t.reversed { -1.0 } else { 1.0 };
+        y = c - sign * front.y;
+        let (f, r, _) = extents(&t.ty, 4.5);
+        tail = tail.min(if t.reversed { y - f } else { y - r });
+    }
+    -tail
+}
+
+/// How much farther a vehicle on rails looks for the one ahead: a long train is found at
+/// its front, that far beyond its tail.
+const RAIL_CONSIST_REACH: f32 = 250.0;
 
 /// Where a vehicle meets a crossing lane on its way: its lane in the sequence, the distance
 /// from its origin to that lane's start.
@@ -1345,6 +1457,8 @@ impl Traffic {
             player: None,
             player_priority: false,
             others: Vec::new(),
+            rail_ahead: Vec::new(),
+            train_cars: train_cars(root, &world.ailists),
             drivers: HashMap::new(),
             driver_pool: Vec::new(),
             tick_split: [0.0; 3],
@@ -1418,6 +1532,14 @@ impl Traffic {
     /// in the opposite order, each turned round. `behind`: the lanes the train has behind
     /// it now, nearest last, for the track its cars stand on. The car keeps its id and its
     /// service.
+    /// A train's extent behind its leading vehicle and its length: its whole consist's.
+    pub(crate) fn fit_consist(&mut self, ci: usize) {
+        let c = &mut self.cars[ci];
+        let (_, rear, _) = extents(&c.vehicle.ty, 4.5);
+        c.state.rear = consist_rear(&c.vehicle, rear);
+        c.state.length = c.state.front + c.state.rear;
+    }
+
     pub(crate) fn turn_train(
         &mut self,
         world: &World,
@@ -1483,16 +1605,20 @@ impl Traffic {
         new.state.min_gap = old.state.min_gap;
         new.state.speed = 0.0;
         new.consist_reversed = reversed;
+        new.train = old.train;
         let old = std::mem::replace(&mut self.cars[ci], new);
         self.orphan_sounds.extend(old.sounds);
         for r in std::iter::once(old.render).chain(old.trailer_renders) {
             world.release_vehicle(renderer, scene, r);
         }
         self.set_trailers(world, renderer, scene, ci, &cars[1..]);
+        self.fit_consist(ci);
         self.seed_rail_trail(ci, behind);
         let c = &mut self.cars[ci];
         let trail = &c.rail_trail;
         let (state, net) = (&c.state, &self.net);
+        c.vehicle
+            .couple_on_track(&|d| Some(rail_behind(trail, state, net, d)));
         c.vehicle
             .retrail(0.0, &|d| Some(rail_behind(trail, state, net, d)));
         let after: Vec<DVec3> = std::iter::once(c.vehicle.position)
@@ -1527,11 +1653,12 @@ impl Traffic {
         let c = &mut self.cars[ci];
         let net = &self.net;
         let odo = c.state.odometer as f64;
+        let keep = rail_trail_length(&c.vehicle);
         let mut pts: Vec<(f64, DVec3)> = Vec::new();
         let (mut lane, mut s) = (c.state.lane, c.state.s);
         let mut back = behind.iter().rev();
         let mut d = 0.0f64;
-        while d <= RAIL_TRAIL {
+        while d <= keep {
             pts.push((odo - d, net.lanes[lane].at(s.max(0.0)).0));
             s -= 1.0;
             if s < 0.0 {
@@ -1691,7 +1818,7 @@ impl Traffic {
     /// The street traffic density now, 1 = the map's normal level, times the options' share
     /// of random traffic.
     fn street_density(&self) -> f32 {
-        self.street_density_map() * self.unsched_factor
+        self.street_density_map() * unsched_share(self.unsched_factor)
     }
 
     fn street_density_map(&self) -> f32 {
@@ -1945,6 +2072,18 @@ impl Traffic {
         self.initial || self.time < 2.0
     }
 
+    /// `hidden` for every part of `c` on the track: a train went with its locomotive behind
+    /// a building, its coaches in plain view.
+    fn consist_hidden(&self, world: &World, c: &AiCar, r: f64) -> bool {
+        let v = &c.vehicle;
+        (v.part_hidden(0) || self.hidden(world, v.position, r))
+            && v.trailers.iter().enumerate().all(|(k, t)| {
+                let (front, rear, _) = extents(&t.ty, 4.5);
+                let r = ((front + rear) * 0.5).max(2.0) as f64;
+                v.part_hidden(k + 1) || self.hidden(world, t.position, r)
+            })
+    }
+
     /// Could the player not see a vehicle (radius `r`) at `p` appear or vanish? Never close
     /// by: mirrors, a turn of the head and the gaps between houses see what is near,
     /// whatever the collision boxes say (a bus let appear 40 m away behind a box that stood
@@ -2023,22 +2162,40 @@ impl Traffic {
         while i < self.cars.len() {
             let c = &self.cars[i];
             let p = c.vehicle.position;
+            // a train is as near as its nearest car on the track (#336)
+            let mut parts = vec![p];
+            if c.is_rail() {
+                let v = &c.vehicle;
+                let coupled = v.trailers.iter().map(|t| t.position);
+                parts = std::iter::once(p)
+                    .chain(coupled)
+                    .enumerate()
+                    .filter(|(k, _)| !v.part_hidden(*k))
+                    .map(|(_, q)| q)
+                    .collect();
+                if parts.is_empty() {
+                    parts.push(p);
+                }
+            }
+            let nearest = |o: DVec3| {
+                parts
+                    .iter()
+                    .map(|q| (*q - o).length())
+                    .fold(f64::INFINITY, f64::min)
+            };
             // (the nearest player: a LAN host keeps the traffic around the others too)
             let dist = self
                 .lan_centers
                 .iter()
-                .fold((p - center).length(), |d, o| d.min((p - *o).length()));
-            // every car on the road or the rails whose ground has been unloaded goes: the
-            // lanes stay in the network when their tile goes, but nothing may drive over
-            // ground that is not there (tiles only go well beyond the view, timetable buses
-            // included; their trips come back with the tiles)
-            let flying = self
+                .fold(nearest(center), |d, o| d.min(nearest(*o)));
+            // Lanes stay in the network after unloading. Test their source tile: a loaded
+            // spline can cross a tile boundary where the map has no terrain at all.
+            let unloaded = !self
                 .net
                 .lanes
                 .get(c.state.lane)
-                .map(|l| l.kind == LaneKind::Air)
+                .map(|l| world.traffic_path_loaded(l, p))
                 .unwrap_or(false);
-            let unloaded = !flying && !world.has_ground(p.x, p.y);
             off_ground += unloaded as usize;
             let random = !c.is_bus() || c.gone;
             let r = (c.state.length as f64 * 0.5).max(2.0);
@@ -2050,7 +2207,7 @@ impl Traffic {
                 && c.stopped > if c.is_bus() { 20.0 } else { 0.5 }
                 && c.state.route.is_empty()
                 && self.net.lanes[c.state.lane].next.is_empty();
-            let from_eye = self.viewer.map(|v| (p - v.pos).length()).unwrap_or(dist);
+            let from_eye = self.viewer.map(|v| nearest(v.pos)).unwrap_or(dist);
             // a timetable bus waiting where the loaded part of its route ends
             let at_edge = c.route_open()
                 && c.state.speed < 0.1
@@ -2067,42 +2224,21 @@ impl Traffic {
                 .get(c.state.lane)
                 .map(|l| l.kind == LaneKind::Street)
                 .unwrap_or(false);
-            let remove = if unloaded {
-                true
-            } else if at_edge {
-                // (its trip comes back with the tiles; kept until nobody saw it, a bus stood
-                // with its passengers at the far end of a straight road for good)
-                self.hidden(world, p, r)
-                    || (c.stopped > 8.0 && from_eye > 180.0)
-                    || c.stopped > 150.0
-            } else if !random {
-                false
-            } else if at_end
-                && (!c.is_bus()
-                || self.hidden(world, p, r)
-                || (c.stopped > 8.0 && from_eye > 180.0)
-                || c.stopped > 150.0
-                || (c.stopped > 25.0 && queued.contains(&c.id) && from_eye > 25.0))
-            {
-                // (and in view too once others wait behind it: a fire engine at the end of a
-                // dead-end street held a queue of fourteen cars for two and a half minutes)
-                // (taken at once it vanished in plain view 300 m ahead; but a car kept
-                // until nobody could see it stood for good at the end of a long straight
-                // road in view, and the queue behind it - timetable buses with their
-                // passengers among them - never moved again)
-                true
-            } else if c.gone || dist > far {
-                // in plain view a car stays until the renderer leaves it out anyway, and
-                // close by (the mirrors, a turn of the head) it stays in any case
-                // (one that gave up in a gridlock goes after four minutes even in view,
-                // unless right beside the viewer: kept until nobody saw it, a jam at a
-                // junction the player watched never cleared)
-                (dist > VISIBLE_RANGE * 1.3 && from_eye > NEAR_HIDE)
-                    || self.hidden(world, p, r)
-                    || (c.gone && c.stopped > 240.0 && from_eye > 40.0)
-            } else {
-                false
-            };
+            let remove = Departure {
+                unloaded,
+                at_edge,
+                random,
+                at_end,
+                bus: c.is_bus(),
+                gone: c.gone,
+                rail: c.is_rail(),
+                queued: queued.contains(&c.id),
+                stopped: c.stopped,
+                dist,
+                from_eye,
+                far,
+            }
+            .remove(|| self.consist_hidden(world, c, r));
             if remove && sleeps_instead && !at_end {
                 let c = self.cars.swap_remove(i);
                 asleep += 1;
@@ -2593,8 +2729,8 @@ impl Traffic {
             {
                 continue;
             }
-            // only on loaded ground (a lane's tile may have gone again)
-            if kind != LaneKind::Air && !world.has_ground(p.x, p.y) {
+            // A lane's source tile may have gone again.
+            if !world.traffic_path_loaded(&self.net.lanes[lane], p) {
                 continue;
             }
             let heading = self.net.lanes[lane].at(s).1 as f64;
@@ -2756,7 +2892,7 @@ impl Traffic {
             // it - woken out of the picture 30-60 m from the bus, a car came into being in
             // the mirror or just round the corner)
             let ok = near
-                && world.has_ground(p.x, p.y)
+                && world.traffic_path_loaded(&self.net.lanes[self.dormant[i].lane], p)
                 && self.may_appear(world, p)
                 && !self
                 .cars
@@ -3125,6 +3261,9 @@ impl Traffic {
                 if self.initial { " (initial)" } else { "" }
             );
         }
+        let at_track_start = self.net.lanes[lane].kind == LaneKind::Rail
+            && self.net.prev.get(lane).is_some_and(|p| p.is_empty());
+        let track_start = at_track_start.then(|| state.odometer as f64 - state.s as f64);
         self.cars.push(AiCar {
             id,
             state,
@@ -3160,7 +3299,9 @@ impl Traffic {
             light_at: None,
             pull_out: 0.0,
             rail_trail: Default::default(),
+            track_start,
             consist_reversed: false,
+            train: false,
             park: None,
             seed,
             scheme,
@@ -3355,7 +3496,12 @@ impl Traffic {
             }
             let l = &self.net.lanes[lane];
             offset += l.length() - s_from;
-            if offset > look || best.is_some() {
+            let reach = if l.kind == LaneKind::Rail {
+                look + RAIL_CONSIST_REACH
+            } else {
+                look
+            };
+            if offset > reach || best.is_some() {
                 break;
             }
             let next = match upcoming.as_mut() {
@@ -5690,20 +5836,20 @@ impl Traffic {
         for c in self.lights.iter_mut() {
             c.request.iter_mut().for_each(|r| *r = false);
         }
+        let rail_within = self.rail_reach();
         for c in &self.cars {
-            self.way_lanes_into(&c.state, 160.0, &mut way_scratch);
-            for &(l, d) in &way_scratch {
-                if let Some((ci, li)) = self.net.lanes[l].traffic_light {
-                    if let Some(ctl) = self.lights.get_mut(ci) {
-                        let gap = d - c.state.front;
-                        if gap <= ctl.approach_dist(li) && d > -self.net.lanes[l].length() {
-                            if let Some(r) = ctl.request.get_mut(li) {
-                                *r = true;
-                            }
-                        }
-                    }
-                }
+            if c.train && !c.state.route.is_empty() {
+                route_lanes_into(&self.net, &c.state, rail_within, &mut way_scratch);
+            } else {
+                self.way_lanes_into(&c.state, 160.0, &mut way_scratch);
             }
+            for &(l, d) in &way_scratch {
+                ask_light(&mut self.lights, &self.net, l, d, c.state.front, c.train);
+            }
+        }
+        // the players' trams and trains
+        for &(l, d, front, train) in &self.rail_ahead {
+            ask_light(&mut self.lights, &self.net, l, d, front, train);
         }
         // the player's bus and the other players' vehicles ask too: a depot gate (Spandau's
         // `Omnibushof_S_1`, the exit arm on light 1) opens only for whoever asks, and the
@@ -5717,22 +5863,12 @@ impl Traffic {
             // (off the lanes - a depot yard, a car park - a gate's lane that starts just
             // ahead, the way the bus is facing, is asked all the same: standing a few metres
             // beside every lane there, the bus never opened the barrier in front of it)
-            let h = heading.to_radians();
-            let fwd = glam::DVec2::new(h.sin(), h.cos());
             for l in self.net.lanes_starting_near(pos, 35.0) {
                 let lane = &self.net.lanes[l];
                 let Some((ci, li)) = lane.traffic_light else {
                     continue;
                 };
-                let (p0, h0) = lane.at(0.0);
-                let d = (p0 - pos).truncate();
-                let (along, across) = (d.dot(fwd), d.perp_dot(fwd).abs());
-                let turn = ((h0 as f64 - heading + 540.0).rem_euclid(360.0) - 180.0).abs();
-                if (-2.0..25.0).contains(&along)
-                    && across < 6.0
-                    && turn < 60.0
-                    && (p0.z - pos.z).abs() < 4.0
-                {
+                if gate_lane_ahead(lane, pos, heading) {
                     if let Some(r) = self.lights.get_mut(ci).and_then(|c| c.request.get_mut(li)) {
                         *r = true;
                     }
@@ -6604,6 +6740,28 @@ impl Traffic {
                 remove.push(i);
                 continue;
             }
+            // Omsi.exe takes a train away whole once its first car reaches the end of the
+            // track; here each car goes as it reaches the end, the train with its last one
+            let l = &self.net.lanes[car.state.lane];
+            if l.kind == LaneKind::Rail && l.next.is_empty() && car.state.s > l.length() {
+                let v = &mut car.vehicle;
+                let past = v.trailers.iter().take_while(|t| l.past_end(t.position));
+                v.parts_gone = 1 + past.count();
+                if v.parts_gone > v.trailers.len() {
+                    if debug {
+                        let end = l.end();
+                        log::info!(
+                            "t={:.1}: train {} ran off the end of its track at ({:.0}, {:.0})",
+                            self.time,
+                            car.id,
+                            end.x,
+                            end.y
+                        );
+                    }
+                    remove.push(i);
+                    continue;
+                }
+            }
             if debug && car.state.acc < -4.5 {
                 // hard braking is for emergencies: say what asked for it
                 let who = match lead.and_then(|l| l.1) {
@@ -6692,11 +6850,22 @@ impl Traffic {
         }
         // Who can be seen: a car out of the view (and farther than the mirrors and the
         // shadows reach) leaves its animations as they are and is not drawn at all.
+        // Every part on the track counts: a long train vanished with its locomotive (#336).
         if let Some(v) = self.viewer {
+            let radius = |front: f32, rear: f32| (front + rear).abs().max(4.0) as f64 + 2.0;
             for c in &mut self.cars {
-                let p = c.vehicle.position;
-                let r = (c.state.front + c.state.rear).abs().max(4.0) as f64 + 2.0;
-                c.vehicle.ai_visuals = (p - v.pos).length() < UNSEEN_NEAR || v.frames(p, r);
+                let lead = (c.vehicle.position, radius(c.state.front, c.state.rear));
+                let coupled = c.vehicle.trailers.iter().map(|t| {
+                    let (front, rear, _) = extents(&t.ty, 4.5);
+                    (t.position, radius(front, rear))
+                });
+                let parts = std::iter::once(lead)
+                    .chain(coupled)
+                    .enumerate()
+                    .filter(|(k, _)| !c.vehicle.part_hidden(*k))
+                    .map(|(_, p)| p);
+                let seen = any_part_seen(&v, parts);
+                c.vehicle.ai_visuals = seen;
             }
         }
         let t_par = std::time::Instant::now();
@@ -6713,6 +6882,7 @@ impl Traffic {
                 &'a mut VehicleInstance,
                 &'a mut AiFrame,
                 &'a mut std::collections::VecDeque<(f64, DVec3)>,
+                &'a mut Option<f64>,
             );
             let mut work: Vec<Work> = self
                 .cars
@@ -6720,7 +6890,8 @@ impl Traffic {
                 .zip(frames.iter_mut())
                 .filter_map(|(c, f)| {
                     let f = f.as_mut()?;
-                    Some((&c.state, &mut c.body, &mut c.vehicle, f, &mut c.rail_trail))
+                    let (trail, start) = (&mut c.rail_trail, &mut c.track_start);
+                    Some((&c.state, &mut c.body, &mut c.vehicle, f, trail, start))
                 })
                 .collect();
             let profile = ::legacy_config::env::var_os("OMSI_PROFILE").is_some();
@@ -6729,13 +6900,15 @@ impl Traffic {
             // slowest pack of scripts - a third longer than for the slowest car)
             work.par_iter_mut()
                 .with_min_len(1)
-                .for_each(|(state, body, vehicle, frame, trail)| {
+                .for_each(|(state, body, vehicle, frame, trail, track_start)| {
                     let t0 = std::time::Instant::now();
                     let ground = vehicle.ground.clone();
                     let contact = vehicle.contact.clone();
                     let rail = body.kind == MotionKind::Rail;
                     if rail {
-                        record_rail_trail(trail, state.odometer as f64, state.way_point(net, 0.0));
+                        let keep = rail_trail_length(vehicle);
+                        let here = state.way_point(net, 0.0);
+                        record_rail_trail(trail, state.odometer as f64, here, keep);
                     }
                     let trail = &**trail;
                     let behind = |d: f64| rail_behind(trail, state, net, d);
@@ -6755,10 +6928,25 @@ impl Traffic {
                         contact.as_deref(),
                     );
                     body.apply(vehicle);
+                    if rail {
+                        vehicle.couple_on_track(&|d| Some(behind(d)));
+                    }
                     if rail && !vehicle.trailers.is_empty() {
                         // the coupled cars (a train's, a tram's sections) on the track it
                         // came along, not dragged round the bends like a road trailer
-                        vehicle.retrail(0.0, &|d| Some(behind(d)));
+                        // (cars still before the start of their track are not shown yet)
+                        let waiting = std::cell::Cell::new(0);
+                        let odo = state.odometer as f64;
+                        vehicle.retrail(0.0, &|d| {
+                            if track_start.is_some_and(|s0| odo - d < s0) {
+                                waiting.set(waiting.get() + 1);
+                            }
+                            Some(behind(d))
+                        });
+                        vehicle.parts_waiting = waiting.get();
+                        if vehicle.parts_waiting == 0 {
+                            **track_start = None;
+                        }
                     }
                     frame.steer_deg = body.steer;
                     let t1 = std::time::Instant::now();
@@ -7575,6 +7763,21 @@ impl Traffic {
         }
     }
 
+    /// How far ahead a train looks for lights (m): a set `[approachdist]` counts for trains
+    /// as written, however far.
+    pub fn rail_reach(&self) -> f32 {
+        self.lights
+            .iter()
+            .flat_map(|c| c.approach.iter().flatten())
+            .fold(RAIL_APPROACH, |m, &d| m.max(d))
+            + 10.0
+    }
+
+    /// Whether the vehicle file `path` is a car of one of the map's AI trains.
+    pub fn is_train(&self, path: &Path) -> bool {
+        self.train_cars.contains(&car_key(path))
+    }
+
     /// The street lanes a vehicle standing at `pos` facing `heading` is on and will drive
     /// onto within `reach` metres, each with the distance from the vehicle to its start
     /// (0 for the lane it is on): the way straight on and the gentle turns (within 60° of
@@ -7788,6 +7991,16 @@ impl Traffic {
                 };
                 let mut s = script.lock();
                 s.update(dt, &vars);
+                if near.is_none_or(|p| (lamp.pos - p).length() < 250.0) {
+                    let at = lamp.pos;
+                    crate::scene::draw_script_texts(
+                        renderer,
+                        scene,
+                        &mut s,
+                        &mut lamp.texts.lock(),
+                        || format!("lamp_{:.0}_{:.0}", at.x, at.y),
+                    );
+                }
                 // `OMSI_DEBUG_LAMPS`: where the moving lamps are (barriers) and how far their
                 // meshes are turned, each time the lamps are updated
                 if lamp.animated && debug_lamps {
@@ -7826,6 +8039,21 @@ impl Traffic {
                         }
                     }
                 }
+            }
+            if !lamp.animated {
+                use std::hash::{Hash, Hasher};
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                (state, request).hash(&mut h);
+                if let Some(script) = lamp.script.as_ref() {
+                    for v in &script.lock().state.vars {
+                        v.to_bits().hash(&mut h);
+                    }
+                }
+                let sig = h.finish();
+                if lamp.shown == Some(sig) {
+                    continue;
+                }
+                lamp.shown = Some(sig);
             }
             // Traffic lamps do not enter World's ordinary scripted-object update path.
             // Switch their materials here too, so [matl_item] nightmaps light the LEDs.
@@ -7983,13 +8211,14 @@ impl Traffic {
                         }
                     }
                 }
-                renderer.set_params(scene, *inst, &alpha, p.visible && vp_ok, &p.slot_uv);
+                let shown = p.visible && vp_ok && !c.vehicle.part_hidden(0);
+                renderer.set_params(scene, *inst, &alpha, shown, &p.slot_uv);
                 renderer.set_slot_light(scene, *inst, &p.slot_light);
                 renderer.set_slot_night(scene, *inst, &p.slot_night);
                 renderer.set_interior(scene, *inst, p.interior);
                 renderer.set_cabin(scene, *inst, !def.illumination_interior.is_empty());
             }
-            for (t, r) in c.vehicle.trailers.iter().zip(&c.trailer_renders) {
+            for (k, (t, r)) in c.vehicle.trailers.iter().zip(&c.trailer_renders).enumerate() {
                 for (i, inst) in r.instances.iter().enumerate() {
                     renderer.set_transform(scene, *inst, t.position, t.mesh_local_transform(i));
                     let p = &t.mesh_props[i];
@@ -8008,7 +8237,8 @@ impl Traffic {
                             }
                         }
                     }
-                    renderer.set_params(scene, *inst, &alpha, p.visible && vp_ok, &p.slot_uv);
+                    let shown = p.visible && vp_ok && !c.vehicle.part_hidden(k + 1);
+                    renderer.set_params(scene, *inst, &alpha, shown, &p.slot_uv);
                     renderer.set_slot_light(scene, *inst, &p.slot_light);
                     renderer.set_slot_night(scene, *inst, &p.slot_night);
                     renderer.set_interior(scene, *inst, p.interior);
@@ -8056,6 +8286,114 @@ impl Traffic {
         }
         n
     }
+}
+
+/// Like `Traffic::way_lanes_into`, along the timetable route (as `AiState::route_distance`).
+fn route_lanes_into(net: &Network, st: &AiState, within: f32, out: &mut Vec<(usize, f32)>) {
+    out.clear();
+    let (mut k, mut l, mut d) = (st.route_index, st.lane, -st.s);
+    if let Some(c) = st.change {
+        if st.route.get(k + 1) == Some(&c.to) {
+            (k, l, d) = (k + 1, c.to, -c.s_to);
+        }
+    }
+    out.push((l, d));
+    while let Some(&next) = st.route.get(k + 1) {
+        if net.parallel(l, next) {
+            d -= net.beside_delta(l, next);
+        } else {
+            d += net.lanes[l].length();
+        }
+        if d > within {
+            break;
+        }
+        out.push((next, d));
+        (k, l) = (k + 1, next);
+    }
+}
+
+/// Request lane `l`'s light for a vehicle `d` m before the lane, its front `front` m ahead.
+fn ask_light(
+    lights: &mut [TrafficLightController],
+    net: &Network,
+    l: usize,
+    d: f32,
+    front: f32,
+    train: bool,
+) {
+    let Some((ci, li)) = net.lanes.get(l).and_then(|x| x.traffic_light) else {
+        return;
+    };
+    if let Some(ctl) = lights.get_mut(ci) {
+        if ctl.asked_from(li, d - front, train) && d > -net.lanes[l].length() {
+            if let Some(r) = ctl.request.get_mut(li) {
+                *r = true;
+            }
+        }
+    }
+}
+
+/// Whether a street lane (a depot gate's) starts just ahead of a bus; never a rail lane.
+fn gate_lane_ahead(lane: &::simulation::traffic::Lane, pos: DVec3, heading: f64) -> bool {
+    let h = heading.to_radians();
+    let fwd = glam::DVec2::new(h.sin(), h.cos());
+    let (p0, h0) = lane.at(0.0);
+    let d = (p0 - pos).truncate();
+    let (along, across) = (d.dot(fwd), d.perp_dot(fwd).abs());
+    let turn = ((h0 as f64 - heading + 540.0).rem_euclid(360.0) - 180.0).abs();
+    lane.kind == LaneKind::Street
+        && (-2.0..25.0).contains(&along)
+        && across < 6.0
+        && turn < 60.0
+        && (p0.z - pos.z).abs() < 4.0
+}
+
+/// A vehicle file from its `vehicles/` folder on, lower case: the same car in any root.
+fn car_key(path: &Path) -> String {
+    let p = path
+        .to_string_lossy()
+        .to_ascii_lowercase()
+        .replace('\\', "/");
+    match p.rfind("vehicles/") {
+        Some(k) => p[k..].to_string(),
+        None => p,
+    }
+}
+
+/// The vehicle files of the map's `.zug` trains (a car naming a group: all its vehicles).
+fn train_cars(root: &Path, lists: &::map::ailists::AiLists) -> hashbrown::HashSet<String> {
+    let mut out = hashbrown::HashSet::new();
+    for v in lists
+        .groups
+        .iter()
+        .filter(|g| !g.is_depot)
+        .flat_map(|g| &g.vehicles)
+    {
+        if !v.file.to_ascii_lowercase().ends_with(".zug") {
+            continue;
+        }
+        let Ok(train) =
+            ::legacy_vehicle::vehicle::Train::load(&::mods::resolve_path(root, &v.file))
+        else {
+            continue;
+        };
+        for (file, _) in &train.cars {
+            let p = ::mods::resolve_path(root, file);
+            let files: Vec<std::path::PathBuf> = if ::legacy_config::vfs::is_file(&p) {
+                vec![p]
+            } else {
+                lists
+                    .groups
+                    .iter()
+                    .filter(|g| g.name.eq_ignore_ascii_case(file.trim()))
+                    .flat_map(|g| &g.vehicles)
+                    .map(|v| ::mods::resolve_path(root, &v.file))
+                    .collect()
+            };
+            out.extend(files.iter().map(|f| car_key(f)));
+        }
+    }
+    out
 }
 
 /// What the tiles placed since the last call hand to the traffic: their lanes, their parked
@@ -8248,7 +8586,9 @@ impl Traffic {
             light_at: None,
             pull_out: 0.0,
             rail_trail: Default::default(),
+            track_start: None,
             consist_reversed: false,
+            train: false,
             park: None,
         });
         self.cars.len() - 1
@@ -8334,6 +8674,70 @@ fn in_player_box(
     let rel = p.truncate() - centre.truncate();
     let (x, y) = (rel.dot(right), rel.dot(fwd));
     x.abs() <= wide && y <= ahead && y >= -behind && (p.z - centre.z).abs() < 4.0
+}
+
+/// The options' share of random traffic, kept to the 0-300 % the options offer.
+fn unsched_share(factor: f32) -> f32 {
+    if factor.is_finite() {
+        factor.clamp(0.0, 3.0)
+    } else {
+        1.0
+    }
+}
+
+#[cfg(test)]
+mod consist_rear_tests {
+    use super::consist_rear;
+    use ::simulation::{SimClock, VehicleHost, VehicleInstance, VehicleType};
+    use std::sync::Arc;
+
+    /// A train reaches back to its last car, a turned one included; a part coupled on
+    /// ahead (the BR 481's bogies) does not make it longer (#342).
+    #[test]
+    fn a_train_reaches_back_to_its_last_car() {
+        let dir = std::env::temp_dir().join(format!("omsi-consist-rear-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("model.cfg"), "").unwrap();
+        // (no box of their own: 4.5 m long, their origin in the middle)
+        let part = |name: &str, front: f32, back: f32| {
+            std::fs::write(
+                dir.join(name),
+                format!(
+                    "[model]\nmodel.cfg\n[coupling_front]\n0\n{front}\n1\n[coupling_back]\n0\n{back}\n1\n"
+                ),
+            )
+            .unwrap();
+            Arc::new(VehicleType::load(&dir, &dir.join(name)).unwrap())
+        };
+        let car = part("car.ovh", 5.0, -5.0);
+        let bogie = part("bogie.ovh", -20.0, -3.0);
+        let new = || VehicleInstance::new(car.clone(), VehicleHost::new(SimClock::default()));
+        let alone = new();
+        assert_eq!(consist_rear(&alone, 2.25), 2.25);
+        // a car 10 m behind the first (tail at 12.25 m), a turned one 10 m behind that
+        let mut train = new();
+        train.attach_trailer_ex(car.clone(), false);
+        train.attach_trailer_ex(car.clone(), true);
+        assert!((consist_rear(&train, 2.25) - 22.25).abs() < 1e-4);
+        // a bogie coupled on behind the first car whose origin lies 15 m ahead of it
+        let mut ahead = new();
+        ahead.attach_trailer_ex(bogie, false);
+        assert_eq!(consist_rear(&ahead, 2.25), 2.25);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+#[cfg(test)]
+mod unsched_share_tests {
+    use super::unsched_share;
+
+    #[test]
+    fn the_share_stays_within_the_options_range() {
+        assert_eq!(unsched_share(1.5), 1.5);
+        assert_eq!(unsched_share(100.0), 3.0);
+        assert_eq!(unsched_share(-1.0), 0.0);
+        assert_eq!(unsched_share(f32::NAN), 1.0);
+    }
 }
 
 #[cfg(test)]
@@ -8530,5 +8934,285 @@ mod bodies_moved_tests {
         assert!((m.center - glam::DVec2::new(94.0, 50.0)).length() < 1e-9);
         assert!((m.heading - want.heading).abs() < 1e-9);
         assert!((m.z0 - want.z0).abs() < 1e-9 && (m.z1 - want.z1).abs() < 1e-9);
+    }
+}
+
+#[cfg(test)]
+mod gate_lane_tests {
+    use super::gate_lane_ahead;
+    use ::simulation::traffic::{LaneBuilder, LaneKind};
+    use glam::DVec3;
+
+    /// A bus asks for the street lane starting ahead of it, not for a rail lane there.
+    #[test]
+    fn a_bus_asks_for_no_rail_lane() {
+        let lane =
+            |kind| LaneBuilder::arc(DVec3::new(3.0, 10.0, 0.0), 0.0, 20.0, 0.0, 0.0, kind, 3.0);
+        assert!(gate_lane_ahead(&lane(LaneKind::Street), DVec3::ZERO, 0.0));
+        assert!(!gate_lane_ahead(&lane(LaneKind::Rail), DVec3::ZERO, 0.0));
+    }
+}
+
+#[cfg(test)]
+mod route_lanes_tests {
+    use super::{AiState, LaneKind, Network, route_lanes_into};
+    use ::simulation::traffic::LaneBuilder;
+    use glam::DVec3;
+
+    /// A lane beside the one before it counts from where it lies beside it.
+    #[test]
+    fn a_lane_beside_counts_from_beside() {
+        let line = |a: [f64; 2], b: [f64; 2]| {
+            LaneBuilder::polyline(
+                vec![DVec3::new(a[0], a[1], 0.0), DVec3::new(b[0], b[1], 0.0)],
+                LaneKind::Rail,
+                3.0,
+            )
+        };
+        let mut net = Network {
+            lanes: vec![
+                line([0.0, 0.0], [0.0, 100.0]),
+                line([3.5, 40.0], [3.5, 140.0]),
+                line([3.5, 140.0], [3.5, 200.0]),
+            ],
+            ..Default::default()
+        };
+        net.link(1.5);
+        assert!(net.parallel(0, 1));
+        let mut st = AiState::new(0, 10.0, 1);
+        st.route = vec![0, 1, 2];
+        let mut out = Vec::new();
+        route_lanes_into(&net, &st, 1000.0, &mut out);
+        assert_eq!(out.len(), 3);
+        for (ri, &(l, d)) in out.iter().enumerate() {
+            assert_eq!(l, st.route[ri]);
+            let want = st.route_distance(&net, ri, 0.0);
+            assert!((d - want).abs() < 0.01, "{out:?}");
+        }
+        assert!((out[1].1 - 30.0).abs() < 0.01, "{out:?}");
+    }
+}
+
+#[cfg(test)]
+mod train_car_tests {
+    use super::{car_key, train_cars};
+    use ::map::ailists::{AiGroup, AiLists, AiVehicleEntry};
+
+    fn entry(file: &str) -> AiVehicleEntry {
+        AiVehicleEntry {
+            file: file.into(),
+            weight: 1.0,
+            number: None,
+            registration: None,
+        }
+    }
+
+    /// A `.zug`'s cars, a group's among them, are trains; a tram is not.
+    #[test]
+    fn the_cars_of_the_maps_trains_are_trains() {
+        let root = std::env::temp_dir().join(format!("neoomsi_train_cars_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for f in [
+            "Vehicles/Zug/Kopf.ovh",
+            "Vehicles/Zug/Mitte.ovh",
+            "Vehicles/Tram/GT6.bus",
+        ] {
+            let p = root.join(f);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, "[friendlyname]\nx\n").unwrap();
+        }
+        std::fs::create_dir_all(root.join("Trains")).unwrap();
+        std::fs::write(
+            root.join("Trains/S5.zug"),
+            "Vehicles\\Zug\\Kopf.ovh\n0\nMitten\n1\n",
+        )
+        .unwrap();
+        let lists = AiLists {
+            groups: vec![
+                AiGroup {
+                    name: "S5".into(),
+                    vehicles: vec![entry("Trains\\S5.zug")],
+                    ..Default::default()
+                },
+                AiGroup {
+                    name: "Mitten".into(),
+                    vehicles: vec![entry("Vehicles\\Zug\\Mitte.ovh")],
+                    ..Default::default()
+                },
+                AiGroup {
+                    name: "Tram".into(),
+                    vehicles: vec![entry("Vehicles\\Tram\\GT6.bus")],
+                    ..Default::default()
+                },
+            ],
+        };
+        let cars = train_cars(&root, &lists);
+        assert!(cars.contains("vehicles/zug/kopf.ovh"), "{cars:?}");
+        assert!(cars.contains("vehicles/zug/mitte.ovh"), "{cars:?}");
+        assert!(!cars.contains("vehicles/tram/gt6.bus"));
+        // another content root holding the same car
+        assert_eq!(
+            car_key(std::path::Path::new("/mods/X/Vehicles/Zug/Kopf.ovh")),
+            "vehicles/zug/kopf.ovh"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod rail_trail_tests {
+    use super::record_rail_trail;
+    use glam::DVec3;
+
+    /// A train longer than the usual 400 m keeps its own length of track behind it.
+    #[test]
+    fn a_long_train_keeps_its_length_of_track() {
+        let mut trail = std::collections::VecDeque::new();
+        for i in 0..=1200 {
+            let u = i as f64;
+            record_rail_trail(&mut trail, u, DVec3::new(0.0, u, 0.0), 600.0);
+        }
+        let span = trail.back().unwrap().0 - trail.front().unwrap().0;
+        assert!((span - 600.0).abs() <= 1.0, "{span}");
+    }
+}
+
+#[cfg(test)]
+mod part_seen_tests {
+    use super::{Viewer, any_part_seen};
+    use glam::DVec3;
+
+    /// A camera at the origin looking north, 60 degrees wide.
+    fn viewer() -> Viewer {
+        let tan = 30f64.to_radians().tan();
+        Viewer {
+            pos: DVec3::ZERO,
+            forward: DVec3::Y,
+            tan_x: tan,
+            tan_y: tan,
+            range: 2000.0,
+            min_size: 0.0,
+            max_dist: 0.0,
+            fov: 60f64.to_radians(),
+        }
+    }
+
+    /// Locomotive behind the camera, a coach still in view (#336).
+    #[test]
+    fn a_train_is_seen_while_a_coach_is_in_view() {
+        let v = viewer();
+        let loco = (DVec3::new(0.0, -200.0, 0.0), 22.0);
+        let coach = (DVec3::new(0.0, 150.0, 0.0), 28.0);
+        assert!(!any_part_seen(&v, std::iter::once(loco)));
+        assert!(any_part_seen(&v, [loco, coach].into_iter()));
+    }
+
+    #[test]
+    fn a_train_wholly_behind_is_not_seen() {
+        let v = viewer();
+        let parts = [
+            (DVec3::new(0.0, -200.0, 0.0), 22.0),
+            (DVec3::new(0.0, -226.0, 0.0), 28.0),
+        ];
+        assert!(!any_part_seen(&v, parts.into_iter()));
+    }
+}
+
+#[cfg(test)]
+mod departure_tests {
+    use super::{Departure, NEAR_HIDE, VISIBLE_RANGE};
+
+    /// A vehicle in view, near the player, that has stood a long time.
+    fn standing(rail: bool) -> Departure {
+        Departure {
+            unloaded: false,
+            at_edge: false,
+            random: true,
+            at_end: false,
+            bus: false,
+            gone: true,
+            rail,
+            queued: true,
+            stopped: 300.0,
+            dist: 200.0,
+            from_eye: 200.0,
+            far: 1000.0,
+        }
+    }
+
+    /// At the edge of the loaded route a bus goes in view after a wait, a train only
+    /// unseen (#336).
+    #[test]
+    fn a_train_at_the_edge_goes_only_unseen() {
+        for rail in [false, true] {
+            let d = Departure {
+                at_edge: true,
+                random: false,
+                bus: true,
+                gone: false,
+                ..standing(rail)
+            };
+            assert_eq!(d.remove(|| false), !rail, "rail {rail}");
+            assert!(d.remove(|| true), "rail {rail}");
+        }
+    }
+
+    /// At the end of the network: a random car goes at once, a train only unseen.
+    #[test]
+    fn a_train_at_the_end_goes_only_unseen() {
+        for (bus, rail) in [(false, false), (true, false), (false, true), (true, true)] {
+            let d = Departure {
+                at_end: true,
+                bus,
+                ..standing(rail)
+            };
+            assert_eq!(d.remove(|| false), !rail, "bus {bus} rail {rail}");
+            assert!(d.remove(|| true), "bus {bus} rail {rail}");
+        }
+    }
+
+    /// Given up in a gridlock four minutes ago: a car goes in view, a train does not.
+    #[test]
+    fn a_stuck_train_stays_in_view() {
+        for rail in [false, true] {
+            let d = Departure {
+                queued: false,
+                ..standing(rail)
+            };
+            assert_eq!(d.remove(|| false), !rail, "rail {rail}");
+        }
+    }
+
+    /// Far off or on unloaded tiles, either goes.
+    #[test]
+    fn far_off_or_unloaded_goes() {
+        for rail in [false, true] {
+            let far = Departure {
+                stopped: 0.0,
+                dist: VISIBLE_RANGE * 1.5,
+                from_eye: NEAR_HIDE + 1.0,
+                ..standing(rail)
+            };
+            assert!(far.remove(|| false), "rail {rail}");
+            let unloaded = Departure {
+                unloaded: true,
+                ..standing(rail)
+            };
+            assert!(unloaded.remove(|| false), "rail {rail}");
+        }
+    }
+
+    /// A timetable vehicle in service near the player is never taken away here.
+    #[test]
+    fn a_timetable_vehicle_on_its_way_stays() {
+        for rail in [false, true] {
+            let d = Departure {
+                random: false,
+                bus: true,
+                gone: false,
+                ..standing(rail)
+            };
+            assert!(!d.remove(|| true), "rail {rail}");
+        }
     }
 }

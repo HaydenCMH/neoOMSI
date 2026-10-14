@@ -4,7 +4,7 @@ use super::*;
 
 impl Schedule {
     /// `clock` gives the date: tours carry a validity mask (bits 0-6 Monday…Sunday, 7 public
-    /// holiday, 8 school holidays, 9 school days) that selects which run today.
+    /// holiday, 8 school days, 9 school holidays) that selects which run today.
     pub fn new(root: &Path, world: &World, clock: &::simulation::SimClock) -> Schedule {
         let chrono_dirs = world.chrono_dirs.read().clone();
         let deactivated = ::map::chrono_deactivated_lines(&chrono_dirs);
@@ -47,6 +47,7 @@ impl Schedule {
         let holiday = calendar.is_holiday(date);
         let school_holiday = calendar.in_holiday_range(date);
         let (day_bit, school_bit) = day_bits(&calendar, clock);
+        let eve_bits = day_bits(&calendar, &day_before(clock));
         let mut departures = Vec::new();
         let mut skipped_tours = 0;
         for line in &data.lines {
@@ -73,6 +74,7 @@ impl Schedule {
                             tour: tour.number.clone(),
                             mask,
                             spawned: false,
+                            base: 0.0,
                         });
                     }
                 }
@@ -270,6 +272,7 @@ impl Schedule {
             calendar,
             day: date,
             day_bits: (day_bit, school_bit),
+            eve_bits,
             next_day_bit: 1 << ((clock.weekday() + 1) % 7),
             day_base: 0.0,
             date_clock: clock.clone(),

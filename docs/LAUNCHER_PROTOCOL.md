@@ -68,7 +68,7 @@ launcher shows that the engine went away.
 | `config`, `save_config` | saving the folders also drops the cached content lists |
 | `maps`, `vehicles`, `weather` | cached until the content changes (`content_changed`) |
 | `lines`, `ibis` | |
-| `minimap` | roads (`main`: a speed limit of 55 km/h or more), stops and entry points in world metres, each with the `--spawn` it starts at; kept per map and date until the content changes |
+| `minimap` | roads (`main`: a speed limit of 55 km/h or more), stops and entry points in world metres, each with the `x,y,heading,z` `--spawn` it starts at; kept per map and date until the content changes |
 | `profiles`, `profile`, `create_profile`, `delete_profile` | |
 | `mods`, `modinfo` | `mods.installed` lists the entries of `<content>/mods` the game mounts; `error` says why a damaged `.zip` cannot be read |
 | `start_install` | returns at once; progress comes as `installs_changed`. A mod is installed as `mods/<name>` (unpacked, archive tree kept) or `mods/<name>.zip` (in place); with `replace`, an installed mod of that name moves to `mods/uninstalled` |

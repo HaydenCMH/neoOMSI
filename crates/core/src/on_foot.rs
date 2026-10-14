@@ -71,6 +71,7 @@ pub(crate) struct OnFoot {
     pub attached: bool,
     pub wheel: Option<(BusId, glam::Vec3, f32, f32)>,
     pub cab: Option<wheel::CabMove>,
+    pub dbg: collision::MoveDbg,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -148,6 +149,7 @@ impl OnFoot {
             attached: false,
             wheel: None,
             cab: None,
+            dbg: collision::MoveDbg::default(),
         }
     }
 
@@ -244,6 +246,8 @@ impl App {
             KeyCode::Escape | KeyCode::F12 | KeyCode::KeyP | KeyCode::KeyV | KeyCode::Slash => {
                 false
             }
+            // the navigator's key (Shift+N) works on foot as in the bus :D
+            _ if self.bound_actions(code).iter().any(|a| a == "toggle_navigator") => false,
             KeyCode::F1 => {
                 if pressed && !repeat {
                     if let Some(f) = self.on_foot.as_mut() {
@@ -392,6 +396,7 @@ impl App {
 
         let bus = self.foot_bus_step(f, dt);
         f.on_lane = bus.door.is_some();
+        f.dbg.exempt = bus.exempt;
         if bus.inside_moved {
             return;
         }

@@ -377,7 +377,11 @@ impl Look {
             extra.screen = true;
             return Look {
                 diffuse: Some(t),
-                alpha: AlphaMode::Blend,
+                alpha: if l.alpha == AlphaMode::Test {
+                    AlphaMode::Test
+                } else {
+                    AlphaMode::Blend
+                },
                 color: [1.0; 4],
                 emissive: [0.0; 3],
                 unlit: false,

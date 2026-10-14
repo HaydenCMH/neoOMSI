@@ -287,6 +287,42 @@ impl PlayerDuty {
         self.left_late.map(|l| l.max(due)).unwrap_or(due)
     }
 
+    /// The player's bus at one stop for `Schedule::stop_list`, in clock time: a trip at
+    /// 24:22 is the board's 0:22.
+    pub(super) fn board_visits(&self, stop: i64, day_time: f64) -> Vec<(f64, String, String)> {
+        let now = self.duty_time(day_time);
+        // it leaves on time at the earliest, or as late as it runs
+        let late = self.delay(day_time).max(0.0);
+        let mut list = Vec::new();
+        for (ti, trip) in self.trips.iter().enumerate().skip(self.trip_index) {
+            if trip.departure > now + BOARD_AHEAD {
+                break;
+            }
+            for (k, s) in trip
+                .stops
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| s.object_id == stop && s.stops)
+            {
+                let current = ti == self.trip_index;
+                let leaves =
+                    if current && (k < self.next_stop || self.done && k + 1 < trip.stops.len()) {
+                        continue;
+                    } else if current && k == self.next_stop && self.at_stop {
+                        s.dep.max(now)
+                    } else {
+                        (s.dep + late).max(now)
+                    };
+                list.push((
+                    leaves - now + day_time,
+                    trip.line.trim().to_string(),
+                    trip.terminus.clone(),
+                ));
+            }
+        }
+        list
+    }
+
     /// The clock's time of day as the duty counts it: the day before or after when that is
     /// nearer the trip under way, so a duty across midnight (picked at 23:00 for trips from
     /// 0:49, or running from 23:40 into the night) is neither 22 hours late nor early.
@@ -311,7 +347,12 @@ impl PlayerDuty {
     ) -> Option<(f64, f64)> {
         let day_time = self.duty_time(day_time);
         self.heading = bus.heading;
-        let served = self.advance(bus.position, day_time);
+        // A later stop can be close to the road out of the current stand (especially at
+        // terminals).  Being inside its service circle is not enough to say it was served:
+        // the bus must actually be standing with a door open there.
+        let served_here =
+            crate::humans::Humans::any_door_open(bus) && bus.physics.velocity_kmh().abs() < 1.0;
+        let served = self.advance_while_serving(bus.position, day_time, served_here);
         let delay = self.delay(day_time);
         let trip = &self.trips[self.trip_index];
         let host = &mut bus.host;
@@ -388,6 +429,17 @@ impl PlayerDuty {
 
     /// The duty's progress with the bus at `pos` (see [`PlayerDuty::update`]).
     pub(super) fn advance(&mut self, pos: glam::DVec3, day_time: f64) -> Option<(f64, f64)> {
+        self.advance_while_serving(pos, day_time, true)
+    }
+
+    /// As [`Self::advance`], but only permits recovery to a later stop if the bus is
+    /// actually serving passengers there.  Tests use this to cover overlapping stop circles.
+    pub(super) fn advance_while_serving(
+        &mut self,
+        pos: glam::DVec3,
+        day_time: f64,
+        serving_here: bool,
+    ) -> Option<(f64, f64)> {
         // the path the bus drove (a jump, e.g. a teleport, does not count)
         if let Some(last) = self.last_pos {
             let step = (pos - last).length();
@@ -440,7 +492,7 @@ impl PlayerDuty {
         let last = trip.stops.len().saturating_sub(1);
         // the bus reached a later stop of the trip (skipped stops); before it has left a
         // stop of the trip, not its last one (where the tour's previous trip may end)
-        if !self.at_stop {
+        if !self.at_stop && serving_here {
             self.catch_up(pos, forward_of(self.heading));
         }
         let trip = &self.trips[self.trip_index];

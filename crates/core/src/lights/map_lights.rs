@@ -3,10 +3,13 @@ use super::geom::{cell3, enclosure, sees};
 use super::sources::corona_lights;
 use super::tuning::*;
 use crate::scene::{LightSwitch, World};
-use glam::DVec3;
 use ::render::{Corona, LightMode, PointLight, Scene};
+use ::simulation::collision::CollisionWorld;
+use glam::DVec3;
 use std::collections::HashMap;
-use std::time::Instant;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::JoinHandle;
 
 #[derive(Clone, Copy, PartialEq)]
 struct BuildKey {
@@ -15,16 +18,13 @@ struct BuildKey {
     lamps_on: bool,
 }
 
+/// Near lamps sized against the buildings on a worker thread (by a dense mesh, 20 ms a lamp).
 struct Build {
     key: BuildKey,
     centre: DVec3,
     counts: (usize, usize),
-    src_lights: Vec<PointLight>,
-    src_coronas: Vec<Corona>,
-    li: usize,
-    ci: usize,
-    lights: Vec<PointLight>,
-    coronas: Vec<Corona>,
+    cancel: Arc<AtomicBool>,
+    worker: JoinHandle<(Vec<PointLight>, Vec<Corona>)>,
 }
 
 #[derive(Default)]
@@ -61,8 +61,8 @@ impl NearCache {
         let stale =
             self.key != Some(key) || self.counts != counts || f.dist(self.centre) > NEAR_MARGIN;
 
-        if self.build.as_ref().is_some_and(|b| b.key != key) {
-            self.build = None;
+        if let Some(b) = self.build.take_if(|b| b.key != key) {
+            b.cancel.store(true, Ordering::Relaxed);
         }
         if stale && self.build.is_none() {
             self.build = Some(Self::start_build(
@@ -75,18 +75,16 @@ impl NearCache {
         }
         drop((static_lights, static_coronas));
 
-        if let Some(mut b) = self.build.take() {
-            if b.step(f) {
+        if let Some(b) = self.build.take_if(|b| b.worker.is_finished()) {
+            if let Ok((lights, coronas)) = b.worker.join() {
                 *self = NearCache {
                     key: Some(b.key),
                     centre: b.centre,
                     counts: b.counts,
-                    lights: b.lights,
-                    coronas: b.coronas,
+                    lights,
+                    coronas,
                     ..Default::default()
                 };
-            } else {
-                self.build = Some(b);
             }
         }
         self.sweep_visibility(f);
@@ -123,16 +121,18 @@ impl NearCache {
                 Some(corona)
             })
             .collect();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (coll, stop) = (f.coll.clone(), cancel.clone());
+        let worker = std::thread::Builder::new()
+            .name("lamp build".into())
+            .spawn(move || build(&coll, src_lights, src_coronas, &stop))
+            .expect("lamp build thread");
         Build {
             key,
             centre: f.camera,
             counts,
-            src_lights,
-            src_coronas,
-            li: 0,
-            ci: 0,
-            lights: Vec::new(),
-            coronas: Vec::new(),
+            cancel,
+            worker,
         }
     }
 
@@ -247,29 +247,29 @@ impl NearCache {
     }
 }
 
-impl Build {
-    fn step(&mut self, f: &Frame) -> bool {
-        let t0 = Instant::now();
-        let out_of_time = || t0.elapsed().as_micros() >= BUILD_BUDGET_US;
-        while self.li < self.src_lights.len() && !out_of_time() {
-            let mut l = self.src_lights[self.li];
-            self.li += 1;
-            if let Some(extent) = enclosure(&f.coll, l.position) {
-                l.radius = l.radius.min((extent + 1.0).max(ENCL_MIN_RADIUS));
-                l.core = l.core.min(l.radius);
-            }
-            self.lights.push(l);
+fn build(
+    coll: &CollisionWorld,
+    src_lights: Vec<PointLight>,
+    src_coronas: Vec<Corona>,
+    cancel: &AtomicBool,
+) -> (Vec<PointLight>, Vec<Corona>) {
+    let mut lights = Vec::with_capacity(src_lights.len());
+    for mut l in src_lights {
+        if cancel.load(Ordering::Relaxed) {
+            break;
         }
-        while self.li >= self.src_lights.len() && self.ci < self.src_coronas.len() && !out_of_time()
-        {
-            let c = self.src_coronas[self.ci];
-            self.ci += 1;
-            if enclosure(&f.coll, c.position).is_none() {
-                self.coronas.push(c);
-            }
+        if let Some(extent) = enclosure(coll, l.position) {
+            l.radius = l.radius.min((extent + 1.0).max(ENCL_MIN_RADIUS));
+            l.core = l.core.min(l.radius);
         }
-        self.li >= self.src_lights.len() && self.ci >= self.src_coronas.len()
+        lights.push(l);
     }
+    let coronas = src_coronas
+        .into_iter()
+        .take_while(|_| !cancel.load(Ordering::Relaxed))
+        .filter(|c| enclosure(coll, c.position).is_none())
+        .collect();
+    (lights, coronas)
 }
 
 #[derive(Default)]
@@ -292,39 +292,16 @@ impl ObjectLampVis {
 
     pub(super) fn emit(&mut self, f: &Frame, world: &World, scene: &mut Scene) {
         self.new_epoch_if_moved(f);
-        let epoch = self.epoch;
         let mut rays = LAMP_RAYS_PER_FRAME;
         let mut with_light: Vec<Corona> = Vec::new();
         for lamp in world.light_objects.lock().iter() {
-            let dist = f.dist(lamp.pos);
-            if dist > f.visible_range {
-                continue;
-            }
-            if dist < OCC_CORONA_RANGE {
-                let entry = self
-                    .seen
-                    .entry(cell3(lamp.pos, 2.0))
-                    .or_insert((true, epoch.wrapping_sub(1)));
-                if entry.1 != epoch && rays > 0 {
-                    rays -= 1;
-                    *entry = (sees(&f.coll, f.camera, lamp.pos), epoch);
-                }
-                if !entry.0 {
-                    continue;
-                }
-            }
-            let first = scene.coronas.len();
-            for ((c, _), lit) in lamp.coronas.iter().zip(&lamp.lit) {
-                if *lit <= 0.0 {
-                    continue;
-                }
-                let mut corona = *c;
-                corona.brightness *= lit.min(1.0);
-                scene.coronas.push(corona);
-            }
-            if dist < SRC_RANGE {
-                with_light.extend_from_slice(&scene.coronas[first..]);
-            }
+            let lamp = (lamp.pos, &lamp.coronas[..], &lamp.lit[..]);
+            self.emit_object(f, lamp, &mut rays, scene, &mut with_light);
+        }
+        let scripted = world.scripted.lock();
+        for o in scripted.iter().filter(|o| !o.coronas.is_empty()) {
+            let lamp = (o.pos, &o.coronas[..], &o.lit[..]);
+            self.emit_object(f, lamp, &mut rays, scene, &mut with_light);
         }
         with_light.sort_by(|a, b| f.dist(a.position).total_cmp(&f.dist(b.position)));
         with_light.truncate(SRC_MAX_OBJECTS * 3);
@@ -335,5 +312,46 @@ impl ObjectLampVis {
             SRC_MAX_OBJECTS,
             &mut scene.lights,
         );
+    }
+
+    /// An object's lit coronas, unless it is out of sight.
+    fn emit_object(
+        &mut self,
+        f: &Frame,
+        (pos, coronas, lit): (DVec3, &[(Corona, String)], &[f32]),
+        rays: &mut usize,
+        scene: &mut Scene,
+        with_light: &mut Vec<Corona>,
+    ) {
+        let dist = f.dist(pos);
+        if dist > f.visible_range {
+            return;
+        }
+        if dist < OCC_CORONA_RANGE {
+            let epoch = self.epoch;
+            let entry = self
+                .seen
+                .entry(cell3(pos, 2.0))
+                .or_insert((true, epoch.wrapping_sub(1)));
+            if entry.1 != epoch && *rays > 0 {
+                *rays -= 1;
+                *entry = (sees(&f.coll, f.camera, pos), epoch);
+            }
+            if !entry.0 {
+                return;
+            }
+        }
+        let first = scene.coronas.len();
+        for ((c, _), lit) in coronas.iter().zip(lit) {
+            if *lit <= 0.0 {
+                continue;
+            }
+            let mut corona = *c;
+            corona.brightness *= lit.min(1.0);
+            scene.coronas.push(corona);
+        }
+        if dist < SRC_RANGE {
+            with_light.extend_from_slice(&scene.coronas[first..]);
+        }
     }
 }

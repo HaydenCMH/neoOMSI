@@ -2,6 +2,7 @@
 
 use ::legacy_config::CfgFile;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct FontChar {
@@ -188,21 +189,28 @@ pub struct FontAtlas {
     pub font: Font,
     pub width: u32,
     pub height: u32,
-    /// Colour bitmap (RGBA8) and alpha bitmap (RGBA8; the red channel is the coverage).
-    pub color: Vec<u8>,
-    pub alpha: Vec<u8>,
+    /// Colour bitmap (RGBA8) and alpha bitmap (RGBA8; the red channel is the coverage),
+    /// shared by the fonts drawn from the same file.
+    pub color: Arc<[u8]>,
+    pub alpha: Arc<[u8]>,
 }
 
 impl FontAtlas {
     /// `color`/`alpha` are the decoded font bitmaps (same size). When the font has no
     /// separate colour bitmap, pass the alpha image for both.
-    pub fn new(font: Font, width: u32, height: u32, color: Vec<u8>, alpha: Vec<u8>) -> FontAtlas {
+    pub fn new(
+        font: Font,
+        width: u32,
+        height: u32,
+        color: impl Into<Arc<[u8]>>,
+        alpha: impl Into<Arc<[u8]>>,
+    ) -> FontAtlas {
         FontAtlas {
             font,
             width,
             height,
-            color,
-            alpha,
+            color: color.into(),
+            alpha: alpha.into(),
         }
     }
 
@@ -356,7 +364,7 @@ mod tests {
             ..Default::default()
         };
         let colors = [[255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 255, 255]];
-        let color = (0..height)
+        let color: Vec<u8> = (0..height)
             .flat_map(|_| colors.into_iter().flatten())
             .collect();
         FontAtlas::new(font, 3, height, color, vec![255; (3 * height * 4) as usize])

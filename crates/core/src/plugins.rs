@@ -7,7 +7,7 @@ use ::legacy_script::Host;
 use ::legacy_script::SysVar;
 
 /// Load every plugin of every content root (`OMSI_NO_PLUGINS=1` leaves them out).
-pub(crate) fn load() -> Plugins {
+pub(crate) fn load(map_dir: Option<&std::path::Path>) -> Plugins {
     if ::legacy_config::env::var_os("OMSI_NO_PLUGINS").is_some() {
         return Plugins::default();
     }
@@ -41,7 +41,26 @@ pub(crate) fn load() -> Plugins {
     if dirs.is_empty() {
         return Plugins::default();
     }
+    if let Some(map) = map_dir {
+        for root in dirs.iter().filter_map(|d| d.parent()) {
+            omsi_logfile(root, map);
+        }
+    }
     Plugins::load(&dirs, &HostConfig::detect())
+}
+
+/// OMSI's `logfile.txt` with its "map loaded!" line: GPM.dll waits for it in that file.
+fn omsi_logfile(root: &std::path::Path, map: &std::path::Path) {
+    let Some(name) = map.file_name() else { return };
+    let time = chrono::Local::now().format("%-I:%M:%S %p");
+    let text = format!(
+        "====================\r\n    Start logging\r\n====================\r\n\r\n\
+         0 {time} -  -       Information: maps\\{}\\global.cfg map loaded!\r\n",
+        name.to_string_lossy()
+    );
+    if let Err(e) = std::fs::write(root.join("logfile.txt"), text) {
+        log::warn!("could not write {}: {e}", root.join("logfile.txt").display());
+    }
 }
 
 /// The game's side of a plugin frame: the player's bus, when there is one.

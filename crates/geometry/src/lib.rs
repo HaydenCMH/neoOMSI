@@ -637,6 +637,96 @@ pub fn build_spline_mesh(
     mesh
 }
 
+pub fn group_spline_ranges(def: &Spline, mesh: &MeshData) -> Option<MeshData> {
+    let drawn: Vec<&::scenery::sli::SplineProfile> = def
+        .profiles
+        .iter()
+        .filter(|p| p.points.len() >= 2 && mesh.ranges.iter().any(|r| r.2 as usize == p.texture))
+        .collect();
+    if drawn.len() < 2
+        || drawn.len() != mesh.ranges.len()
+        || drawn
+            .iter()
+            .zip(&mesh.ranges)
+            .any(|(p, r)| p.texture != r.2 as usize)
+        || drawn
+            .iter()
+            .any(|p| def.textures.get(p.texture).is_some_and(|t| t.alpha >= 2))
+    {
+        return None;
+    }
+    // (the profiles of each range to be, in drawing order)
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for (j, profile) in drawn.iter().enumerate() {
+        let joins = groups
+            .iter()
+            .rposition(|g| drawn[g[0]].texture == profile.texture)
+            .filter(|&g| {
+                groups[g + 1..]
+                    .iter()
+                    .flatten()
+                    .all(|&i| !profiles_share_face(drawn[i], profile))
+            });
+        match joins {
+            Some(g) => groups[g].push(j),
+            None => groups.push(vec![j]),
+        }
+    }
+    if groups.len() == drawn.len() {
+        return None;
+    }
+    let mut out = MeshData {
+        positions: mesh.positions.clone(),
+        normals: mesh.normals.clone(),
+        uvs: mesh.uvs.clone(),
+        indices: Vec::with_capacity(mesh.indices.len()),
+        ranges: Vec::with_capacity(groups.len()),
+        one_sided: mesh.one_sided,
+    };
+    for group in &groups {
+        let start = out.indices.len() as u32;
+        for &j in group {
+            let (first, count, _) = mesh.ranges[j];
+            out.indices
+                .extend_from_slice(&mesh.indices[first as usize..(first + count) as usize]);
+        }
+        let count = out.indices.len() as u32 - start;
+        out.ranges.push((start, count, mesh.ranges[group[0]].2));
+    }
+    Some(out)
+}
+
+/// Whether two profiles of a spline have faces at (nearly) one place: a stretch of one lies
+/// within 10 cm of a stretch of the other, along more than a centimetre
+fn profiles_share_face(
+    a: &::scenery::sli::SplineProfile,
+    b: &::scenery::sli::SplineProfile,
+) -> bool {
+    const NEAR: f32 = 0.1;
+    let stretches = |p: &::scenery::sli::SplineProfile| {
+        p.points
+            .windows(2)
+            .map(|w| (Vec2::new(w[0].x, w[0].z), Vec2::new(w[1].x, w[1].z)))
+            .collect::<Vec<_>>()
+    };
+    let along = |(a0, a1): (Vec2, Vec2), (b0, b1): (Vec2, Vec2)| {
+        let length = (a1 - a0).length();
+        if length < 1e-4 {
+            return false;
+        }
+        let dir = (a1 - a0) / length;
+        let across = dir.perp();
+        if across.dot(b0 - a0).abs() > NEAR || across.dot(b1 - a0).abs() > NEAR {
+            return false;
+        }
+        let (t0, t1) = (dir.dot(b0 - a0), dir.dot(b1 - a0));
+        t0.max(t1).min(length) - t0.min(t1).max(0.0) > 0.01
+    };
+    let (sa, sb) = (stretches(a), stretches(b));
+    sa.iter()
+        .any(|&x| sb.iter().any(|&y| along(x, y) || along(y, x)))
+}
+
 /// The profiles of the hole a spline laid with `[spline_terrain_align]` cuts into the ground,
 /// as points (x across, height, how far that end of the hole stands off the spline's end):
 /// the `.sli`'s own `[terrainholeprofile]`s, or else those Omsi.exe makes from the drawn
@@ -1247,6 +1337,79 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_point_the_probes_take_on_a_triangle_is_inside_its_reach() {
+        // (a small xorshift: the same triangles every run)
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut rnd = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 40) as f32 / (1u64 << 24) as f32
+        };
+        let mut taken = 0;
+        for k in 0..4000 {
+            // slivers too: one corner drawn close to the line through the others
+            let a = Vec3::new(rnd() * 40.0, rnd() * 40.0, 0.0);
+            let b = Vec3::new(rnd() * 40.0, rnd() * 40.0, 0.0);
+            let c = if k % 4 == 0 {
+                a.lerp(b, rnd()) + Vec3::new(rnd() * 0.01, rnd() * 0.01, 0.0)
+            } else {
+                Vec3::new(rnd() * 40.0, rnd() * 40.0, 0.0)
+            };
+            let r = drive_reach(&[a, b, c]);
+            // (the furthest the tolerance reaches: -1e-4 on two corners, the rest on the third)
+            for w in [
+                [1.0002, -1e-4, -1e-4],
+                [-1e-4, 1.0002, -1e-4],
+                [-1e-4, -1e-4, 1.0002],
+            ] {
+                let (x, y) = (
+                    a.x * w[0] + b.x * w[1] + c.x * w[2],
+                    a.y * w[0] + b.y * w[1] + c.y * w[2],
+                );
+                if r[0] > f32::MIN {
+                    taken += 1;
+                    assert!(
+                        x >= r[0] && y >= r[1] && x <= r[2] && y <= r[3],
+                        "{a} {b} {c} ({x}, {y}) {r:?}"
+                    );
+                }
+            }
+            for _ in 0..50 {
+                let (x, y) = (rnd() * 44.0 - 2.0, rnd() * 44.0 - 2.0);
+                let d = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+                if d.abs() < 1e-9 {
+                    continue;
+                }
+                let l1 = ((b.y - c.y) * (x - c.x) + (c.x - b.x) * (y - c.y)) / d;
+                let l2 = ((c.y - a.y) * (x - c.x) + (a.x - c.x) * (y - c.y)) / d;
+                let l3 = 1.0 - l1 - l2;
+                if l1.min(l2).min(l3) >= -1e-4 {
+                    taken += 1;
+                    assert!(
+                        x >= r[0] && y >= r[1] && x <= r[2] && y <= r[3],
+                        "{a} {b} {c} ({x}, {y}) {r:?}"
+                    );
+                }
+            }
+        }
+        assert!(taken > 1000);
+    }
+
+    #[test]
+    fn a_probe_past_a_long_triangle_tip_is_inside_its_reach() {
+        // (TruckiHD's case: the tolerance reaches further along the long side than its height)
+        let t = [
+            Vec3::new(0.0, 4.0, 0.0),
+            Vec3::new(30.0, 4.0, 0.0),
+            Vec3::new(31.0, 4.1, 0.0),
+        ];
+        let r = drive_reach(&t);
+        let (x, y) = (31.002f32, 4.100012f32);
+        assert!(x >= r[0] && y >= r[1] && x <= r[2] && y <= r[3], "{r:?}");
+    }
+
+    #[test]
     fn static_mesh_merge_preserves_geometry_uvs_and_material_order() {
         let a = MeshData {
             positions: vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z],
@@ -1833,6 +1996,132 @@ mod tests {
         assert_eq!(spline_station_count(&def, &plain_curve(4.0, 0.0)), 1);
     }
 
+    /// A spline whose profiles are (texture, x from, x to, height)
+    fn profiled(profiles: &[(usize, f32, f32, f32)]) -> Spline {
+        let mut def = Spline::default();
+        let textures = profiles.iter().map(|p| p.0).max().unwrap_or(0) + 1;
+        def.textures.resize(textures, Default::default());
+        for &(texture, x0, x1, z) in profiles {
+            def.profiles.push(::scenery::sli::SplineProfile {
+                texture,
+                points: [x0, x1]
+                    .map(|x| ::scenery::sli::SplineProfilePoint {
+                        x,
+                        z,
+                        v_scale: 0.1,
+                        ..Default::default()
+                    })
+                    .to_vec(),
+            });
+        }
+        def
+    }
+
+    /// The triangles of each texture slot, whatever order the ranges draw them in.
+    fn triangles_by_slot(m: &MeshData) -> Vec<(u32, Vec<[u32; 3]>)> {
+        let mut slots: Vec<(u32, Vec<[u32; 3]>)> = Vec::new();
+        for &(first, count, slot) in &m.ranges {
+            let tris = m.indices[first as usize..(first + count) as usize]
+                .chunks_exact(3)
+                .map(|t| [t[0], t[1], t[2]]);
+            match slots.iter_mut().find(|s| s.0 == slot) {
+                Some(s) => s.1.extend(tris),
+                None => slots.push((slot, tris.collect())),
+            }
+        }
+        for s in &mut slots {
+            s.1.sort_unstable();
+        }
+        slots.sort_unstable_by_key(|s| s.0);
+        slots
+    }
+
+    /// A road of lanes, gutters and verges side by side draws one range per texture, with
+    /// the same triangles as one range per profile
+    #[test]
+    fn spline_ranges_group_by_texture() {
+        // (RQ_10,5_2spur_7,5m_Oneway.sli: ten profiles over three textures)
+        let def = profiled(&[
+            (0, -4.15, -4.05, 0.1),
+            (0, -4.05, -3.95, 0.1),
+            (1, -3.95, -3.85, 0.1),
+            (1, -3.85, -3.75, 0.1),
+            (2, -3.75, 0.0, 0.1),
+            (2, 0.0, 3.75, 0.1),
+            (1, 3.75, 3.85, 0.1),
+            (1, 3.85, 3.95, 0.1),
+            (0, 3.95, 4.05, 0.1),
+            (0, 4.05, 4.15, 0.1),
+        ]);
+        let mesh = build_spline_mesh(&def, &plain_curve(30.0, 0.0), false, DVec3::ZERO);
+        assert_eq!(mesh.ranges.len(), 10);
+        let grouped = group_spline_ranges(&def, &mesh).unwrap();
+        assert_eq!(
+            grouped.ranges.iter().map(|r| r.2).collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+        assert_eq!(grouped.indices.len(), mesh.indices.len());
+        assert_eq!(grouped.positions, mesh.positions);
+        assert_eq!(grouped.uvs, mesh.uvs);
+        assert!(grouped.one_sided);
+        assert_eq!(triangles_by_slot(&grouped), triangles_by_slot(&mesh));
+        // one range already per texture: nothing to do
+        let single = build_spline_mesh(
+            &strip(2.0, 0.1),
+            &plain_curve(30.0, 0.0),
+            false,
+            DVec3::ZERO,
+        );
+        assert!(group_spline_ranges(&strip(2.0, 0.1), &single).is_none());
+    }
+
+    #[test]
+    fn spline_ranges_keep_faces_drawn_over_others() {
+        let beside = profiled(&[
+            (0, -2.0, 2.0, 0.0),
+            (1, -1.0, 1.0, 0.01),
+            (0, 2.0, 3.0, 0.0),
+        ]);
+        let mesh = build_spline_mesh(&beside, &plain_curve(20.0, 0.0), false, DVec3::ZERO);
+        let grouped = group_spline_ranges(&beside, &mesh).unwrap();
+        assert_eq!(
+            grouped.ranges.iter().map(|r| r.2).collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+        let under = profiled(&[
+            (0, -2.0, 2.0, 0.0),
+            (1, -1.0, 1.0, 0.01),
+            (0, -0.5, 0.5, 0.0),
+        ]);
+        let mesh = build_spline_mesh(&under, &plain_curve(20.0, 0.0), false, DVec3::ZERO);
+        assert!(group_spline_ranges(&under, &mesh).is_none());
+        // a wall (a vertical face) on the road's edge only meets it at a line
+        let wall = profiled(&[(0, -2.0, 2.0, 0.0), (1, 2.0, 2.0, 0.0), (0, 2.0, 3.0, 0.0)]);
+        let mut def = wall.clone();
+        def.profiles[1].points[1].z = 1.0;
+        let mesh = build_spline_mesh(&def, &plain_curve(20.0, 0.0), false, DVec3::ZERO);
+        assert_eq!(group_spline_ranges(&def, &mesh).unwrap().ranges.len(), 2);
+    }
+
+    /// Blended textures keep their profiles' order, and ranges that are not the profiles'
+    /// (a slot taken out) are left alone unless whole textures are missing
+    #[test]
+    fn spline_ranges_leave_blends_and_foreign_ranges() {
+        let mut def = profiled(&[(0, -2.0, 0.0, 0.0), (1, 0.0, 1.0, 0.0), (0, 1.0, 2.0, 0.0)]);
+        let mesh = build_spline_mesh(&def, &plain_curve(20.0, 0.0), false, DVec3::ZERO);
+        assert!(group_spline_ranges(&def, &mesh).is_some());
+        // without texture 1 (a [terrainmapping] slot drawn with the ground)
+        let mut rest = mesh.clone();
+        rest.ranges.retain(|r| r.2 != 1);
+        assert_eq!(group_spline_ranges(&def, &rest).unwrap().ranges.len(), 1);
+        // one range missing that the profiles have
+        let mut torn = mesh.clone();
+        torn.ranges.remove(2);
+        assert!(group_spline_ranges(&def, &torn).is_none());
+        def.textures[0].alpha = 2;
+        assert!(group_spline_ranges(&def, &mesh).is_none());
+    }
+
     /// The skew shifts every cross-section, running from its start value to its end value.
     #[test]
     fn skew_runs_along_the_spline() {
@@ -2387,6 +2676,20 @@ impl Probe {
     }
 }
 
+/// Triangle `t`'s plan bounds, widened by what weights down to -1e-4 add: 2e-4 of its extent.
+fn drive_reach(t: &[Vec3; 3]) -> [f32; 4] {
+    const ALL: [f32; 4] = [f32::MIN, f32::MIN, f32::MAX, f32::MAX];
+    let (p, q, r) = (t[0].truncate(), t[1].truncate(), t[2].truncate());
+    let area2 = (q - p).perp_dot(r - p).abs();
+    let shortest = (q - r).length().min((r - p).length()).min((p - q).length());
+    if area2 < 1e-9 || shortest < 1e-6 {
+        return ALL;
+    }
+    let (lo, hi) = (p.min(q).min(r), p.max(q).max(r));
+    let m = (hi - lo) * 2.5e-4 + 1e-3;
+    [lo.x - m.x, lo.y - m.y, hi.x + m.x, hi.y + m.y]
+}
+
 /// Upward-facing triangles of one tile (tile-local x/y in metres, absolute z), bucketed on a
 /// coarse grid so that a wheel asks only the few faces around it.
 #[derive(Debug, Clone, Default)]
@@ -2403,6 +2706,9 @@ pub struct DriveGrid {
     /// Per cell, the range of `items` that lists its triangles (`cells² + 1` offsets).
     start: Vec<u32>,
     items: Vec<u32>,
+    /// Per triangle, the box (min x, min y, max x, max y) outside which the probes never
+    /// take a point to lie on it (see [`drive_reach`]).
+    reach: Vec<[f32; 4]>,
 }
 
 #[derive(Debug, Clone)]
@@ -2424,6 +2730,7 @@ impl DriveGrid {
             + self.surf_maps.capacity() * std::mem::size_of::<Arc<HeightMap>>()
             + self.start.capacity() * 4
             + self.items.capacity() * 4
+            + self.reach.capacity() * 16
     }
 
     /// Add a triangle; walls (faces steeper than about 70°) are left out, they are nothing
@@ -2501,6 +2808,7 @@ impl DriveGrid {
                 surf_index += 1;
             }
         }
+        self.reach = keep.iter().map(drive_reach).collect();
         self.tris = keep;
         self.ridge = keep_ridge;
         self.surf_tris = keep_surf;
@@ -2560,7 +2868,7 @@ impl DriveGrid {
         let k = cy * self.cells + cx;
         let mut best: Option<(f32, Vec3)> = None;
         for &i in &self.items[self.start[k] as usize..self.start[k + 1] as usize] {
-            if self.ridge.get(i as usize).copied().unwrap_or(false) {
+            if self.ridge.get(i as usize).copied().unwrap_or(false) || !self.reaches(i, x, y) {
                 continue;
             }
             let [a, b, c] = self.tris[i as usize];
@@ -2593,6 +2901,13 @@ impl DriveGrid {
         best
     }
 
+    #[inline]
+    fn reaches(&self, i: u32, x: f32, y: f32) -> bool {
+        self.reach
+            .get(i as usize)
+            .is_none_or(|r| x >= r[0] && y >= r[1] && x <= r[2] && y <= r[3])
+    }
+
     /// The wall tops over tile-local (x, y) alone, as [`DriveGrid::probe`] gives the rest.
     pub fn probe_walls(&self, x: f32, y: f32, z_top: f32) -> Probe {
         self.probe_kind(x, y, z_top, true)
@@ -2609,7 +2924,9 @@ impl DriveGrid {
         }
         let k = cy * self.cells + cx;
         for &i in &self.items[self.start[k] as usize..self.start[k + 1] as usize] {
-            if self.ridge.get(i as usize).copied().unwrap_or(false) != ridges {
+            if self.ridge.get(i as usize).copied().unwrap_or(false) != ridges
+                || !self.reaches(i, x, y)
+            {
                 continue;
             }
             let [a, b, c] = self.tris[i as usize];

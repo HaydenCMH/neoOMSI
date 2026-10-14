@@ -382,6 +382,31 @@ fn trip_times_from_the_profile() {
     );
 }
 
+/// An X10 Berlin S-Bahn trip (S7_Tgn_Sav: from the map's edge, Zoo at 1.5 min) comes at
+/// its departure time; a bus or a track beginning at a stop has its layover (#342).
+#[test]
+fn a_train_from_the_maps_edge_comes_at_its_departure() {
+    let s7 = ::timetable::TripProfile {
+        name: "hvz".into(),
+        factor: 3.5,
+        man_arr_time: vec![(0, 1.5)],
+        man_dep_time: vec![(0, 2.0)],
+        ..Default::default()
+    };
+    let t = TripTimes::new(&[10654593], Some(&s7), &link);
+    assert_eq!(t.stations[0], (90.0, 120.0));
+    assert!(spawn::comes_at_departure(true, &t));
+    assert!(!spawn::comes_at_departure(false, &t));
+    let plain = ::timetable::TripProfile {
+        name: "p".into(),
+        factor: 3.5,
+        ..Default::default()
+    };
+    let from_stop = TripTimes::new(&[1, 2], Some(&plain), &link);
+    assert_eq!(from_stop.stations[0].0, 0.0);
+    assert!(!spawn::comes_at_departure(true, &from_stop));
+}
+
 fn planned(departure: f64, stops: &[(f64, f64, f64)]) -> PlannedTrip {
     let stops: Vec<PlannedStop> = stops
         .iter()
@@ -476,6 +501,55 @@ fn a_page_can_go_back_to_an_earlier_stop() {
 }
 
 #[test]
+fn the_players_trip_after_midnight_is_on_the_board() {
+    // #299: trip ended at stop 11 at 24:12, the next leaves there at 24:22, clock 0:14:11
+    let h = |m: f64| 24.0 * 3600.0 + m * 60.0;
+    let mut ended = planned(
+        h(-4.0),
+        &[(0.0, h(-4.0), h(-4.0)), (500.0, h(12.0), h(12.0))],
+    );
+    let mut next = planned(
+        h(22.0),
+        &[(500.0, h(22.0), h(22.0)), (0.0, h(30.0), h(30.0))],
+    );
+    ended.stops[0].object_id = 10;
+    ended.stops[1].object_id = 11;
+    next.stops[0].object_id = 11;
+    next.stops[1].object_id = 10;
+    let d = PlayerDuty {
+        line: "5".into(),
+        tour: "1".into(),
+        trips: vec![ended, next],
+        trip_index: 0,
+        first_trip: 0,
+        statistics: Default::default(),
+        completed_report: None,
+        next_stop: 1,
+        at_stop: true,
+        arrived_late: None,
+        done: true,
+        left_late: None,
+        held_back: false,
+        odo: 0.0,
+        last_pos: None,
+        arrival_odo: 0.0,
+        left_odo: 0.0,
+        placed: true,
+        trip_changed: false,
+        picked: false,
+        first_update: None,
+        heading: 0.0,
+    };
+    let now = 14.0 * 60.0 + 11.0;
+    let at_11: Vec<f64> = d.board_visits(11, now).into_iter().map(|v| v.0).collect();
+    // standing there, and leaving at 0:22
+    assert_eq!(at_11, vec![now, 22.0 * 60.0]);
+    // late: due now
+    let late = 25.0 * 60.0;
+    assert_eq!(d.board_visits(11, late)[1].0, late);
+}
+
+#[test]
 fn a_loop_does_not_jump_to_the_stop_over_the_road() {
     // out along y = 0 to x = 1000, back along y = 12: stop 1 at x = 100 going out, stop 5
     // at x = 100 coming back, 12 m apart (#254)
@@ -531,6 +605,59 @@ fn a_loop_does_not_jump_to_the_stop_over_the_road() {
     assert_eq!(
         d.next_stop, 2,
         "the duty goes on to stop 2, not over the road to stop 5"
+    );
+}
+
+#[test]
+fn passing_a_later_overlapping_stop_does_not_skip_the_trip() {
+    // Leaving a terminal stand can pass through the service circle of a later stop on the
+    // same route.  It is not a missed-stop recovery unless the bus has actually opened its
+    // doors there.
+    let trip = planned(
+        0.0,
+        &[
+            (0.0, 0.0, 0.0),
+            (100.0, 60.0, 60.0),
+            (200.0, 120.0, 120.0),
+            (300.0, 180.0, 180.0),
+            (400.0, 240.0, 240.0),
+        ],
+    );
+    let mut d = PlayerDuty {
+        line: "5".into(),
+        tour: "1".into(),
+        trips: vec![trip],
+        trip_index: 0,
+        first_trip: 0,
+        statistics: Default::default(),
+        completed_report: None,
+        next_stop: 1,
+        at_stop: false,
+        arrived_late: None,
+        done: false,
+        left_late: Some(0.0),
+        held_back: false,
+        odo: 200.0,
+        last_pos: Some(glam::DVec3::new(0.0, 0.0, 0.0)),
+        arrival_odo: 0.0,
+        left_odo: 0.0,
+        placed: true,
+        trip_changed: false,
+        picked: true,
+        first_update: None,
+        heading: 90.0,
+    };
+
+    d.advance_while_serving(glam::DVec3::new(300.0, 0.0, 0.0), 180.0, false);
+    assert_eq!(
+        d.next_stop, 1,
+        "passing the overlapping stop must not skip ahead"
+    );
+
+    d.advance_while_serving(glam::DVec3::new(300.0, 0.0, 0.0), 180.0, true);
+    assert_eq!(
+        d.next_stop, 3,
+        "serving the later stop may recover missed progress"
     );
 }
 
@@ -778,4 +905,230 @@ fn a_service_trip_without_a_line_shows_none() {
         "[trip]\nS_Schulz_Hallenbad\nSchwimmkinder\n&\n",
     );
     assert_eq!(bus_line(&swim), "&");
+}
+
+#[test]
+fn school_days_select_bit_8_and_school_holidays_bit_9() {
+    let calendar = ::map::Calendar {
+        ranges: vec![::map::HolidayRange {
+            start: 20230622,
+            end: 20230804,
+            name: "Sommerferien".into(),
+        }],
+        holidays: vec![],
+    };
+    // Tuesdays 2023-06-20 and 2023-06-27.
+    let school_day = ::simulation::SimClock {
+        year: 2023,
+        day_of_year: 171,
+        ..Default::default()
+    };
+    let in_holidays = ::simulation::SimClock {
+        day_of_year: 178,
+        ..school_day.clone()
+    };
+    assert_eq!(day_bits(&calendar, &school_day), (1 << 1, 1 << 8));
+    assert_eq!(day_bits(&calendar, &in_holidays), (1 << 1, 1 << 9));
+}
+
+#[test]
+fn a_tour_runs_on_its_days_and_a_night_tour_on_the_eve() {
+    let tour = |mask: i32, departure: f32| ::timetable::Tour {
+        extra: mask.to_string(),
+        trips: vec![::timetable::TourTrip { departure, ..Default::default() }],
+        ..Default::default()
+    };
+    let weekdays = (0..5).fold(0, |m, d| m | 1 << d) | 3 << 8;
+    let saturday = 1 << 5 | 3 << 8;
+    // a Tuesday, a school day
+    let tuesday = ((1 << 1, 1 << 8), 1 << 2);
+    assert!(tour_runs(&tour(weekdays, 6.0 * 60.0), tuesday.0, tuesday.1));
+    assert!(!tour_runs(&tour(saturday, 6.0 * 60.0), tuesday.0, tuesday.1));
+    // a Friday night: the Saturday tour's trips after 24:00 belong to it
+    let friday = ((1 << 4, 1 << 8), 1 << 5);
+    assert!(tour_runs(&tour(saturday, 24.0 * 60.0 + 49.0), friday.0, friday.1));
+    assert!(!tour_runs(&tour(saturday, 23.0 * 60.0), friday.0, friday.1));
+    // school days only, in the holidays
+    assert!(!tour_runs(&tour(1 << 1 | 1 << 8, 6.0 * 60.0), (1 << 1, 1 << 9), 1 << 2));
+}
+
+/// A Saturday after one midnight on the traffic's clock: departures of one trip over stops
+/// 1, 2, 3 (ten minutes apart), as (time, tour mask).
+fn saturday_after_midnight(departures: &[(f64, i32)]) -> Schedule {
+    let trip = ::timetable::Trip {
+        line: "N1".into(),
+        terminus: "T".into(),
+        stations: vec![1, 2, 3],
+        ..Default::default()
+    };
+    let times = TripTimes {
+        stations: vec![(0.0, 0.0), (600.0, 600.0), (1200.0, 1200.0)],
+        stops: vec![true; 3],
+        kinds: vec![0; 3],
+        duration: 1200.0,
+    };
+    let departures: Vec<Departure> = departures
+        .iter()
+        .map(|&(time, mask)| Departure {
+            time,
+            trip: 0,
+            profile: 0,
+            line: "N1".into(),
+            ai_group: String::new(),
+            tour: "1".into(),
+            mask,
+            spawned: false,
+            base: DAY,
+        })
+        .collect();
+    Schedule {
+        data: ::timetable::TimetableData {
+            trips: vec![trip],
+            ..Default::default()
+        },
+        trip_departures: vec![(0..departures.len()).collect()],
+        departures,
+        times: vec![vec![times]],
+        visits: HashMap::from([(1, vec![(0, 0)]), (2, vec![(0, 1)]), (3, vec![(0, 2)])]),
+        day_bits: (1 << 5, 1 << 8),
+        eve_bits: (1 << 4, 1 << 8),
+        day_base: DAY,
+        ..Default::default()
+    }
+}
+
+const FRIDAY: i32 = 1 << 4 | 1 << 8;
+const SATURDAY: i32 = 1 << 5 | 1 << 8;
+
+#[test]
+fn the_day_befores_night_trips_run_after_midnight() {
+    let s = saturday_after_midnight(&[
+        (10.0 * 60.0, SATURDAY),
+        (DAY + 22.0 * 60.0, FRIDAY),
+        (DAY + 22.0 * 60.0, SATURDAY),
+    ]);
+    // at 0:25: Saturday's 0:10, and Friday's tour's 24:22 - Saturday's 24:22 runs tonight
+    assert_eq!(s.due(25.0 * 60.0, 20.0 * 60.0), vec![(0, DAY), (1, 0.0)]);
+}
+
+#[test]
+fn a_run_of_the_day_before_does_not_take_todays() {
+    let mut s = saturday_after_midnight(&[
+        (23.0 * 3600.0 + 50.0 * 60.0, FRIDAY | SATURDAY),
+        (DAY + 5.0 * 60.0, FRIDAY | SATURDAY),
+    ]);
+    // Friday's 23:50 is still on the road at midnight; Friday's 24:05 ran this morning
+    for d in &mut s.departures {
+        d.spawned = true;
+        d.base = 0.0;
+    }
+    // Saturday's 23:50 runs all the same, Friday's 24:05 not twice
+    assert_eq!(s.due(23.0 * 3600.0 + 55.0 * 60.0, 600.0), vec![(0, DAY)]);
+    assert!(s.due(10.0 * 60.0, 600.0).is_empty());
+    // the player's tour is no one else's, whatever day it was taken on
+    s.player_tour = Some(("N1".into(), "1".into()));
+    assert!(s.due(23.0 * 3600.0 + 55.0 * 60.0, 600.0).is_empty());
+}
+
+#[test]
+fn the_boards_show_the_buses_of_the_night_after_midnight() {
+    let mut s = saturday_after_midnight(&[
+        (23.0 * 3600.0 + 50.0 * 60.0, FRIDAY),
+        (DAY + 22.0 * 60.0, FRIDAY),
+        (DAY + 22.0 * 60.0, SATURDAY),
+    ]);
+    // Friday's 23:50 is on the road, due at stop 3 at 0:10
+    s.departures[0].spawned = true;
+    s.departures[0].base = 0.0;
+    let on_road = HashMap::from([(
+        0,
+        OnRoad {
+            next: Some(10.0 * 60.0),
+            dwelling: false,
+            late: 0.0,
+        },
+    )]);
+    let now = 14.0 * 60.0;
+    let at = |stop: i64| -> Vec<f64> {
+        let mut l: Vec<f64> = s
+            .stop_list(stop, now, &on_road, None)
+            .iter()
+            .map(|v| v.0)
+            .collect();
+        l.sort_by(f64::total_cmp);
+        l
+    };
+    // the 23:50 is past stop 2 and overdue at stop 3; Friday's 24:22 comes at 0:32
+    assert_eq!(at(2), vec![32.0 * 60.0]);
+    assert_eq!(at(3), vec![now, 42.0 * 60.0]);
+}
+
+/// #393: the boards show when a bus leaves, not when it arrives.
+#[test]
+fn the_boards_show_when_a_bus_leaves() {
+    let mut s = saturday_after_midnight(&[(10.0 * 60.0, SATURDAY)]);
+    // at stop 2 from 0:20:00 to 0:20:30
+    s.times[0][0].stations[1] = (600.0, 630.0);
+    let leaves = |s: &Schedule, now: f64, on_road: &HashMap<usize, OnRoad>| -> Vec<f64> {
+        s.stop_list(2, now, on_road, None)
+            .iter()
+            .map(|v| v.0)
+            .collect()
+    };
+    let at_20_30 = 20.0 * 60.0 + 30.0;
+    // not on the road yet
+    assert_eq!(leaves(&s, 12.0 * 60.0, &HashMap::new()), vec![at_20_30]);
+    // on its way, two minutes late
+    s.departures[0].spawned = true;
+    let late = HashMap::from([(
+        0,
+        OnRoad {
+            next: Some(at_20_30),
+            dwelling: false,
+            late: 120.0,
+        },
+    )]);
+    assert_eq!(leaves(&s, 12.0 * 60.0, &late), vec![at_20_30 + 120.0]);
+    // standing there
+    let standing = HashMap::from([(
+        0,
+        OnRoad {
+            next: Some(at_20_30),
+            dwelling: true,
+            late: 0.0,
+        },
+    )]);
+    assert_eq!(leaves(&s, 20.0 * 60.0 + 10.0, &standing), vec![at_20_30]);
+    assert_eq!(leaves(&s, 21.0 * 60.0, &standing), vec![21.0 * 60.0]);
+}
+
+/// #393: the boards' two hours count to when a bus leaves.
+#[test]
+fn the_boards_look_two_hours_ahead_by_departure() {
+    let mut s = saturday_after_midnight(&[(3.0 * 3600.0, SATURDAY)]);
+    // at stop 2 from 3:10:00 to 3:10:30
+    s.times[0][0].stations[1] = (600.0, 630.0);
+    let leaves = |now: f64| -> Vec<f64> {
+        s.stop_list(2, now, &HashMap::new(), None)
+            .iter()
+            .map(|v| v.0)
+            .collect()
+    };
+    let at_3_10_30 = 3.0 * 3600.0 + 10.0 * 60.0 + 30.0;
+    // it arrives within two hours, but leaves after
+    assert!(leaves(at_3_10_30 - BOARD_AHEAD - 15.0).is_empty());
+    assert_eq!(leaves(at_3_10_30 - BOARD_AHEAD), vec![at_3_10_30]);
+}
+
+#[test]
+fn the_day_before_new_year() {
+    let mut c = ::simulation::SimClock {
+        year: 2027,
+        day_of_year: 1,
+        ..Default::default()
+    };
+    let d = day_before(&c);
+    assert_eq!((d.year, d.day_of_year), (2026, 365));
+    c.day_of_year = 60;
+    assert_eq!(day_before(&c).day_of_year, 59);
 }
