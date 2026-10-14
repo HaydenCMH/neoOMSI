@@ -547,7 +547,7 @@
           "name": "Active mods"
         },
         "none": "No mods active",
-        "none_desc": "No mods were found. Please note that OMSI 2 content is not counted as mods.\n\n\n\nYou can install mods from the Mods folder as archives or folders.",
+        "none_desc": "No mods were found. Please note that OMSI 2 folder content is not counted as mods.\n\nYou can install mods in the Mods folder as archives or folders.",
         "open": {
           "button": "Open",
           "desc": "Opens the Mods folder",
@@ -585,7 +585,7 @@
           "name": "Check for updates automatically"
         },
         "update_checking": "Looking for updates...",
-        "update_current": "This is neoOMSI {version}",
+        "update_current": "Current version: {version}",
         "update_failed": "The last check failed",
         "update_latest": "{version} is the latest version",
         "update_now": {
@@ -1564,13 +1564,6 @@
     }
   },
   "start": {
-    "entry": {
-      "start": "Start",
-      "continue": "Continue",
-      "join": "Join multiplayer",
-      "options": "Options",
-      "quit": "Quit"
-    },
     "maps": {
       "nav": "Start",
       "head": "Choose a map",
@@ -1632,7 +1625,7 @@
       "weather": "WEATHER",
       "presets": "PRESETS",
       "icao": "AIRPORT (ICAO)",
-      "onfoot": "Start on foot (no bus needed)",
+      "onfoot": "Start on foot (no bus)",
       "onfoot_short": "On foot",
       "icao_ph": "ICAO code, e.g. EDDB",
       "icao_auto": "Empty: nearest airport to the map",
@@ -1672,18 +1665,16 @@
       "placeholder": "Session code or server address",
       "hint": "Paste a code from a friend, or an IP / address with port. Leave empty to search the local network.",
       "go": "Join",
-      "checking": "Checking…",
+      "checking": "Checking...",
       "online": "Server online  -  {map}  -  {players}/{max} players",
       "offline": "Server not reachable: {error}",
       "offline_short": "Offline",
       "game": "YOUR GAME",
       "host": "Host my next drive",
-      "host_note": "Friends join with the code you get when the drive starts.",
+      "host_note": "Friends can join your session as soon as you start it.",
       "servers_note": "Only servers that answer can be joined.",
       "no_servers": "No saved servers yet."
     },
-
-
     "row": {
       "vehicle": "Vehicle",
       "time": "Time",

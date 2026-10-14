@@ -137,7 +137,7 @@
         },
         "head_tracking_invert": {
           "name": "Invertovat sledování pohybu hlavy",
-          "desc": "Které osy sledování pohybu hlavy jsou otočeny"
+          "desc": "Které osy sledování pohybu hlavy jsou invertovány"
         },
         "free_look": {
           "desc": "Nastavit volný pohled, křížek a názvy ovládání"
@@ -145,7 +145,7 @@
       },
       "controls": {
         "drive_keys": {
-          "desc": "Které klávesy řídí vozidlo",
+          "desc": "Kterými klávesami ovládáte vozidlo",
           "name": "Klávesy pro řízení"
         },
         "ff": {
@@ -197,7 +197,7 @@
           "name": "Úhel volantu při plném zámku"
         },
         "wheel_range": {
-          "desc": "Celkové otáčení volantu od zámku do zámku",
+          "desc": "Celkové otočení volantu od jednoho konce zámku do druhého",
           "name": "Rozsah otáčení volantu"
         }
       },
@@ -270,7 +270,7 @@
         },
         "blinker_cancel": {
           "desc": "Zapnuto: Autobusový skript vypne blinkr po projetí zatáčky. Vypnuto: blinkr zůstane zapnutý, dokud jej nevypneš",
-          "name": "Blinky se ruší samy"
+          "name": "Blinkry se ruší samy"
         },
         "brake_hold": {
           "desc": "Vozidlo udržuje sešlápnutou brzdu, dokud nešlápnete na plyn",
@@ -302,7 +302,7 @@
           "name": "Zaměřovač"
         },
         "free_look": {
-          "desc": "Myš otočí pohled a střed obrazovky ovládá ovladače; podržením levého Altu zobrazíte kurzor",
+          "desc": "Myší otáčite pohled, středem obrazovky ovládáte tlačítka; podržením levého Altu zobrazíte kurzor a přerušíte otáčení pohledu",
           "name": "Volný pohled"
         },
         "tooltips": {
@@ -342,7 +342,7 @@
         },
         "exact_fare": {
           "desc": "Cestující platí přesnou částku, takže řidič nevrací zpátky",
-          "name": "Cestující platí přesnou cenu"
+          "name": "Cestující platí přesnou částku"
         },
         "maintenance": {
           "name": "Údržba"
@@ -466,7 +466,7 @@
           "desc": "Uhlazuje hrany po výkresu"
         },
         "shadow_blobs": {
-          "name": "Stínové bloby",
+          "name": "Stínové skvrny",
           "desc": "Zobrazí jednoduché tmavé skvrny pod objekty, které samy o sobě nemají žádný stín"
         },
         "mirror_refresh": {
@@ -607,7 +607,7 @@
         },
         "nav_turn": {
           "desc": "Zobrazí další odbočení v horní části mapy",
-          "name": "Instrukce k zatáčce"
+          "name": "Instrukce k odbočení"
         },
         "navigator": {
           "desc": "Povolí nebo zakáže minimapu",
@@ -704,18 +704,18 @@
         "boarding": {
           "auto": "Zaplatit a vzít si jízdenku",
           "pay": "Řidič prodává lístky",
-          "walk": "Pouze nastoupí"
+          "walk": "Cestující pouze nastoupí"
         },
         "pax_motion": {
           "natural": "Přirozený",
           "omsi": "OMSI 2"
         },
         "maintenance": {
-          "0": "Nekonečný (bez opotřebení)",
-          "1": "Velmi špatné",
+          "0": "Nekonečná (bez opotřebení)",
+          "1": "Velmi špatná",
           "2": "Špatné",
           "3": "Normální",
-          "4": "Dobré"
+          "4": "Dobrá"
         },
         "ai_max_scheduled": {
           "0": "Vše",
@@ -767,7 +767,7 @@
         },
         "pax_voices": {
           "all": "Pozdrav a jízdenky",
-          "tickets": "Pouze jízdenka o kterou žádal",
+          "tickets": "Cestující pouze požádá o jízdenku",
           "off": "Ticho"
         },
         "navigator_corner": {
@@ -888,7 +888,7 @@
         },
         "action": {
           "switch": {
-            "name": "Jezděte s dalším vozidlem",
+            "name": "Jezdit s dalším vozidlem",
             "desc": "Vezměte jiné vozidlo stojící ve světě",
             "button": "Přepnout"
           },
@@ -897,18 +897,18 @@
             "desc": "Umístěte vozidlo dle Vašeho výběru do světa"
           },
           "swap": {
-            "name": "Zaměnit za jiné vozidlo",
+            "name": "Vyměnit za jiné vozidlo",
             "desc": "Vlož do tohoto místa jiné vozidlo a řiď ho",
             "button": "Vyměnit"
           },
           "couple": {
             "name": "Spojit",
-            "desc": "Spojí vozidlo s tím před ním nebo za ním",
+            "desc": "Spojí vozidlo s vozidlem před nebo za autobusem",
             "button": "Spojit"
           },
           "uncouple": {
             "name": "Rozpojit",
-            "desc": "Oddělá spojená vozidla",
+            "desc": "Rozpojí spojená vozidla",
             "button": "Rozpojit"
           },
           "remove": {
@@ -949,8 +949,8 @@
             "button": "Opravit"
           },
           "reset_vehicle": {
-            "name": "Set upright",
-            "desc": "Puts the vehicle upright again",
+            "name": "Postavit vozidlo na kola",
+            "desc": "Postaví vozidlo zpět na kola",
             "button": "Obnovit"
           },
           "reload": {
@@ -998,7 +998,7 @@
         "find": "Najít nastavení kláves",
         "group_driving": "Řízení a autobus",
         "group_vr": "Headset (VR)",
-        "group_scripted": "Scripted (this vehicle)",
+        "group_scripted": "Skriptované (toto vozidlo)",
         "press_key": "stiskni klávesu...",
         "press_key_desc": "Stisknutím tlačítka Escape ponecháte aktuální klávesu",
         "not_set": "Nenastaveno",
@@ -1007,9 +1007,9 @@
       }
     },
     "world": {
-      "automatic": "automatic",
+      "automatic": "automatická",
       "dew": "rosa",
-      "typing": "typing",
+      "typing": "píše",
       "vehicles": "vozidla",
       "text": {
         "time": "Čas",
@@ -1017,7 +1017,7 @@
         "temperature_and_wind": "Teplota a vítr",
         "traffic_and_people": "Doprava a lidé",
         "tools": "Nástroje",
-        "real_time_sync": "Real-time sync",
+        "real_time_sync": "Synchronizace reálného času",
         "the_game_follows_your_device_s_date_and_time": "Hra sleduje datum a čas Vašeho zařízení",
         "date_and_time": "Datum a čas",
         "synchronized_with_the_real_time": "Synchronizováno s reálným časem",
@@ -1047,7 +1047,7 @@
         "how_fast_the_world_s_clock_runs": "Jak rychle běží světový čas",
         "metar_sync": "Synchronizace METAR",
         "the_weather_follows_the_real_metar_report": "Počasí se řídí skutečnou zprávou METAR",
-        "metar_source": "Zdroj METARu",
+        "metar_source": "Zdroj zprávy METAR",
         "the_airport_used_for_real_weather": "Letiště využito pro reálné počasí.",
         "icao": "ICAO",
         "enter_any_4_letter_icao_station": "Zadejte jakýkoliv čtyřpísmenný kód ICAO.",
@@ -1271,7 +1271,7 @@
       "unknown_maker": "Neznámý výrobce",
       "no_numbers": "Tento autobus nemá žádný seznam evidenčních čísel",
       "driver_set": "Řidič: {name}",
-      "preview_meta": "Linka {line}  · Trasa {trip}/{trips}  · Vyberte zastávku odkud začít",
+      "preview_meta": "Linka {line}  · Trasa {trip}/{trips}  · Vyberte zastávku, odkud začnete",
       "start_trip": "Zahájit trasu"
     },
     "keyname": {
@@ -1314,7 +1314,7 @@
       "cashdesk_changer_4_00": "Vrátit 4.00",
       "cashdesk_changer_5_00": "Vrátit 5.00",
       "cashdesk_changer_8_00": "Vrátit 8.00",
-      "change_give": "Dát zpátky",
+      "change_give": "Vrátit rozdíl",
       "change_take": "Vzít peníze",
       "clutch": "Spojka",
       "cp_batterietrennschalter_toggle": "Přepínač odpojení baterie",
@@ -1427,11 +1427,11 @@
       "clock_locked": "Čas nelze změnit, dokud je zapnuta synchronizace v reálném čase",
       "clock_set": "Čas nastaven na {time}",
       "graphics_missing": "Grafický profil \"{name}\" nebyl nalezen",
-      "metar_source": "Zdroj METAR: {code}",
+      "metar_source": "Zdroj zprávy METAR: {code}",
       "icao_invalid": "Zadejte platný čtyřpísmenný kód ICAO",
       "free_drive": "Volná jízda: žádná služba neprobíhá",
       "no_vehicles": "Žádné další vozidlo k řízení",
-      "vehicle_upright": "The vehicle is upright again",
+      "vehicle_upright": "Vozidlo je zpět na kolech",
       "no_duty": "Službu nelze spustit: {error}",
       "duty_started": "Linka {line}, trasa {tour} začala",
       "depot_file": "Soubor depa: {name}",
@@ -1448,12 +1448,12 @@
     "admin": {
       "player": "Hráč {id}",
       "go_to": "Jít na {name}",
-      "bring": "Bring {name} here",
+      "bring": "Teleportovat sem {name}",
       "repair": "Oprav vozidlo {name}",
-      "unstick": "Set {name}'s vehicle upright",
+      "unstick": "Postavit na kola vozidlo hráče {name}",
       "kick": "Vyhodit {name}",
       "ban": "Zabanovat {name}",
-      "bring_all": "Bring everyone here",
+      "bring_all": "Teleportovat sem všechny hráče",
       "repair_all": "Opravit všechna vozidla",
       "refuel_all": "Dotankovat všechna vozidla",
       "wash_all": "Umýt všechna vozidla",
@@ -1479,7 +1479,7 @@
       "weather_cycle_msg": "Cyklus počasí: {state}",
       "brought": "{count} hráči se připojili",
       "traffic_msg": "Provoz: {value}",
-      "host_brought": "The host brought you here",
+      "host_brought": "Hostitel tě sem teleportoval",
       "host_service": "Hostitel provozoval službu: {kind}",
       "host_upright": "Hostitel postavil vozidlo vzhůru",
       "wrong_password": "Nesprávné heslo",
