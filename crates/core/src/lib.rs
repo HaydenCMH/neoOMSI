@@ -698,6 +698,7 @@ pub(crate) fn make_app(
         cpu_mark: None,
         thread_cpu_mark: Vec::new(),
         profile_mark: None,
+        play_since: None,
         touch: touch::Touch::new(),
     };
     app.lan = lan;

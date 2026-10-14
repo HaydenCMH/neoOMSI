@@ -256,6 +256,8 @@ pub(crate) struct App {
     /// The stage, renderer stage and count totals when `cpu_mark` was taken: the summary
     /// averages over the steady frames after it, not over the loading.
     pub(crate) profile_mark: Option<ProfileMark>,
+    /// When the player's bus first stood in the world (OMSI_PROFILE's mark without --exit-after).
+    pub(crate) play_since: Option<Instant>,
     pub(crate) plugins: Option<legacy_plugin::Plugins>,
     pub(crate) touch: touch::Touch,
 }
