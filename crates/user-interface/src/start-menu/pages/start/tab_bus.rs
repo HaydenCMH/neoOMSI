@@ -2,7 +2,7 @@ use super::*;
 
 impl Ui {
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn start_tab_bus(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, a: [f32; 4], v: &StartView, u: f32, hits: &mut Hits) {
+    pub(super) fn start_tab_bus(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, a: [f32; 4], v: &StartView, u: f32) {
         let th = (54.0 * u).round();
         let g = 6.0 * u;
         let mut y = a[1];

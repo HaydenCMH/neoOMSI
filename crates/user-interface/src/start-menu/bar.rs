@@ -3,7 +3,7 @@ use super::*;
 const TABS: [&str; 3] = ["start.maps.nav", "start.join.nav", "pause.page.options.nav"];
 
 impl Ui {
-    pub(crate) fn draw_start_bar(
+    pub fn draw_start_bar(
         &mut self,
         r: &Renderer,
         scene: &mut Scene,
@@ -136,28 +136,5 @@ impl Ui {
         if !busy {
             self.start.update_btn = rc;
         }
-    }
-
-    pub(super) fn start_head(
-        &mut self,
-        r: &Renderer,
-        scene: &mut Scene,
-        m: Metrics,
-        head: &str,
-        note: &str,
-        y: f32,
-        pt: f32,
-    ) -> f32 {
-        let Metrics { u, mx, .. } = m;
-        let hs = head_alpha(pt);
-        self.text.alpha = hs;
-        let hl = self.text.label(r, scene, head, (34.0 * u) as u32, WHITE);
-        hl.place(scene, mx - 40.0 * u * (1.0 - hs), y);
-        let ns = out((pt - 0.08) / 0.6);
-        self.text.alpha = ns;
-        let nl = self.text.label(r, scene, note, (14.0 * u) as u32, MUTED);
-        nl.place(scene, mx - 40.0 * u * (1.0 - ns), y + hl.h as f32);
-        self.text.alpha = 1.0;
-        y + hl.h as f32 + nl.h as f32 + 18.0 * u
     }
 }

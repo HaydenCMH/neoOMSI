@@ -59,7 +59,7 @@ impl Ui {
         let area = [left[0], left[1] + hl.h as f32 + 14.0 * u, left[2], btn[1] - 14.0 * u];
         match s {
             1 => self.start_tab_map(r, scene, f, area, v, u, hits),
-            2 => self.start_tab_bus(r, scene, f, area, v, u, hits),
+            2 => self.start_tab_bus(r, scene, f, area, v, u),
             _ => self.start_tab_time(r, scene, f, area, v, u, hits),
         }
         self.start_preview(r, scene, f, right, v, u, hits);
