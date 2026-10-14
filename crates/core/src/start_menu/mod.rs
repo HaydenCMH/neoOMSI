@@ -272,6 +272,9 @@ impl App {
         if let Some(u) = self.ui.as_mut() {
             u.start_reset();
         }
+        if self.args.lan_join.is_none() {
+            place_on_duty(&mut self.args);
+        }
         self.load_world_now(event_loop);
     }
 

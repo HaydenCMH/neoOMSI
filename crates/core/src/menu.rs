@@ -973,6 +973,7 @@ impl Menu {
     pub fn pick_tour(&mut self, i: usize) {
         if self.tour != i {
             self.trip = 0;
+            self.entry = None;
         }
         self.tour = i;
     }
@@ -1048,6 +1049,7 @@ impl Menu {
 
     pub fn pick_line(&mut self, i: usize) {
         self.line = i;
+        self.entry = None;
         self.tour_query.clear();
         self.tour_top = 0;
         self.tour = 0;

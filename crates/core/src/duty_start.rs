@@ -149,13 +149,20 @@ pub(crate) fn place_on_duty(args: &mut Args) {
                 let (path, _) = navigator::way_back(&net, from, heading, &targets, 40_000.0)?;
                 Some(path.iter().map(|&l| net.lanes[l].length() as f64).sum())
             };
+            let mut stop_spawn: Option<String> = None;
             let pick = if let Some((position, heading)) = explicit_spawn {
                 cost(position, heading).map(|way| (None, String::new(), way))
             } else if args.auto_entry {
-                entries
-                    .iter()
-                    .filter_map(|e| cost(e.2, e.3).map(|c| (Some(e.0), e.1.clone(), c)))
-                    .min_by(|a, b| a.2.total_cmp(&b.2))
+                let before = 12.0_f32;
+                let (at, heading) = net.lanes[route[li]].at_ext((stop_s - before).max(0.0));
+                stop_spawn = Some(format!(
+                    "{:.1},{:.1},{:.1},{:.1}",
+                    at.x,
+                    at.y,
+                    (heading as f64).rem_euclid(360.0),
+                    at.z
+                ));
+                Some((None, String::new(), before as f64))
             } else {
                 entries
                     .iter()
@@ -172,7 +179,7 @@ pub(crate) fn place_on_duty(args: &mut Args) {
                 continue;
             };
             let origin = entry.map_or_else(
-                || "the selected map spawn".to_owned(),
+                || "the start stop".to_owned(),
                 |entry| format!("entry point {entry} '{}'", name.trim()),
             );
             log::info!(
@@ -189,6 +196,9 @@ pub(crate) fn place_on_duty(args: &mut Args) {
             );
             if let Some(entry) = entry {
                 args.entry = entry;
+            }
+            if let Some(sp) = stop_spawn {
+                args.spawn = Some(sp);
             }
             args.duty_trip = Some(k);
             args.duty_first_stop = j;
