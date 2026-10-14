@@ -816,9 +816,17 @@ impl Ui {
         let inner = w - mx - px0 - 44.0 * u;
         let tpx = (20.0 * u) as u32;
         let bpx = 15.0 * u;
-        let lines = wrap(&self.text, &page_text(page, &a.desc), bpx, inner);
+        let desc = page_text(page, &a.desc);
+        let mut lines: Vec<String> = Vec::new();
+        for para in desc.replace("\\n", "\n").replace("\r\n", "\n").split('\n') {
+            if para.trim().is_empty() {
+                lines.push(String::new());
+            } else {
+                lines.extend(wrap(&self.text, para, bpx, inner));
+            }
+        }
         let lh = bpx * 1.3 + 3.0 * u;
-        let ph = (22.0 * u + tpx as f32 * 1.3 + 14.0 * u + lines.len() as f32 * lh + 22.0 * u)
+        let ph = (22.0 * u + tpx as f32 * 1.3 + 14.0 * u + lines.iter().map(|l| if l.is_empty() { bpx * 0.7 } else { lh }).sum::<f32>() + 22.0 * u)
             .min((bottom - top).max(0.0));
         let x0 = px0 + 14.0 * u * (1.0 - e);
         let card = [x0, top, x0 + (w - mx - px0), top + ph];
@@ -843,6 +851,10 @@ impl Ui {
         for ln in lines {
             if ty + bpx * 1.3 > card[3] - 12.0 * u {
                 break;
+            }
+            if ln.is_empty() {
+                ty += bpx * 0.7;
+                continue;
             }
             let l = self.text.label(r, scene, &ln, bpx as u32, SOFT);
             l.place(scene, card[0] + 24.0 * u, ty);
