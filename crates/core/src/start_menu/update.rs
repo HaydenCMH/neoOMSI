@@ -1,7 +1,7 @@
 use super::*;
 use crate::updater::{self, Status};
 
-fn update_view(u: &updater::Updater) -> crate::ui::StartUpdate {
+fn update_view(u: &updater::Updater) -> ui::StartUpdate {
     let (kind, label, progress) = match u.status() {
         Status::Available(r) if !u.dismissed => (1, format!("Update {}", r.version), 0.0),
         Status::Downloading { release, done, total } => (
@@ -17,7 +17,7 @@ fn update_view(u: &updater::Updater) -> crate::ui::StartUpdate {
         }
         _ => (0, String::new(), 0.0),
     };
-    crate::ui::StartUpdate { kind, label, progress }
+    ui::StartUpdate { kind, label, progress }
 }
 
 impl App {
@@ -26,7 +26,9 @@ impl App {
             return;
         };
         if !m.update.checked_once {
-            if ::legacy_config::env::var_os("OMSI_NO_UPDATE").is_none() {
+            if ::legacy_config::env::var_os("OMSI_NO_UPDATE").is_none()
+                && ::config::get_bool("launcher", "update_check").unwrap_or(true)
+            {
                 let _ = updater::just_updated();
                 updater::cleanup_after_update();
                 m.update.check();
@@ -35,13 +37,23 @@ impl App {
             }
         }
         m.update.poll();
+        if let Status::Available(r) = m.update.status() {
+            if ::config::get_bool("launcher", "update_auto").unwrap_or(false)
+                && !m.update.dismissed
+                && !m.update.auto_started
+            {
+                m.update.auto_started = true;
+                log::info!("update: installing {} by itself (update_auto)", r.version);
+                m.update.install(r);
+            }
+        }
         if let Status::Restarting(r) = m.update.status() {
             if !m.update.relaunched {
                 m.update.relaunched = true;
                 match updater::install_place().and_then(|p| updater::relaunch(&p)) {
                     Ok(()) => {
                         log::info!("update: {} installed, the new program starts", r.version);
-                        crate::quit::request();
+                        quit::request();
                     }
                     Err(e) => m.update.fail(format!(
                         "neoOMSI {} is installed; start it again yourself ({e}).",
@@ -52,7 +64,7 @@ impl App {
         }
     }
 
-    pub(super) fn start_update_view(&self) -> crate::ui::StartUpdate {
+    pub(super) fn start_update_view(&self) -> ui::StartUpdate {
         self.menu.as_ref().map(|m| update_view(&m.update)).unwrap_or_default()
     }
 
