@@ -63,7 +63,8 @@ impl App {
     fn start_show_weather(&mut self) {
         let vis = self.ui.as_ref().map_or(8, |u| u.start.weather_vis).max(1);
         if let Some(m) = self.menu.as_mut() {
-            if m.weather < m.weather_top {
+            m.weather_top = m.weather_top.max(4);
+            if m.weather >= 4 && m.weather < m.weather_top {
                 m.weather_top = m.weather;
             } else if m.weather >= m.weather_top + vis {
                 m.weather_top = m.weather + 1 - vis;

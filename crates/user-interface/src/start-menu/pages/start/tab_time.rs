@@ -43,27 +43,6 @@ impl Ui {
             return;
         }
 
-        self.start_caption(r, scene, "start.maps.season", a[0] + 4.0 * u, y, u);
-        y += cap + 6.0 * u;
-        let sh = (44.0 * u).round();
-        let seg = [a[0], y, a[2], y + sh];
-        self.text.rounded(r, scene, seg, sh * 0.5, OPT_GROUP);
-        let inset = 4.0 * u;
-        let n = SEASONS.len();
-        let bw = ((w - inset * 2.0 - 2.0 * u * (n - 1) as f32) / n as f32).floor();
-        for (k, key) in SEASONS.iter().enumerate() {
-            let x = a[0] + inset + k as f32 * (bw + 2.0 * u);
-            let b = [x, seg[1] + inset, x + bw, seg[3] - inset];
-            let on = v.season == k;
-            let hot = inside(b, f.cursor);
-            let ov = self.ease((223, "season", k), if on { 1.0 } else { 0.0 }, 12.0);
-            let hv = self.ease((223, "seasonhot", k), if hot && !on { 1.0 } else { 0.0 }, 12.0);
-            self.text.rounded(r, scene, b, (b[3] - b[1]) * 0.5, mix(fade(LIT, hv), ACCENT_SOFT, ov));
-            let l = self.text.label(r, scene, key, (14.0 * u) as u32, if on { WHITE } else { mix(SOFT, WHITE, hv) });
-            l.place(scene, b[0] + (bw - l.w as f32) * 0.5, (b[1] + b[3] - l.h as f32) * 0.5);
-            self.start.seasons.push(b);
-        }
-        y += sh + g;
         self.start_tab_weather(r, scene, f, [a[0], y, a[2], a[3]], v, u, hits);
     }
 
@@ -141,23 +120,123 @@ impl Ui {
 
     #[allow(clippy::too_many_arguments)]
     pub(super) fn start_tab_weather(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, a: [f32; 4], v: &StartView, u: f32, hits: &mut Hits) {
-        let custom = v.weather == 3;
-        let th = (46.0 * u).round();
-        let g = 4.0 * u;
         let cap = (16.0 * u).round();
+        let w = a[2] - a[0];
         self.start_caption(r, scene, "start.maps.weather", a[0] + 4.0 * u, a[1], u);
-        let a = [a[0], a[1] + cap + 6.0 * u, a[2], a[3]];
-        let ctl = if custom { (th + g) * v.custom.len() as f32 + 8.0 * u } else { 0.0 };
-        let list = [a[0], a[1], a[2], (a[3] - ctl).max(a[1] + ROW_H * u * 3.0)];
-        let mut rects = Vec::new();
-        self.start.weather_vis = self.start_weather_list(r, scene, f, list, v, u, &mut rects);
-        self.start.weathers = rects;
-        if custom {
-            let mut y = list[3] + 8.0 * u;
-            for (k, (label, value)) in v.custom.iter().enumerate() {
-                self.start_stepper(r, scene, f, [a[0], y, a[2], y + th], 12 + k, label, value, v, u, false, None, hits);
-                y += th + g;
+        let mut y = a[1] + cap + 6.0 * u;
+
+        let tile_h = (74.0 * u).round();
+        let tg = 6.0 * u;
+        let tw = ((w - tg * 3.0) / 4.0).floor();
+        let isz = (26.0 * u).round();
+        let px = (13.0 * u) as u32;
+        for k in 0..4usize {
+            let x = a[0] + k as f32 * (tw + tg);
+            let rc = [x, y, x + tw, y + tile_h];
+            let on = v.weather == k;
+            let hv = self.ease((231, "wmode", k), if inside(rc, f.cursor) { 1.0 } else { 0.0 }, 10.0);
+            let ov = self.ease((231, "wmodeon", k), if on { 1.0 } else { 0.0 }, 12.0);
+            self.text.rounded(r, scene, rc, ROW_R * u, mix(mix(OPT_ROW, OPT_ROW_HOT, hv), OPT_GROUP_ON, ov));
+            let (icon, label) = v.weathers.get(k).map(|x| (x.0.as_str(), x.1.as_str())).unwrap_or(("wb_sunny", "-"));
+            if let Some(ic) = self.text.icon(r, scene, icon, isz as u32, mix(mix(MUTED, WHITE, hv), ACCENT, ov)) {
+                ic.place(scene, x + (tw - isz) * 0.5, y + 10.0 * u);
             }
+            let name = clip_to(&self.text, label, px as f32, tw - 10.0 * u);
+            let l = self.text.label(r, scene, &name, px, if on { WHITE } else { mix(SOFT, WHITE, hv) });
+            l.place(scene, x + (tw - l.w as f32) * 0.5, y + tile_h - 12.0 * u - l.h as f32);
+            self.start.weather_modes.push(rc);
+        }
+        y += tile_h + 12.0 * u;
+        let area = [a[0], y, a[2], a[3]];
+
+        match v.weather {
+            2 => self.start_weather_real(r, scene, f, area, v, u),
+            3 => {
+                let rh = (58.0 * u).round();
+                for (k, (label, value)) in v.custom.iter().enumerate() {
+                    let rc = [a[0], y, a[2], y + rh];
+                    let hot = inside(rc, f.cursor);
+                    let focus = v.zone == 1 && v.row == 12 + k;
+                    let hv = self.ease((235, "slrow", k), if hot || focus { 1.0 } else { 0.0 }, 10.0);
+                    self.text.rounded(r, scene, rc, ROW_R * u, mix(OPT_ROW, OPT_ROW_HOT, hv));
+                    let ll = self.text.label(r, scene, label, (13.0 * u) as u32, mix(MUTED, SOFT, hv));
+                    ll.place(scene, rc[0] + TEXT_IN * u, y + 9.0 * u);
+                    let vl = self.text.label(r, scene, value, (16.0 * u) as u32, if focus { ACCENT_TEXT } else { WHITE });
+                    vl.place(scene, rc[2] - TEXT_IN * u - vl.w as f32, y + 7.0 * u);
+                    let (x0, x1) = (rc[0] + TEXT_IN * u, rc[2] - TEXT_IN * u);
+                    let t = 6.0 * u;
+                    let ty = y + rh - 17.0 * u;
+                    let frac = v.custom_fracs.get(k).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+                    let fx = x0 + (x1 - x0) * frac;
+                    self.text.rounded(r, scene, [x0, ty, x1, ty + t], t * 0.5, OPT_LINE);
+                    if frac > 0.0 {
+                        self.text.rounded(r, scene, [x0, ty, fx.max(x0 + t), ty + t], t * 0.5, ACCENT);
+                    }
+                    let kn = (7.0 + 2.0 * hv) * u;
+                    self.text.rounded(r, scene, [fx - kn, ty + t * 0.5 - kn, fx + kn, ty + t * 0.5 + kn], kn, WHITE_FILL);
+                    self.start.sliders.push([x0, y, x1, y + rh]);
+                    y += rh + 6.0 * u;
+                }
+                let _ = hits;
+            }
+            _ => {
+                self.start_caption(r, scene, "start.maps.presets", a[0] + 4.0 * u, y, u);
+                let list = [a[0], y + cap + 6.0 * u, a[2], a[3]];
+                let mut rects = Vec::new();
+                self.start.weather_vis = self.start_weather_list(r, scene, f, list, v, u, &mut rects);
+                self.start.weathers = rects;
+            }
+        }
+    }
+
+    pub(super) fn start_weather_real(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, a: [f32; 4], v: &StartView, u: f32) {
+        let cap = (16.0 * u).round();
+        let fh = (50.0 * u).round();
+        let row_h = (ROW_H * u).round();
+        self.start_caption(r, scene, "start.maps.icao", a[0] + 4.0 * u, a[1], u);
+        let mut y = a[1] + cap + 6.0 * u;
+        let fr = [a[0], y, a[2], y + fh];
+        let ph = tr("start.maps.icao_ph");
+        self.start_field(r, scene, f, fr, None, Some("location_on"), v.icao, &ph, v.edit == 6, v.caret, 6, u);
+        self.start.icao_field = fr;
+        y += fh + 6.0 * u;
+
+        if v.icao.is_empty() {
+            let hl = self.text.label(r, scene, "start.maps.icao_auto", (13.0 * u) as u32, MUTED);
+            hl.place(scene, a[0] + 6.0 * u, y);
+            y += hl.h as f32 + 8.0 * u;
+        } else {
+            y += 4.0 * u;
+        }
+
+        if v.icao_rows.is_empty() {
+            let l = self.text.label(r, scene, "start.maps.noair", (14.0 * u) as u32, MUTED);
+            l.place(scene, a[0] + 6.0 * u, y + 4.0 * u);
+            return;
+        }
+        let fit = (((a[3] - y) / row_h).floor() as usize).max(1);
+        let px = (15.0 * u) as u32;
+        for (k, (code, label)) in v.icao_rows.iter().take(fit).enumerate() {
+            let rc = [a[0], y, a[2], y + row_h];
+            let on = code.eq_ignore_ascii_case(v.icao);
+            let hot = inside(rc, f.cursor);
+            let hv = self.ease((232, "air", k), if hot || on { 1.0 } else { 0.0 }, 10.0);
+            if hv > 0.0 {
+                let base = if on { OPT_GROUP_ON } else { OPT_GROUP_HOT };
+                self.text.rounded(r, scene, rc, ROW_R * u, fade(base, if on { 1.0 } else { hv }));
+            }
+            let bl = self.text.label(r, scene, code, px, ACCENT_TEXT);
+            let bw = (bl.w as f32 + 16.0 * u).max(52.0 * u);
+            let br = [rc[0] + 6.0 * u, y + 5.0 * u, rc[0] + 6.0 * u + bw, y + row_h - 5.0 * u];
+            self.text.rounded(r, scene, br, 6.0 * u, OPT_ROW);
+            bl.place(scene, br[0] + (bw - bl.w as f32) * 0.5, y + (row_h - bl.h as f32) * 0.5);
+            let tx = br[2] + 12.0 * u;
+            let name = label.split_once(" - ").map_or(label.as_str(), |x| x.1);
+            let name = clip_to(&self.text, name, px as f32, rc[2] - tx - TEXT_IN * u);
+            let nl = self.text.label(r, scene, &name, px, if on || hot { WHITE } else { SOFT });
+            nl.place(scene, tx, y + (row_h - nl.h as f32) * 0.5);
+            self.start.icao_picks.push(rc);
+            y += row_h;
         }
     }
 
@@ -167,8 +246,10 @@ impl Ui {
         let vis = (((a[3] - a[1]) / row_h).floor() as usize).max(1);
         let items = v.weathers;
         let n = items.len();
-        let first = v.weather_top.min(n.saturating_sub(vis));
-        let bar_room = if n > vis { 14.0 * u } else { 0.0 };
+        let base = 4.min(n);
+        let count = n - base;
+        let first = v.weather_top.min(n.saturating_sub(vis)).max(base);
+        let bar_room = if count > vis { 14.0 * u } else { 0.0 };
         let px = (16.0 * u) as u32;
         let isz = (20.0 * u).round();
         for (k, i) in (first..n.min(first + vis)).enumerate() {
@@ -185,9 +266,6 @@ impl Ui {
             if ov > 0.0 {
                 self.accent_bar(r, scene, rc, ov, false, u);
             }
-            if i == 4 && k > 0 {
-                self.text.rounded(r, scene, [rc[0] + 4.0 * u, y, rc[2] - 4.0 * u, y + 1.0], 0.0, [255, 255, 255, 14]);
-            }
             let (icon, label) = &items[i];
             let ix = rc[0] + TEXT_IN * u;
             if let Some(ic) = self.text.icon(r, scene, icon, isz as u32, if on { ACCENT } else { mix(MUTED, WHITE, hv) }) {
@@ -199,11 +277,11 @@ impl Ui {
             l.place(scene, tx, y + (row_h - l.h as f32) * 0.5);
             rects.push(rc);
         }
-        if n > vis {
+        if count > vis {
             let track = [a[2] - 6.0 * u, a[1], a[2], a[1] + vis as f32 * row_h];
             self.text.rounded(r, scene, track, 3.0 * u, OPT_TRACK);
-            let th = ((vis as f32 / n as f32) * (track[3] - track[1])).max(24.0 * u);
-            let ty = track[1] + (track[3] - track[1] - th) * first as f32 / (n - vis) as f32;
+            let th = ((vis as f32 / count as f32) * (track[3] - track[1])).max(24.0 * u);
+            let ty = track[1] + (track[3] - track[1] - th) * (first - base) as f32 / (count - vis) as f32;
             self.text.rounded(r, scene, [track[0], ty, track[2], ty + th], 3.0 * u, [255, 255, 255, 60]);
         }
         vis

@@ -84,6 +84,9 @@ pub struct Menu {
     pub cal_month: i32,
     pub time_buf: String,
     pub weather_top: usize,
+    pub icao: String,
+    pub slider: Option<usize>,
+    pub airports: Vec<(String, String)>,
     pub custom: crate::weather_setup::CustomWeather,
     pub traffic: usize,
     pub passengers: bool,
@@ -377,6 +380,9 @@ impl Menu {
             cal_month: 0,
             time_buf: String::new(),
             weather_top: 0,
+            icao: String::new(),
+            slider: None,
+            airports: crate::weather_setup::metar_airports(root),
             custom: Default::default(),
             traffic: 30,
             passengers: true,
@@ -884,6 +890,7 @@ impl Menu {
             3 => (&mut self.line_query, 40),
             4 => (&mut self.tour_query, 40),
             5 => (&mut self.time_buf, 4),
+            6 => (&mut self.icao, 4),
             _ => (&mut self.plate, 24),
         }
     }
@@ -900,8 +907,19 @@ impl Menu {
                 self.fix_filters();
             }
             5 => self.apply_time(),
+            6 => self.icao = self.icao.chars().filter(|c| c.is_ascii_alphabetic()).map(|c| c.to_ascii_uppercase()).collect(),
             _ => {}
         }
+    }
+
+    pub fn icao_matches(&self, n: usize) -> Vec<(String, String)> {
+        let q = self.icao.trim().to_lowercase();
+        self.airports
+            .iter()
+            .filter(|(c, l)| q.is_empty() || c.to_lowercase().starts_with(&q) || l.to_lowercase().contains(&q))
+            .take(n)
+            .cloned()
+            .collect()
     }
 
     pub fn mini_key(&self) -> Option<(String, String)> {
@@ -1150,6 +1168,7 @@ impl Menu {
     pub fn weather_arg(&self) -> Option<String> {
         match self.weather {
             0 => None,
+            2 => Some(format!("metar-once:{}", self.icao.trim().to_ascii_uppercase())),
             3 => Some(self.custom.encode()),
             w => self.weathers.get(w).map(|x| x.1.clone()),
         }
@@ -1179,6 +1198,36 @@ impl Menu {
             ),
             (tr("start.weather.temp"), format!("{:.0} \u{b0}C", c.temp_c)),
         ]
+    }
+
+    const CUSTOM_VIS: [f32; 8] = [200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0, 20000.0, 50000.0];
+
+    pub fn custom_fracs(&self) -> Vec<f32> {
+        let c = &self.custom;
+        let vis = Self::CUSTOM_VIS.iter().position(|v| *v >= c.visibility_m).unwrap_or(7);
+        vec![
+            vis as f32 / 7.0,
+            c.cloud as f32 / (crate::weather_setup::CUSTOM_CLOUDS.len() - 1).max(1) as f32,
+            c.precip.clamp(0, 2) as f32 / 2.0,
+            ((c.temp_c + 30.0) / 75.0).clamp(0.0, 1.0),
+        ]
+    }
+
+    pub fn custom_set(&mut self, i: usize, f: f32) {
+        let f = f.clamp(0.0, 1.0);
+        let c = &mut self.custom;
+        match i {
+            0 => c.visibility_m = Self::CUSTOM_VIS[(f * 7.0).round() as usize],
+            1 => c.cloud = (f * (crate::weather_setup::CUSTOM_CLOUDS.len() - 1) as f32).round() as usize,
+            2 => {
+                c.precip = (f * 2.0).round() as i32;
+                c.road_wetness = if c.precip == 1 { 0.8 } else { 0.0 };
+                c.snow_cover = c.precip == 2;
+                c.snow_on_road = c.precip == 2;
+            }
+            _ => c.temp_c = (f * 75.0 - 30.0).round(),
+        }
+        c.normalize();
     }
 
     fn custom_step(&mut self, i: usize, dir: i32) {

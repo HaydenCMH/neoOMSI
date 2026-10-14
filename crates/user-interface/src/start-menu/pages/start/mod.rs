@@ -10,7 +10,6 @@ const ROW_H: f32 = 36.0;
 const TAB_KEYS: [&str; 3] = ["start.maps.t1", "start.maps.t2", "start.maps.t3"];
 const TAB_ICONS: [&str; 3] = ["route", "directions_bus", "schedule"];
 const HEADS: [&str; 3] = ["start.maps.h1", "start.maps.h2", "start.maps.h3"];
-const SEASONS: [&str; 5] = ["start.maps.sd", "start.maps.sp", "start.maps.su", "start.maps.sa", "start.maps.sw"];
 
 type Hits = ([[f32; 4]; 16], [[f32; 4]; 32]);
 

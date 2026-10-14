@@ -1613,7 +1613,12 @@
       "today": "Today",
       "close": "Close",
       "sd": "By date",
-      "weather": "WEATHER"
+      "weather": "WEATHER",
+      "presets": "PRESETS",
+      "icao": "AIRPORT (ICAO)",
+      "icao_ph": "ICAO code, e.g. EDDB",
+      "icao_auto": "Empty: nearest airport to the map",
+      "noair": "No matching airport"
     },
     "join": {
       "nav": "Multiplayer",

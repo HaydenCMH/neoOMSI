@@ -109,6 +109,7 @@ impl App {
         if !pressed {
             if let Some(m) = self.menu.as_mut() {
                 m.drag = None;
+                m.slider = None;
             }
             return;
         }
@@ -151,6 +152,10 @@ impl App {
                     Cal(usize),
                     CalDay(usize),
                     Weather(usize),
+                    WeatherMode(usize),
+                    Slider(usize),
+                    IcaoField,
+                    IcaoPick(usize),
                     Arrow(usize),
                     Row(usize),
                     Veh(usize),
@@ -186,7 +191,7 @@ impl App {
                 let first_weather = self
                     .menu
                     .as_ref()
-                    .map_or(0, |m| m.weather_top.min(m.weathers.len().saturating_sub(st.weather_vis)));
+                    .map_or(0, |m| m.weather_top.min(m.weathers.len().saturating_sub(st.weather_vis)).max(4.min(m.weathers.len())));
                 let act = if hit(&[st.go], cursor).is_some() {
                     Act::Go
                 } else if hit(&[st.cont], cursor).is_some() {
@@ -211,6 +216,14 @@ impl App {
                     Act::DropItem(st.drop_first + k)
                 } else if let Some(k) = hit(&st.drops, cursor) {
                     Act::Drop(k)
+                } else if let Some(k) = hit(&st.sliders, cursor) {
+                    Act::Slider(k)
+                } else if let Some(k) = hit(&st.weather_modes, cursor) {
+                    Act::WeatherMode(k)
+                } else if hit(&[st.icao_field], cursor).is_some() {
+                    Act::IcaoField
+                } else if let Some(k) = hit(&st.icao_picks, cursor) {
+                    Act::IcaoPick(k)
                 } else if let Some(k) = hit(&st.weathers, cursor) {
                     Act::Weather(first_weather + k)
                 } else if let Some(k) = hit(&st.summary, cursor) {
@@ -259,6 +272,7 @@ impl App {
                     }
                     m.edit = match act {
                         Act::TimeField => 5,
+                        Act::IcaoField => 6,
                         Act::Search => 1,
                         Act::Plate => 2,
                         Act::LineFilter => 3,
@@ -316,6 +330,29 @@ impl App {
                     Act::CalDay(k) => {
                         if let Some(m) = self.menu.as_mut() {
                             m.cal_pick(k);
+                        }
+                    }
+                    Act::WeatherMode(k) => {
+                        if let Some(m) = self.menu.as_mut() {
+                            m.weather = k.min(3);
+                            m.zone = 0;
+                        }
+                    }
+                    Act::IcaoField => {}
+                    Act::Slider(k) => {
+                        let rc = self.ui.as_ref().and_then(|u| u.start.sliders.get(k).copied());
+                        if let (Some(rc), Some(m)) = (rc, self.menu.as_mut()) {
+                            m.slider = Some(k);
+                            m.zone = 1;
+                            m.row = 12 + k;
+                            m.custom_set(k, (cursor.0 - rc[0]) / (rc[2] - rc[0]).max(1.0));
+                        }
+                    }
+                    Act::IcaoPick(k) => {
+                        if let Some(m) = self.menu.as_mut() {
+                            if let Some((code, _)) = m.icao_matches(5).get(k) {
+                                m.icao = code.clone();
+                            }
                         }
                     }
                     Act::Weather(i) => {

@@ -121,6 +121,7 @@ impl App {
         self.start_update_tick();
         self.start_bus_preview(dt);
         self.start_route_preview();
+        self.start_slider_drag();
         let cursor = self.ui_cursor();
         let caret = self.started.elapsed().as_secs_f32() % 1.0 < 0.55;
         let update = self.start_update_view();
@@ -144,6 +145,8 @@ impl App {
         let (time_text, cal_title, cal_cells) = (m.time_text(), m.cal_title(), m.cal_cells());
         let drop_items = if m.drop != 0 { m.drop_items(m.drop) } else { Vec::new() };
         let (weather_rows, custom_rows) = (m.weather_rows(), m.custom_rows());
+        let icao_rows = m.icao_matches(5);
+        let custom_fracs = m.custom_fracs();
         let line_rows: Vec<LineRow> = m
             .line_rows()
             .into_iter()
@@ -231,6 +234,9 @@ impl App {
             weather: m.weather,
             weather_top: m.weather_top,
             custom: &custom_rows,
+            icao: &m.icao,
+            custom_fracs: &custom_fracs,
+            icao_rows: &icao_rows,
         };
         let frame = ui::Frame::bare(
             scale,
@@ -290,6 +296,21 @@ fn probe_text(p: Option<Probe>, short: bool) -> (u8, String) {
                 (3, ::i18n::translate("start.join.offline_short", &[]))
             } else {
                 (3, ::i18n::translate("start.join.offline", &[("error", &e)]))
+            }
+        }
+    }
+}
+
+impl App {
+    pub(super) fn start_slider_drag(&mut self) {
+        let cursor = self.ui_cursor();
+        let Some(k) = self.menu.as_ref().and_then(|m| m.slider) else {
+            return;
+        };
+        let rc = self.ui.as_ref().and_then(|u| u.start.sliders.get(k).copied());
+        if let (Some(rc), Some(m)) = (rc, self.menu.as_mut()) {
+            if rc[2] > rc[0] {
+                m.custom_set(k, (cursor.0 - rc[0]) / (rc[2] - rc[0]));
             }
         }
     }
