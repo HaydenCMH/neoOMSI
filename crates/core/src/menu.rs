@@ -904,10 +904,17 @@ impl Menu {
         }
     }
 
+    pub fn mini_key(&self) -> Option<(String, String)> {
+        let map = self.maps.get(self.map).map(|m| m.1.clone())?;
+        let (y, mo, d) = self.ymd();
+        Some((map, format!("{y}-{mo}-{d}")))
+    }
+
     pub fn want_mini(&mut self) {
-        let Some(map) = self.maps.get(self.map).map(|m| m.1.clone()) else {
+        let Some((name, date)) = self.mini_key() else {
             return;
         };
+        let map = format!("{name}|{date}");
         if self.mini.as_ref().is_some_and(|m| m.0 == map) || self.mini_failed.as_deref() == Some(map.as_str()) {
             self.mini_want = None;
             return;
@@ -922,9 +929,8 @@ impl Menu {
             return;
         }
         let (tx, rx) = std::sync::mpsc::channel();
-        let name = map.clone();
         std::thread::spawn(move || {
-            let r = crate::start_menu::minimap::minimap(&name, "");
+            let r = crate::start_menu::minimap::minimap(&name, &date);
             if let Err(e) = &r {
                 log::warn!("map preview of {name}: {e:#}");
             }

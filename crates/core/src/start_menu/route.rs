@@ -210,7 +210,7 @@ impl App {
         else {
             return;
         };
-        let map = m.maps.get(m.map).map(|x| x.1.clone()).unwrap_or_default();
+        let map = m.mini_key().map(|(n, d)| format!("{n}|{d}")).unwrap_or_default();
         let trips: Vec<String> = match m.chosen_tour() {
             Some((_, t)) if m.route => t.trips.clone(),
             _ => Vec::new(),
