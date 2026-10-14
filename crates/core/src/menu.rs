@@ -854,10 +854,15 @@ impl Menu {
         let chrono = ::map::active_chrono_dirs(dir, date);
         let off = ::map::chrono_deactivated_lines(&chrono);
         let tt = ::timetable::TimetableData::load_with_chrono(dir, &chrono, &off);
+        let calendar = ::map::Calendar::load(&dir.join("Holidays.txt")).unwrap_or_default();
+        let clock = ::simulation::SimClock { year: self.year, day_of_year: self.day, ..Default::default() };
+        let bits = crate::schedule::day_bits(&calendar, &clock);
+        let next_day_bit = 1 << ((clock.weekday() + 1) % 7);
+        let runs_today = |t: &&::timetable::Tour| crate::schedule::tour_runs(t, bits, next_day_bit);
         let mut chosen: Vec<&::timetable::Line> =
-            tt.lines.iter().filter(|l| l.user_allowed && !l.tours.is_empty()).collect();
+            tt.lines.iter().filter(|l| l.user_allowed && l.tours.iter().any(|t| runs_today(&t))).collect();
         if chosen.is_empty() {
-            chosen = tt.lines.iter().filter(|l| !l.tours.is_empty()).collect();
+            chosen = tt.lines.iter().filter(|l| l.tours.iter().any(|t| runs_today(&t))).collect();
         }
         let mut lines: Vec<LineItem> = chosen
             .into_iter()
@@ -872,6 +877,7 @@ impl Menu {
                 let mut tours: Vec<TourItem> = l
                     .tours
                     .iter()
+                    .filter(runs_today)
                     .map(|t| {
                         let first = t.trips.iter().map(|x| x.departure).fold(f32::MAX, f32::min);
                         let last = t.trips.iter().map(|x| x.departure).fold(0.0, f32::max);

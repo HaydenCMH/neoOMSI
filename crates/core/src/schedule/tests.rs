@@ -856,3 +856,24 @@ fn school_days_select_bit_8_and_school_holidays_bit_9() {
     assert_eq!(day_bits(&calendar, &school_day), (1 << 1, 1 << 8));
     assert_eq!(day_bits(&calendar, &in_holidays), (1 << 1, 1 << 9));
 }
+
+#[test]
+fn a_tour_runs_on_its_days_and_a_night_tour_on_the_eve() {
+    let tour = |mask: i32, departure: f32| ::timetable::Tour {
+        extra: mask.to_string(),
+        trips: vec![::timetable::TourTrip { departure, ..Default::default() }],
+        ..Default::default()
+    };
+    let weekdays = (0..5).fold(0, |m, d| m | 1 << d) | 3 << 8;
+    let saturday = 1 << 5 | 3 << 8;
+    // a Tuesday, a school day
+    let tuesday = ((1 << 1, 1 << 8), 1 << 2);
+    assert!(tour_runs(&tour(weekdays, 6.0 * 60.0), tuesday.0, tuesday.1));
+    assert!(!tour_runs(&tour(saturday, 6.0 * 60.0), tuesday.0, tuesday.1));
+    // a Friday night: the Saturday tour's trips after 24:00 belong to it
+    let friday = ((1 << 4, 1 << 8), 1 << 5);
+    assert!(tour_runs(&tour(saturday, 24.0 * 60.0 + 49.0), friday.0, friday.1));
+    assert!(!tour_runs(&tour(saturday, 23.0 * 60.0), friday.0, friday.1));
+    // school days only, in the holidays
+    assert!(!tour_runs(&tour(1 << 1 | 1 << 8, 6.0 * 60.0), (1 << 1, 1 << 9), 1 << 2));
+}

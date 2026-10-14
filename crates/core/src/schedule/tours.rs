@@ -25,12 +25,7 @@ impl Schedule {
     /// mask has the day (and school day or holiday), or - for a night tour with trips after
     /// 24:00 - the next day's weekday, as the night belongs to both.
     pub(crate) fn tour_available(&self, tour: &::timetable::Tour) -> bool {
-        let m = tour.extra.trim().parse::<i32>().unwrap_or(1023);
-        if m & self.day_bits.0 != 0 && m & self.day_bits.1 != 0 {
-            return true;
-        }
-        let night = tour.trips.iter().any(|t| t.departure >= 24.0 * 60.0);
-        night && m & self.next_day_bit != 0 && m & self.day_bits.1 != 0
+        tour_runs(tour, self.day_bits, self.next_day_bit)
     }
 
     /// Whether departure `i`'s tour runs on the current day.
