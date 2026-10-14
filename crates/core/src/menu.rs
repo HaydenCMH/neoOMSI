@@ -108,6 +108,10 @@ pub struct Menu {
     pub on_foot: bool,
     pub icao_check: Option<(String, Option<String>)>,
     pub icao_job: Option<(String, std::sync::mpsc::Receiver<Option<String>>)>,
+    pub icao_all: Vec<(String, String)>,
+    pub icao_all_job: Option<std::sync::mpsc::Receiver<Vec<(String, String)>>>,
+    pub icao_all_started: bool,
+    pub icao_top: usize,
     pub custom: crate::weather_setup::CustomWeather,
     pub traffic: usize,
     pub passengers: bool,
@@ -410,6 +414,10 @@ impl Menu {
             on_foot: ::config::get_bool("gameplay", "start_on_foot").unwrap_or(false),
             icao_check: None,
             icao_job: None,
+            icao_all: Vec::new(),
+            icao_all_job: None,
+            icao_all_started: false,
+            icao_top: 0,
             custom: Default::default(),
             traffic: 30,
             passengers: true,
@@ -1104,12 +1112,25 @@ impl Menu {
                 self.fix_filters();
             }
             5 => self.apply_time(),
-            6 => self.icao = self.icao.chars().filter(|c| c.is_ascii_alphabetic()).map(|c| c.to_ascii_uppercase()).collect(),
+            6 => {
+                self.icao = self.icao.chars().filter(|c| c.is_ascii_alphanumeric()).map(|c| c.to_ascii_uppercase()).collect();
+                self.icao_top = 0;
+            }
             _ => {}
         }
     }
 
     pub fn icao_matches(&self, _n: usize) -> Vec<(String, String)> {
+        let q = self.icao.trim().to_ascii_uppercase();
+        if !self.icao_all.is_empty() {
+            let mut rows: Vec<&(String, String)> = self
+                .icao_all
+                .iter()
+                .filter(|r| q.is_empty() || r.0.starts_with(&q) || r.1.to_ascii_uppercase().contains(&q))
+                .collect();
+            rows.sort_by_key(|r| !r.0.starts_with(&q));
+            return rows.into_iter().cloned().collect();
+        }
         match &self.icao_check {
             Some((c, Some(t))) if *c == self.icao.trim().to_ascii_uppercase() => vec![(c.clone(), format!("{c} - {t}"))],
             _ => match &self.icao_job {
@@ -1122,8 +1143,16 @@ impl Menu {
     }
 
     pub fn want_icao(&mut self) {
+        if !self.icao_all_started {
+            self.icao_all_started = true;
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(crate::weather_setup::metar_station_list());
+            });
+            self.icao_all_job = Some(rx);
+        }
         let code = self.icao.trim().to_ascii_uppercase();
-        if code.len() != 4 || !code.chars().all(|c| c.is_ascii_alphabetic()) {
+        if !(3..=4).contains(&code.len()) || !code.chars().all(|c| c.is_ascii_alphanumeric()) {
             return;
         }
         if self.icao_check.as_ref().is_some_and(|c| c.0 == code) || self.icao_job.is_some() {
@@ -1132,12 +1161,19 @@ impl Menu {
         let (tx, rx) = std::sync::mpsc::channel();
         let c = code.clone();
         std::thread::spawn(move || {
-            let _ = tx.send(crate::weather_setup::metar_text(&c));
+            let _ = tx.send(crate::weather_setup::metar_station_info(&c).map(|i| i.name));
         });
         self.icao_job = Some((code, rx));
     }
 
     pub fn poll_icao(&mut self) {
+        if let Some(rx) = self.icao_all_job.take() {
+            match rx.try_recv() {
+                Ok(list) => self.icao_all = list,
+                Err(std::sync::mpsc::TryRecvError::Empty) => self.icao_all_job = Some(rx),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {}
+            }
+        }
         let Some((code, rx)) = self.icao_job.take() else {
             return;
         };
@@ -1152,6 +1188,7 @@ impl Menu {
         let code = self.icao.trim().to_ascii_uppercase();
         match &self.icao_check {
             Some((c, Some(_))) if *c == code => Some(code),
+            _ if self.icao_all.iter().any(|r| r.0 == code) => Some(code),
             _ => None,
         }
     }

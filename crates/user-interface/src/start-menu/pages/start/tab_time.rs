@@ -228,8 +228,10 @@ impl Ui {
             return;
         }
         let fit = (((a[3] - y) / row_h).floor() as usize).max(1);
+        self.start.icao_vis = fit;
+        let first = v.icao_top.min(v.icao_rows.len().saturating_sub(fit));
         let px = (15.0 * u) as u32;
-        for (k, (code, label)) in v.icao_rows.iter().take(fit).enumerate() {
+        for (k, (code, label)) in v.icao_rows.iter().skip(first).take(fit).enumerate() {
             let rc = [a[0], y, a[2], y + row_h];
             let on = code.eq_ignore_ascii_case(v.icao);
             let hot = inside(rc, f.cursor);

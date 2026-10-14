@@ -259,6 +259,7 @@ impl App {
             icao: &m.icao,
             custom_fracs: &custom_fracs,
             icao_rows: &icao_rows,
+            icao_top: m.icao_top,
         };
         let frame = ui::Frame::bare(
             scale,

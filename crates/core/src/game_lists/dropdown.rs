@@ -82,14 +82,9 @@ pub(crate) fn dropdown_for(app: &App, row: usize, id: &str) -> Option<Dropdown> 
             let mut v = vec![(tr("Automatic (nearest the map)"), "metar_src ".to_string())];
             let own = &::config::get_string("gameplay", "metar_station").unwrap_or_default();
             current = Some(0);
-            for (i, (code, label)) in crate::weather_setup::metar_airports(&app.args.root)
-                .into_iter()
-                .enumerate()
-            {
-                if code.eq_ignore_ascii_case(own) {
-                    current = Some(i + 1);
-                }
-                v.push((label, format!("metar_src {code}")));
+            if !own.trim().is_empty() {
+                current = Some(1);
+                v.push((own.to_uppercase(), format!("metar_src {}", own.to_uppercase())));
             }
             v
         }

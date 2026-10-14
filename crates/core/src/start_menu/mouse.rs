@@ -33,6 +33,7 @@ impl App {
         let pic = self.ui.as_ref().map_or([0.0; 4], |u| u.start.route_rect);
         let dbox = self.ui.as_ref().map_or([0.0; 4], |u| u.start.drop_box);
         let (vw, tfield) = self.ui.as_ref().map_or((8, [0.0; 4]), |u| (u.start.weather_vis, u.start.time_field));
+        let vi = self.ui.as_ref().map_or(6, |u| u.start.icao_vis);
         let (ve, ebox) = self.ui.as_ref().map_or((6, [0.0; 4]), |u| (u.start.entry_vis, u.start.entry_box));
         if let Some(m) = self.menu.as_mut().filter(|m| m.page == StartPage::Start) {
             match m.sect {
@@ -73,6 +74,10 @@ impl App {
                     } else {
                         m.step_minute(dir);
                     }
+                }
+                3 if m.weather == 2 => {
+                    let max = m.icao_matches(5).len().saturating_sub(vi) as f32;
+                    m.icao_top = (m.icao_top as f32 - amount * 2.0).clamp(0.0, max).round() as usize;
                 }
                 3 => {
                     let max = m.weathers.len().saturating_sub(vw) as f32;
@@ -386,7 +391,7 @@ impl App {
                     }
                     Act::IcaoPick(k) => {
                         if let Some(m) = self.menu.as_mut() {
-                            if let Some((code, _)) = m.icao_matches(5).get(k) {
+                            if let Some((code, _)) = m.icao_matches(5).get(m.icao_top + k) {
                                 m.icao = code.clone();
                             }
                         }
