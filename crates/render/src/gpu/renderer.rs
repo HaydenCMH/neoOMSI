@@ -114,6 +114,8 @@ pub struct Renderer {
     /// Its corner (world x, y), cell size and corner slot.
     pub(crate) cover_place: std::cell::Cell<Option<(f64, f64, f32, (u32, u32))>>,
     pub(crate) mip_pipeline: wgpu::RenderPipeline,
+    /// The mip levels of the bus's own text and script textures (`mip.wgsl` `fs_plain`).
+    pub(crate) mip_plain_pipeline: wgpu::RenderPipeline,
     pub(crate) mip_layout: wgpu::BindGroupLayout,
     pub(crate) mip_sampler: wgpu::Sampler,
     pub(crate) gpu_error: Arc<std::sync::atomic::AtomicBool>,
