@@ -70,6 +70,17 @@ impl App {
         event_loop: &ActiveEventLoop,
         event: winit::event::KeyEvent,
     ) {
+        // Alt+Enter: a window or fullscreen, in the menu and in the game as in the launcher
+        if event.state == ElementState::Pressed
+            && !event.repeat
+            && self.modifiers.alt_key()
+            && event.physical_key == PhysicalKey::Code(KeyCode::Enter)
+        {
+            if let Some(window) = self.window.as_ref() {
+                crate::game_lists::toggle_fullscreen(window);
+            }
+            return;
+        }
         if event.state == ElementState::Pressed && self.key_search {
             if let Some(text) = event.text.as_deref() {
                 self.key_search_text(text);

@@ -1150,6 +1150,20 @@ fn toggle_set_inner(mut app: Option<&mut App>, id: &str, on: bool) -> Option<(&'
         _ => None,
     }
 }
+/// Alt+Enter: between a normal window and fullscreen, kept in the settings.
+pub(crate) fn toggle_fullscreen(window: &winit::window::Window) {
+    let mode = if ::config::get_bool("graphics", "triple_screen").unwrap_or(false)
+        || window.fullscreen().is_some()
+    {
+        "windowed"
+    } else {
+        "fullscreen"
+    };
+    ::config::set_setting("graphics", "window_mode", mode);
+    let _ = ::config::save();
+    window.set_fullscreen((mode == "fullscreen").then(|| exclusive_fullscreen(window)));
+}
+
 pub(crate) fn apply_window_mode(app: &App, mode: &str) {
     let Some(window) = app.window.as_ref() else {
         return;
@@ -1167,6 +1181,14 @@ pub(crate) fn exclusive_fullscreen(window: &winit::window::Window) -> winit::win
     let Some(monitor) = window.current_monitor() else {
         return winit::window::Fullscreen::Borderless(None);
     };
+    // (Wayland has no exclusive mode: winit ignored the request and the game stayed a window)
+    #[cfg(target_os = "linux")]
+    {
+        use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        if let Ok(RawWindowHandle::Wayland(_)) = window.window_handle().map(|h| h.as_raw()) {
+            return winit::window::Fullscreen::Borderless(Some(monitor));
+        }
+    }
     let size = monitor.size();
     let refresh = monitor.refresh_rate_millihertz();
     let fallback = winit::window::Fullscreen::Borderless(Some(monitor.clone()));
