@@ -322,6 +322,15 @@ impl App {
         let Some(k) = self.menu.as_ref().and_then(|m| m.slider) else {
             return;
         };
+        if k == usize::MAX {
+            let bx = self.ui.as_ref().map_or([0.0; 4], |u| u.start.drop_box);
+            if let Some(m) = self.menu.as_mut().filter(|m| m.drop != 0 && bx[3] > bx[1]) {
+                let max = m.drop_items(m.drop).len().saturating_sub(6);
+                let t = ((cursor.1 - bx[1]) / (bx[3] - bx[1])).clamp(0.0, 1.0);
+                m.drop_top = (t * max as f32).round() as usize;
+            }
+            return;
+        }
         let rc = self.ui.as_ref().and_then(|u| u.start.sliders.get(k).copied());
         if let (Some(rc), Some(m)) = (rc, self.menu.as_mut()) {
             if rc[2] > rc[0] {

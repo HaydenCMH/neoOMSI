@@ -186,7 +186,11 @@ pub struct StartUi {
     pub drops: Vec<[f32; 4]>,
     pub drop_items: Vec<[f32; 4]>,
     pub drop_box: [f32; 4],
+    pub drop_pending: Option<[f32; 4]>,
     pub drop_first: usize,
+    pub drop_scroll: f32,
+    pub view_h: f32,
+    pub drop_scroll_for: usize,
     pub details: [f32; 4],
     pub pic_size: (u32, u32),
     pub pic_rect: [f32; 4],
@@ -262,6 +266,7 @@ impl StartUi {
         self.drops.clear();
         self.drop_items.clear();
         self.drop_box = [0.0; 4];
+        self.drop_pending = None;
         self.details = [0.0; 4];
         self.seasons.clear();
         self.close = [0.0; 4];

@@ -50,9 +50,18 @@ impl Ui {
         let first = top.min(n.saturating_sub(vis));
         let bar_room = if n > vis { 14.0 * u } else { 0.0 };
         let px = (15.0 * u) as u32;
-        for (k, i) in (first..n.min(first + vis)).enumerate() {
-            let y = a[1] + k as f32 * row_h;
-            let rc = [a[0], y, a[2] - bar_room, y + row_h];
+        let (i0, frac) = self.glide_rows(id, first);
+        let bottom = a[1] + vis as f32 * row_h;
+        let slots = vis.min(n - first);
+        let mut slot_rects = vec![[0.0f32; 4]; slots];
+        let alpha0 = self.text.alpha;
+        for i in i0..n.min(i0 + vis + 1) {
+            let y = a[1] + ((i - i0) as f32 - frac) * row_h;
+            let Some((vy0, vy1, seen)) = row_seen(a[1], bottom, y, row_h) else {
+                continue;
+            };
+            let rc = [a[0], vy0, a[2] - bar_room, vy1];
+            self.text.alpha = alpha0 * seen.powi(3);
             let on = sel == Some(i);
             let hot = inside(rc, f.cursor);
             let hv = self.ease((id, "item", i), if hot || on { 1.0 } else { 0.0 }, 10.0);
@@ -85,16 +94,36 @@ impl Ui {
                 let l = self.text.label(r, scene, &name, px, col);
                 l.place(scene, rc[0] + TEXT_IN * u, y + (row_h - l.h as f32) * 0.5);
             }
-            rects.push(rc);
+            if i >= first && i - first < slots {
+                slot_rects[i - first] = rc;
+            }
         }
+        self.text.alpha = alpha0;
+        rects.extend(slot_rects);
         if n > vis {
             let track = [a[2] - 6.0 * u, a[1], a[2], a[1] + vis as f32 * row_h];
             self.text.rounded(r, scene, track, 3.0 * u, OPT_TRACK);
             let th = ((vis as f32 / n as f32) * (track[3] - track[1])).max(24.0 * u);
-            let ty = track[1] + (track[3] - track[1] - th) * first as f32 / (n - vis) as f32;
+            let ty = track[1] + (track[3] - track[1] - th) * (i0 as f32 + frac) / (n - vis) as f32;
             self.text.rounded(r, scene, [track[0], ty, track[2], ty + th], 3.0 * u, [255, 255, 255, 60]);
         }
         vis
+    }
+
+    pub(super) fn glide_rows(&mut self, id: u8, target: usize) -> (usize, f32) {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (id, "glide", 0usize).hash(&mut h);
+        let k = 1.0 - (-self.anim_dt * 20.0).exp();
+        let t = target as f32;
+        let v = self.anim.entry(h.finish()).or_insert(t);
+        *v += (t - *v) * k;
+        if (t - *v).abs() < 0.01 {
+            *v = t;
+        }
+        let s = v.max(0.0);
+        let i0 = s.floor() as usize;
+        (i0, s - i0 as f32)
     }
 
     pub(super) fn start_art(&mut self, r: &Renderer, scene: &mut Scene, a: [f32; 4], icon: &str) {
