@@ -56,6 +56,31 @@ fn native_layout_keeps_gamepad_and_wheel_steering_separate() {
     );
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn only_a_force_feedback_wheel_steers_without_the_global_dead_zone() {
+    use super::{Connected, DeviceCfg, Func, configured_steering, global_deadzone};
+    let mut connected = Connected {
+        name: "Wheel or yoke".into(),
+        hardware_id: None,
+        axes: vec![(0, 0.02)],
+        gamepad: false,
+        native_axes: true,
+        ff: false,
+        ff_capable: true,
+        buttons: 0,
+    };
+    let mut device = DeviceCfg::default();
+    device.axes[0] = Some((Func::Steering, false));
+    let (steering, _) = configured_steering(&connected, &device, 0, 0.02, 1.0);
+    assert!((steering - 0.02).abs() < 1e-6);
+    // a joystick's centre is slack: it keeps the settings' dead zone
+    connected.ff_capable = false;
+    let (steering, _) = configured_steering(&connected, &device, 0, 0.02, 1.0);
+    let dz = global_deadzone();
+    assert!((steering - 0.02_f32.signum() * ((0.02 - dz).max(0.0) / (1.0 - dz))).abs() < 1e-6);
+}
+
 #[test]
 fn a_missing_axis_does_not_shift_the_rest() {
     // X and Rz only (a wheel with one pedal axis): Rz stays slot 5

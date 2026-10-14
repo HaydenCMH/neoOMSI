@@ -151,8 +151,12 @@ pub(super) fn configured_steering(
             None,
         )
     } else {
-        let (steering, position) =
-            wheel_steering(value, reversed, d.axis_flags[k], d.wheel_deadzone(k), gain);
+        let deadzone = if c.ff_capable {
+            d.wheel_deadzone(k)
+        } else {
+            d.deadzone(k)
+        };
+        let (steering, position) = wheel_steering(value, reversed, d.axis_flags[k], deadzone, gain);
         (steering, Some(position))
     }
 }

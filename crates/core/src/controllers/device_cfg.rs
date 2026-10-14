@@ -154,7 +154,7 @@ impl DeviceCfg {
         }
     }
 
-    /// A wheel's centre is not slack: only a dead zone set for the wheel itself (#866).
+    /// A force-feedback wheel's centre is not slack: only a dead zone set for it (#866).
     pub(crate) fn wheel_deadzone(&self, k: usize) -> f32 {
         if self.own_deadzone(k) {
             self.deadzone(k)
