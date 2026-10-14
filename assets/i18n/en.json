@@ -538,29 +538,29 @@
         "folder": "Folder",
         "install": {
           "button": "Choose",
-          "desc": "Pick ZIP files and install them into the mods folder",
-          "name": "Install ZIP",
-          "title": "Choose ZIP files for mods"
+          "desc": "Select an archive to install as a mod.\n\nSupported formats:\n- Zip\n- Rar\n- 7Zip",
+          "name": "Install a mod from an archive",
+          "title": "Select a mod archive to install"
         },
         "list": {
           "desc": "All loaded mods and whether data is missing",
           "name": "Active mods"
         },
         "none": "No mods active",
-        "none_desc": "Put mods into the mods folder as a folder or a ZIP",
+        "none_desc": "No mods were found. Please note that OMSI 2 content is not counted as mods.\n\n\n\nYou can install mods from the Mods folder as archives or folders.",
         "open": {
           "button": "Open",
-          "desc": "Opens the folder that holds the mods",
+          "desc": "Opens the Mods folder",
           "name": "Mods folder"
         },
         "status": {
           "empty": "Data missing",
-          "empty_desc": "no OMSI content found (e.g. Vehicles or maps)",
+          "empty_desc": "No OMSI Content found (e.g. Vehicles or maps)",
           "ok": "OK",
           "unreadable": "Data missing",
-          "unreadable_desc": "the folder cannot be read",
+          "unreadable_desc": "The folder cannot be read",
           "zip_error": "Data missing",
-          "zip_error_desc": "the ZIP cannot be read"
+          "zip_error_desc": "The ZIP archive cannot be read"
         },
         "zip": "ZIP"
       },
