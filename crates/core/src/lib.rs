@@ -501,6 +501,7 @@ pub(crate) fn make_app(
         renderer: None,
         resize_pending: None,
         pending_triple_screen_span: None,
+        boot: None,
         #[cfg(windows)]
         vr: None,
         scene: None,
