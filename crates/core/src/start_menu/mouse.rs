@@ -113,6 +113,15 @@ impl App {
             return;
         }
         if !pressed {
+            let click = self
+                .menu
+                .as_ref()
+                .filter(|m| m.sect == 1)
+                .and_then(|m| m.drag)
+                .is_some_and(|(from, _)| (cursor.0 - from.0).hypot(cursor.1 - from.1) < 5.0);
+            if click {
+                self.start_entry_click(cursor);
+            }
             if let Some(m) = self.menu.as_mut() {
                 m.drag = None;
                 m.slider = None;

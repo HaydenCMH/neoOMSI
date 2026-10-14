@@ -230,6 +230,7 @@ pub struct StartUi {
     pub route_rect: [f32; 4],
     pub route_status: String,
     pub stops: Vec<(String, f32, f32)>,
+    pub entry_hits: Vec<(u32, f32, f32)>,
     t: f32,
     page_t: f32,
     sect_t: f32,
