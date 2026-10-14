@@ -563,7 +563,9 @@
           "button": "Change",
           "desc": "The folder with Omsi.exe, maps and Vehicles in it",
           "name": "OMSI 2 installation",
-          "title": "The OMSI 2 folder (with maps and Vehicles in it)"
+          "title": "The OMSI 2 folder (with maps and Vehicles in it)",
+          "exe_title": "Select the Omsi.exe of your OMSI 2 installation",
+          "incomplete": "{path} is not a complete OMSI 2 installation.\n\nMissing: {missing}"
         },
         "root_none": "Not chosen yet",
         "root_restart": "takes effect after a restart",

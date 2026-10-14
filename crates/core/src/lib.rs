@@ -234,6 +234,35 @@ pub(crate) fn launcher_statics() {
     );
 }
 
+fn ask_for_root() -> Option<PathBuf> {
+    loop {
+        let exe = rfd::FileDialog::new()
+            .set_title(::i18n::translate("pause.options.game.root.exe_title", &[]))
+            .add_filter("Omsi.exe", &["exe"])
+            .pick_file()?;
+        let dir = exe.parent()?.to_path_buf();
+        if is_omsi_root(&dir) {
+            let mut c = omsi_launcher_lib::load_config();
+            c.root = dir.to_string_lossy().to_string();
+            if let Err(e) = omsi_launcher_lib::save_config(&c) {
+                log::warn!("OMSI 2 folder not saved: {e}");
+            }
+            if let Some(memo) = root_memo() {
+                let _ = std::fs::write(memo, dir.to_string_lossy().as_bytes());
+            }
+            return Some(dir);
+        }
+        let missing = legacy_config::missing_original_essentials(&dir);
+        fatal_dialog(
+            "neoOMSI",
+            &::i18n::translate(
+                "pause.options.game.root.incomplete",
+                &[("path", &dir.display()), ("missing", &missing.join(", "))],
+            ),
+        );
+    }
+}
+
 pub(crate) fn prepare(
     mut args: Args,
 ) -> Result<Option<(Args, Option<server::ServerCfg>)>> {
@@ -262,7 +291,14 @@ pub(crate) fn prepare(
     log::info!("script random seed {seed} (OMSI_SEED={seed} repeats it)");
     let launcher_mode = args.launcher;
     if !is_omsi_root(&args.root) {
-        match find_root() {
+        let asked = || {
+            let silent = launcher_mode
+                || server_cfg.is_some()
+                || args.offscreen.is_some()
+                || legacy_config::env::var_os("OMSI_BACKGROUND").is_some();
+            if silent { None } else { ask_for_root() }
+        };
+        match find_root().or_else(asked) {
             Some(p) => {
                 log::info!("OMSI 2 found at {}", p.display());
                 args.root = p;
@@ -275,7 +311,7 @@ pub(crate) fn prepare(
                 let text = format!(
                     "The original OMSI 2 was not found.\n\n\
                      neoOMSI needs a complete installation of the original game (any version). \
-                     Choose its folder in the launcher (Setup), or start once with \
+                     Start neoOMSI again and select its Omsi.exe, or start once with \
                      --root \"/path/to/OMSI 2\", the folder with Omsi.exe, maps and Vehicles in it.\n\n\
                      Missing in {}: {}",
                     args.root.display(),
