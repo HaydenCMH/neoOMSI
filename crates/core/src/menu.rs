@@ -7,7 +7,6 @@ pub struct TourItem {
     pub span: String,
     pub start: f32,
     pub trips: Vec<String>,
-    /// departure, "first stop > terminus", trip name
     pub runs: Vec<(f32, String, String)>,
 }
 
@@ -23,13 +22,11 @@ fn hm(m: f32) -> String {
     format!("{:02}:{:02}", t / 60 % 24, t % 60)
 }
 
-// no wrap at midnight: a night trip at 24:49 is not the morning's 00:49
 fn run_time(m: f32) -> String {
     let t = m.max(0.0) as i32;
     format!("{:02}:{:02}", t / 60, t % 60)
 }
 
-/// A trip's first stop by name, as the launcher showed it.
 fn first_stop(tt: &::timetable::TimetableData, trip: &::timetable::Trip) -> String {
     let named = |id: i64| tt.bus_stops.iter().find(|b| b.object_id == id).map(|b| b.name.trim().to_string());
     match trip.stations.first() {
@@ -109,7 +106,8 @@ pub struct Menu {
     pub icao: String,
     pub slider: Option<usize>,
     pub on_foot: bool,
-    pub airports: Vec<(String, String)>,
+    pub icao_check: Option<(String, Option<String>)>,
+    pub icao_job: Option<(String, std::sync::mpsc::Receiver<Option<String>>)>,
     pub custom: crate::weather_setup::CustomWeather,
     pub traffic: usize,
     pub passengers: bool,
@@ -356,7 +354,7 @@ impl Menu {
         let mut weathers = vec![
             ("default".to_string(), String::new()),
             ("cycle".to_string(), crate::weather_cycle::CYCLE.to_string()),
-            ("real".to_string(), "metar-once:".to_string()),
+            ("real".to_string(), "metar-sync:".to_string()),
             ("custom".to_string(), "custom".to_string()),
         ];
         if let Ok(rd) = std::fs::read_dir(root.join("Weather")) {
@@ -410,7 +408,8 @@ impl Menu {
             icao: String::new(),
             slider: None,
             on_foot: ::config::get_bool("gameplay", "start_on_foot").unwrap_or(false),
-            airports: crate::weather_setup::metar_airports(root),
+            icao_check: None,
+            icao_job: None,
             custom: Default::default(),
             traffic: 30,
             passengers: true,
@@ -618,14 +617,13 @@ impl Menu {
         self.numbers = numbers;
         if self.want_bus.as_ref().is_some_and(|w| w.0.eq_ignore_ascii_case(&bus)) {
             let (_, livery, depot, number, plate) = self.want_bus.take().unwrap_or_default();
-            self.livery = self.liveries.iter().position(|l| *l == livery).map_or(0, |i| i + 1);
-            self.depot = self.depots.iter().position(|d| d.1.eq_ignore_ascii_case(&depot)).map_or(0, |i| i + 1);
-            self.number = self.numbers.iter().position(|n| *n == number).map_or(0, |i| i + 1);
+            self.livery = self.liveries.iter().position(|l| *l == livery).unwrap_or(0);
+            self.depot = self.depots.iter().position(|d| d.1.eq_ignore_ascii_case(&depot)).unwrap_or(0);
+            self.number = self.numbers.iter().position(|n| *n == number).unwrap_or(0);
             self.plate = plate;
         }
     }
 
-    /// The choices of the last drive, as `remember` kept them in the settings.
     pub fn recall(&mut self) {
         let get = |k: &str| ::config::get_string("start_menu", k).unwrap_or_default();
         self.route = !::config::get_bool("start_menu", "free_drive").unwrap_or(true);
@@ -681,11 +679,10 @@ impl Menu {
         }
     }
 
-    /// The rows of dropdown `kind` shown dimmed: the trips that left before the start time.
     pub fn drop_dim(&self, kind: usize) -> Vec<bool> {
         let now = (self.hour * 60 + self.minute) as f32;
         match (kind, self.chosen_tour()) {
-            (16, Some((_, t))) => std::iter::once(false).chain(t.runs.iter().map(|r| r.0 < now)).collect(),
+            (16, Some((_, t))) => t.runs.iter().map(|r| r.0 < now).collect(),
             _ => Vec::new(),
         }
     }
@@ -845,7 +842,7 @@ impl Menu {
 
     pub fn route_text(&self) -> String {
         match self.chosen_tour() {
-            Some((l, t)) if self.trip > 0 => format!("{}  -  {}  -  {}", l.name, t.number, self.trip_text()),
+            Some((l, t)) if !self.trip_text().is_empty() => format!("{}  -  {}  -  {}", l.name, t.number, self.trip_text()),
             Some((l, t)) => format!("{}  -  {}", l.name, t.number),
             None => "-".to_string(),
         }
@@ -942,7 +939,7 @@ impl Menu {
                         }
                     })
                     .collect();
-                tours.sort_by(|a, b| a.start.total_cmp(&b.start).then_with(|| natural_cmp(&a.number, &b.number)));
+                tours.sort_by(|a, b| natural_cmp(&a.number, &b.number).then_with(|| a.start.total_cmp(&b.start)));
                 LineItem { name: l.name.trim().to_string(), title, tours }
             })
             .collect();
@@ -964,7 +961,7 @@ impl Menu {
                 self.pick_line(l);
                 if let Some(t) = self.lines[l].tours.iter().position(|x| x.number.eq_ignore_ascii_case(&tour)) {
                     self.pick_tour(t);
-                    self.trip = self.lines[l].tours[t].runs.iter().position(|r| run_time(r.0) == trip).map_or(0, |i| i + 1);
+                    self.trip = self.lines[l].tours[t].runs.iter().position(|r| run_time(r.0) == trip).unwrap_or(0);
                 }
             }
         }
@@ -979,7 +976,7 @@ impl Menu {
     }
 
     pub fn trip_rows(&self) -> Vec<String> {
-        let mut v = vec![::i18n::translate("start.maps.autotrip", &[])];
+        let mut v = Vec::new();
         if let Some((_, t)) = self.chosen_tour() {
             v.extend(t.runs.iter().map(|(dep, to, _)| format!("{}  {to}", hm(*dep))));
         }
@@ -990,19 +987,16 @@ impl Menu {
         self.trip_rows().get(self.trip).cloned().unwrap_or_default()
     }
 
-    /// The picked trip as `--trip` takes it: its departure, "HH:MM".
     pub fn trip_arg(&self) -> Option<String> {
         let (_, t) = self.chosen_tour()?;
-        t.runs.get(self.trip.checked_sub(1)?).map(|r| run_time(r.0))
+        t.runs.get(self.trip).map(|r| run_time(r.0))
     }
 
-    /// Picking a trip starts the drive three minutes before it leaves, as the old launcher did.
     fn pick_trip(&mut self, i: usize) {
         self.trip = i;
-        let dep = self.chosen_tour().and_then(|(_, t)| t.runs.get(i.checked_sub(1)?)).map(|r| r.0);
+        let dep = self.chosen_tour().and_then(|(_, t)| t.runs.get(i)).map(|r| r.0);
         if let Some(dep) = dep {
             let at = (dep.floor() as i32 - 3).max(0);
-            // a later trip keeps the start time: the bus waits for it
             if self.hour * 60 + self.minute > at {
                 self.hour = at / 60 % 24;
                 self.minute = at % 60;
@@ -1010,7 +1004,6 @@ impl Menu {
         }
     }
 
-    /// A tour still has a trip leaving at the start time or later.
     fn tour_left(&self, t: &TourItem) -> bool {
         let now = (self.hour * 60 + self.minute) as f32;
         t.runs.iter().any(|r| r.0 >= now)
@@ -1116,14 +1109,51 @@ impl Menu {
         }
     }
 
-    pub fn icao_matches(&self, n: usize) -> Vec<(String, String)> {
-        let q = self.icao.trim().to_lowercase();
-        self.airports
-            .iter()
-            .filter(|(c, l)| q.is_empty() || c.to_lowercase().starts_with(&q) || l.to_lowercase().contains(&q))
-            .take(n)
-            .cloned()
-            .collect()
+    pub fn icao_matches(&self, _n: usize) -> Vec<(String, String)> {
+        match &self.icao_check {
+            Some((c, Some(t))) if *c == self.icao.trim().to_ascii_uppercase() => vec![(c.clone(), format!("{c} - {t}"))],
+            _ => match &self.icao_job {
+                Some((c, _)) if *c == self.icao.trim().to_ascii_uppercase() => {
+                    vec![(c.clone(), format!("{c} - {}", ::i18n::translate("start.maps.icao_checking", &[])))]
+                }
+                _ => Vec::new(),
+            },
+        }
+    }
+
+    pub fn want_icao(&mut self) {
+        let code = self.icao.trim().to_ascii_uppercase();
+        if code.len() != 4 || !code.chars().all(|c| c.is_ascii_alphabetic()) {
+            return;
+        }
+        if self.icao_check.as_ref().is_some_and(|c| c.0 == code) || self.icao_job.is_some() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let c = code.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(crate::weather_setup::metar_text(&c));
+        });
+        self.icao_job = Some((code, rx));
+    }
+
+    pub fn poll_icao(&mut self) {
+        let Some((code, rx)) = self.icao_job.take() else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok(t) => self.icao_check = Some((code, t)),
+            Err(std::sync::mpsc::TryRecvError::Empty) => self.icao_job = Some((code, rx)),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => self.icao_check = Some((code, None)),
+        }
+    }
+
+    pub fn icao_valid(&self) -> Option<String> {
+        let code = self.icao.trim().to_ascii_uppercase();
+        match &self.icao_check {
+            Some((c, Some(_))) if *c == code => Some(code),
+            _ => None,
+        }
     }
 
     pub fn mini_key(&self) -> Option<(String, String)> {
@@ -1372,7 +1402,7 @@ impl Menu {
     pub fn weather_arg(&self) -> Option<String> {
         match self.weather {
             0 => None,
-            2 => Some(format!("metar-once:{}", self.icao.trim().to_ascii_uppercase())),
+            2 => Some(format!("metar-sync:{}", self.icao_valid().unwrap_or_default())),
             3 => Some(self.custom.encode()),
             w => self.weathers.get(w).map(|x| x.1.clone()),
         }

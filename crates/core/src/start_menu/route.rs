@@ -199,6 +199,10 @@ impl App {
     }
 
     pub(super) fn start_route_preview(&mut self) {
+        if let Some(m) = self.menu.as_mut() {
+            m.want_icao();
+            m.poll_icao();
+        }
         let in_tab = self.menu.as_ref().is_some_and(|m| m.page == StartPage::Start && m.sect == 1);
         if !in_tab {
             if let Some(m) = self.menu.as_mut() {
@@ -244,9 +248,9 @@ impl App {
         };
         let map = m.mini_key().map(|(n, d)| format!("{n}|{d}")).unwrap_or_default();
         let trips: Vec<String> = match m.chosen_tour() {
-            Some((_, t)) if m.route => match m.trip.checked_sub(1).and_then(|i| t.runs.get(i)) {
+            Some((_, t)) if m.route => match t.runs.get(m.trip) {
                 Some(run) => vec![run.2.clone()],
-                None => t.trips.clone(),
+                None => t.trips.iter().take(1).cloned().collect(),
             },
             _ => Vec::new(),
         };

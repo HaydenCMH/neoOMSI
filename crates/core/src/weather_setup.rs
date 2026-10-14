@@ -953,15 +953,14 @@ pub(crate) fn fetch_metar(icao: &str) -> ::content::weather::Weather {
     }
 }
 
-/// The weather of an airport's METAR report, None when it cannot be had.
-pub(crate) fn try_metar(icao: &str) -> Option<::content::weather::Weather> {
+pub(crate) fn metar_text(icao: &str) -> Option<String> {
     // (Tegel, OMSI's Berlin default, closed in 2020: Berlin's airport now reports)
     let icao = match icao.to_ascii_uppercase().as_str() {
         "EDDT" | "EDDI" | "" => "EDDB".to_string(),
         other => other.to_string(),
     };
     let url = format!("https://aviationweather.gov/api/data/metar?ids={icao}&format=raw");
-    let text = ureq::get(&url)
+    ureq::get(&url)
         .header("User-Agent", AVIATION_WEATHER_USER_AGENT)
         .config()
         .timeout_global(Some(std::time::Duration::from_secs(6)))
@@ -970,8 +969,15 @@ pub(crate) fn try_metar(icao: &str) -> Option<::content::weather::Weather> {
         .ok()
         .and_then(|r| r.into_body().read_to_string().ok())
         .map(|t| t.lines().next().unwrap_or("").trim().to_string())
-        .filter(|t| !t.is_empty());
-    let t = text?;
+        .filter(|t| !t.is_empty())
+}
+
+pub(crate) fn try_metar(icao: &str) -> Option<::content::weather::Weather> {
+    let icao = match icao.to_ascii_uppercase().as_str() {
+        "EDDT" | "EDDI" | "" => "EDDB".to_string(),
+        other => other.to_string(),
+    };
+    let t = metar_text(&icao)?;
     log::info!("current weather at {icao}: {t}");
     let mut w = ::content::weather::from_metar(&icao, &t);
     w.path = PathBuf::from(format!("metar:{icao}"));
@@ -1017,72 +1023,15 @@ pub(crate) fn from_report(s: &str) -> Option<::content::weather::Weather> {
     Some(w)
 }
 
-/// A station name resolved from Aviation Weather's current station catalogue.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct MetarStationInfo {
-    pub icao: String,
-    pub name: String,
-}
-
-#[derive(serde::Deserialize)]
-struct StationInfoResponse {
-    #[serde(rename = "icaoId")]
-    icao: String,
-    site: String,
-}
-
-fn parse_metar_station_info(icao: &str, text: &str) -> Option<MetarStationInfo> {
-    let station = serde_json::from_str::<Vec<StationInfoResponse>>(text)
-        .ok()?
-        .into_iter()
-        .next()?;
-    (station.icao.eq_ignore_ascii_case(icao) && !station.site.trim().is_empty()).then_some(MetarStationInfo {
-        icao: station.icao.to_ascii_uppercase(),
-        name: station.site.trim().to_string(),
-    })
-}
-
-/// Resolve an ICAO code without downloading a weather report. Invalid or unavailable stations
-/// intentionally return None so the launcher can show that the code cannot be used.
-pub(crate) fn metar_station_info(icao: &str) -> Option<MetarStationInfo> {
-    let icao = icao.trim().to_ascii_uppercase();
-    if icao.len() != 4 || !icao.chars().all(|character| character.is_ascii_alphabetic()) {
-        return None;
-    }
-    let url = format!("https://aviationweather.gov/api/data/stationinfo?ids={icao}&format=json");
-    let text = ureq::get(&url)
-        .header("User-Agent", AVIATION_WEATHER_USER_AGENT)
-        .config()
-        .timeout_global(Some(std::time::Duration::from_secs(6)))
-        .build()
-        .call()
-        .ok()?
-        .into_body()
-        .read_to_string()
-        .ok()?;
-    parse_metar_station_info(&icao, &text)
-}
-
 #[cfg(test)]
 mod metar_mode_tests {
-    use super::{metar_mode, parse_metar_station_info, MetarMode};
+    use super::{metar_mode, MetarMode};
 
     #[test]
     fn distinguishes_a_one_off_report_from_live_sync() {
         assert_eq!(metar_mode("metar-once:EGNX"), Some((MetarMode::Once, "EGNX")));
         assert_eq!(metar_mode("metar-sync:EGNX"), Some((MetarMode::Sync, "EGNX")));
         assert_eq!(metar_mode("metar:EGNX"), Some((MetarMode::Legacy, "EGNX")));
-    }
-
-    #[test]
-    fn resolves_an_airport_name_from_the_live_station_response() {
-        let station = parse_metar_station_info(
-            "EGNX",
-            r#"[{"icaoId":"EGNX","site":"Nottingham/E Midlands Arpt"}]"#,
-        )
-        .unwrap();
-        assert_eq!(station.icao, "EGNX");
-        assert_eq!(station.name, "Nottingham/E Midlands Arpt");
     }
 }
 
