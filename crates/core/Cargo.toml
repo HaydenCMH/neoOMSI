@@ -72,7 +72,7 @@ sha2 = "0.11"
 imgui = { version = "0.12", optional = true }
 bytemuck = { workspace = true, optional = true }
 # updates: the release archives from GitHub
-zip = { version = "8", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 
 # the desktop's clipboard and file dialogs (a phone has neither in this form)
 [target.'cfg(not(target_os = "android"))'.dependencies]

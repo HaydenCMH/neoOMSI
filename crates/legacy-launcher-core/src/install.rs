@@ -615,7 +615,7 @@ fn extract_zip(job: &Job, content: &Path, src: &Path, dest: &Path) -> Result<()>
     let mut z = zip::ZipArchive::new(std::io::BufReader::with_capacity(1 << 13, f))
         .with_context(|| format!("{} is not a readable zip archive", src.display()))?;
     let names: Vec<String> = (0..z.len())
-        .filter_map(|i| z.by_index_raw(i).ok().map(|e| e.name().replace('\\', "/")))
+        .filter_map(|i| z.by_index_raw(i).ok().map(|e| e.name().unwrap().replace('\\', "/")))
         .collect();
     let first = names
         .first()
@@ -626,7 +626,7 @@ fn extract_zip(job: &Job, content: &Path, src: &Path, dest: &Path) -> Result<()>
     for i in 0..z.len() {
         job.check_cancel()?;
         let mut e = z.by_index(i)?;
-        let raw = e.name().replace('\\', "/");
+        let raw = e.name()?.replace('\\', "/");
         let rel = match &strip {
             Some(p) => raw.strip_prefix(p.as_str()).unwrap_or(&raw).to_string(),
             None => raw,
