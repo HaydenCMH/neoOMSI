@@ -104,6 +104,7 @@ pub struct StartView<'a> {
     pub tour_sel: Option<usize>,
     pub tour_top: usize,
     pub tour_query: &'a str,
+    pub trip_text: &'a str,
     pub route_sub: &'a str,
     pub entries: &'a [String],
     pub entry_text: &'a str,

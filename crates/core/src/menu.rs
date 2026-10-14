@@ -7,6 +7,7 @@ pub struct TourItem {
     pub span: String,
     pub start: f32,
     pub trips: Vec<String>,
+    pub runs: Vec<(f32, String)>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -19,6 +20,12 @@ pub struct LineItem {
 fn hm(m: f32) -> String {
     let t = m.max(0.0) as i32;
     format!("{:02}:{:02}", t / 60 % 24, t % 60)
+}
+
+// no wrap at midnight: a night trip at 24:49 is not the morning's 00:49
+fn run_time(m: f32) -> String {
+    let t = m.max(0.0) as i32;
+    format!("{:02}:{:02}", t / 60, t % 60)
 }
 
 fn now_local() -> (i32, i32, i32, i32, i32) {
@@ -132,6 +139,9 @@ pub struct Menu {
     pub lines_for: Option<String>,
     pub line: usize,
     pub tour: usize,
+    pub trip: usize,
+    pub want_route: Option<(String, String, String, String)>,
+    pub want_bus: Option<(String, String, String, String, String)>,
     pub line_top: usize,
     pub tour_top: usize,
     pub line_query: String,
@@ -431,6 +441,9 @@ impl Menu {
             lines_for: None,
             line: 0,
             tour: 0,
+            trip: 0,
+            want_route: None,
+            want_bus: None,
             line_top: 0,
             tour_top: 0,
             line_query: String::new(),
@@ -581,6 +594,48 @@ impl Menu {
         numbers.sort_by(|a, b| natural_cmp(a, b));
         numbers.dedup();
         self.numbers = numbers;
+        if self.want_bus.as_ref().is_some_and(|w| w.0.eq_ignore_ascii_case(&bus)) {
+            let (_, livery, depot, number, plate) = self.want_bus.take().unwrap_or_default();
+            self.livery = self.liveries.iter().position(|l| *l == livery).map_or(0, |i| i + 1);
+            self.depot = self.depots.iter().position(|d| d.1.eq_ignore_ascii_case(&depot)).map_or(0, |i| i + 1);
+            self.number = self.numbers.iter().position(|n| *n == number).map_or(0, |i| i + 1);
+            self.plate = plate;
+        }
+    }
+
+    /// The choices of the last drive, as `remember` kept them in the settings.
+    pub fn recall(&mut self) {
+        let get = |k: &str| ::config::get_string("start_menu", k).unwrap_or_default();
+        self.route = !::config::get_bool("start_menu", "free_drive").unwrap_or(true);
+        if !get("line").is_empty() {
+            self.want_route = Some((get("map"), get("line"), get("tour"), get("trip")));
+        }
+        if let Some(i) = self.vehicles.iter().position(|v| v.1.eq_ignore_ascii_case(&get("bus"))) {
+            self.vehicle = i;
+            self.veh_open = self.maker_key(i);
+            self.want_bus = Some((get("bus"), get("livery"), get("depot"), get("fleet_number"), get("plate")));
+        }
+    }
+
+    pub fn remember(&self) {
+        let set = |k: &str, v: String| ::config::set_setting("start_menu", k, v);
+        ::config::set_setting("start_menu", "free_drive", !self.route);
+        if let Some((l, t)) = self.chosen_tour() {
+            set("map", self.maps.get(self.map).map(|m| m.1.clone()).unwrap_or_default());
+            set("line", l.name.clone());
+            set("tour", t.number.clone());
+            set("trip", self.trip_arg().unwrap_or_default());
+        }
+        if let Some(bus) = self.vehicles.get(self.vehicle).filter(|_| self.opts_for == Some(self.vehicle)) {
+            set("bus", bus.1.clone());
+            set("livery", self.livery.checked_sub(1).and_then(|i| self.liveries.get(i)).cloned().unwrap_or_default());
+            set("depot", self.depot.checked_sub(1).and_then(|i| self.depots.get(i)).map(|d| d.1.clone()).unwrap_or_default());
+            set("fleet_number", self.number.checked_sub(1).and_then(|i| self.numbers.get(i)).cloned().unwrap_or_default());
+            set("plate", self.plate.trim().to_string());
+        }
+        if let Err(e) = ::config::save() {
+            log::warn!("settings: cannot save: {e}");
+        }
     }
 
     pub fn livery_text(&self) -> String {
@@ -617,6 +672,9 @@ impl Menu {
         if kind == 14 {
             return crate::weather_setup::CUSTOM_PRECIP.iter().map(|s| s.to_string()).collect();
         }
+        if kind == 16 {
+            return self.trip_rows();
+        }
         let mut v = vec![::i18n::translate("start.maps.auto", &[])];
         match kind {
             8 => v.extend(self.liveries.iter().cloned()),
@@ -637,6 +695,7 @@ impl Menu {
             }
             8 => self.livery,
             9 => self.depot,
+            16 => self.trip,
             _ => self.number,
         }
     }
@@ -653,6 +712,7 @@ impl Menu {
             }
             8 => self.livery = i,
             9 => self.depot = i,
+            16 => self.pick_trip(i),
             _ => self.number = i,
         }
         self.drop = 0;
@@ -768,22 +828,32 @@ impl Menu {
         let Some(map) = self.maps.get(self.map).map(|m| m.1.clone()) else {
             return;
         };
-        if self.lines_for.as_deref() == Some(map.as_str()) {
+        let (y, mo, d) = self.ymd();
+        let date = y * 10000 + mo * 100 + d;
+        let key = format!("{map}|{date}");
+        if self.lines_for.as_deref() == Some(key.as_str()) {
             return;
         }
-        self.lines_for = Some(map.clone());
+        let same_map = self.lines_for.as_deref().and_then(|k| k.rsplit_once('|')).is_some_and(|k| k.0 == map);
+        if !same_map {
+            self.line_query.clear();
+            self.tour_query.clear();
+        }
+        let keep = self.lines.get(self.line).map(|l| l.name.clone()).filter(|_| same_map);
+        let keep_tour = self.chosen_tour().map(|(_, t)| t.number.clone()).filter(|_| same_map);
+        self.lines_for = Some(key);
         self.lines.clear();
         self.line = 0;
         self.tour = 0;
         self.line_top = 0;
         self.tour_top = 0;
-        self.line_query.clear();
-        self.tour_query.clear();
         let cfg = ::mods::resolve_path(root, &map);
         let Some(dir) = cfg.parent() else {
             return;
         };
-        let tt = ::timetable::TimetableData::load(dir);
+        let chrono = ::map::active_chrono_dirs(dir, date);
+        let off = ::map::chrono_deactivated_lines(&chrono);
+        let tt = ::timetable::TimetableData::load_with_chrono(dir, &chrono, &off);
         let mut chosen: Vec<&::timetable::Line> =
             tt.lines.iter().filter(|l| l.user_allowed && !l.tours.is_empty()).collect();
         if chosen.is_empty() {
@@ -811,11 +881,18 @@ impl Menu {
                                 trips.push(x.trip.clone());
                             }
                         }
+                        let mut runs: Vec<(f32, String)> = t
+                            .trips
+                            .iter()
+                            .map(|x| (x.departure, tt.trip(&x.trip).map(|t| t.terminus.trim().to_string()).unwrap_or_default()))
+                            .collect();
+                        runs.sort_by(|a, b| a.0.total_cmp(&b.0));
                         TourItem {
                             number: t.number.trim().to_string(),
                             span: if t.trips.is_empty() { String::new() } else { format!("{} - {}", hm(first), hm(last)) },
                             start: if t.trips.is_empty() { 0.0 } else { first },
                             trips,
+                            runs,
                         }
                     })
                     .collect();
@@ -826,6 +903,61 @@ impl Menu {
         lines.sort_by(|a, b| natural_cmp(&a.name, &b.name));
         self.lines = lines;
         self.pick_line(0);
+        if let Some(k) = keep {
+            if let Some(l) = self.lines.iter().position(|x| x.name.eq_ignore_ascii_case(&k)) {
+                self.pick_line(l);
+                if let Some(t) = keep_tour.and_then(|n| self.lines[l].tours.iter().position(|x| x.number == n)) {
+                    self.pick_tour(t);
+                }
+            }
+        }
+        self.fix_filters();
+        if self.want_route.as_ref().is_some_and(|w| w.0.eq_ignore_ascii_case(&map)) {
+            let (_, line, tour, trip) = self.want_route.take().unwrap_or_default();
+            if let Some(l) = self.lines.iter().position(|x| x.name.eq_ignore_ascii_case(&line)) {
+                self.pick_line(l);
+                if let Some(t) = self.lines[l].tours.iter().position(|x| x.number.eq_ignore_ascii_case(&tour)) {
+                    self.pick_tour(t);
+                    self.trip = self.lines[l].tours[t].runs.iter().position(|r| run_time(r.0) == trip).map_or(0, |i| i + 1);
+                }
+            }
+        }
+    }
+
+    pub fn pick_tour(&mut self, i: usize) {
+        if self.tour != i {
+            self.trip = 0;
+        }
+        self.tour = i;
+    }
+
+    pub fn trip_rows(&self) -> Vec<String> {
+        let mut v = vec![::i18n::translate("start.maps.autotrip", &[])];
+        if let Some((_, t)) = self.chosen_tour() {
+            v.extend(t.runs.iter().map(|(dep, to)| format!("{}  {to}", hm(*dep))));
+        }
+        v
+    }
+
+    pub fn trip_text(&self) -> String {
+        self.trip_rows().get(self.trip).cloned().unwrap_or_default()
+    }
+
+    /// The picked trip as `--trip` takes it: its departure, "HH:MM".
+    pub fn trip_arg(&self) -> Option<String> {
+        let (_, t) = self.chosen_tour()?;
+        t.runs.get(self.trip.checked_sub(1)?).map(|r| run_time(r.0))
+    }
+
+    /// Picking a trip starts the drive three minutes before it leaves, as the old launcher did.
+    fn pick_trip(&mut self, i: usize) {
+        self.trip = i;
+        let dep = self.chosen_tour().and_then(|(_, t)| t.runs.get(i.checked_sub(1)?)).map(|r| r.0);
+        if let Some(dep) = dep {
+            let at = (dep.floor() as i32 - 3).max(0);
+            self.hour = at / 60 % 24;
+            self.minute = at % 60;
+        }
     }
 
     pub fn line_rows(&self) -> Vec<(usize, String, String)> {
@@ -833,7 +965,7 @@ impl Menu {
         self.lines
             .iter()
             .enumerate()
-            .filter(|(_, l)| q.is_empty() || format!("{} {}", l.name, l.title).to_lowercase().contains(&q))
+            .filter(|(_, l)| q.is_empty() || format!("{} {}", l.name, l.title).to_lowercase().contains(&q) || l.tours.iter().any(|t| t.runs.iter().any(|r| r.1.to_lowercase().contains(&q))))
             .map(|(i, l)| (i, l.name.clone(), l.title.clone()))
             .collect()
     }
@@ -862,6 +994,7 @@ impl Menu {
         self.tour_query.clear();
         self.tour_top = 0;
         self.tour = 0;
+        self.trip = 0;
     }
 
     pub fn line_step(&mut self, dir: i32) {
@@ -882,7 +1015,7 @@ impl Menu {
             return;
         }
         let at = rows.iter().position(|r| r.0 == self.tour).unwrap_or(0) as i32;
-        self.tour = rows[(at + dir).clamp(0, rows.len() as i32 - 1) as usize].0;
+        self.pick_tour(rows[(at + dir).clamp(0, rows.len() as i32 - 1) as usize].0);
     }
 
     pub fn fix_filters(&mut self) {
@@ -892,7 +1025,7 @@ impl Menu {
         }
         let rows = self.tour_rows();
         if !rows.is_empty() && !rows.iter().any(|r| r.0 == self.tour) {
-            self.tour = rows[0].0;
+            self.pick_tour(rows[0].0);
         }
     }
 

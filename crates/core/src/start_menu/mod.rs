@@ -193,10 +193,17 @@ impl App {
         self.args.date = Some(format!("{y}-{mo}-{d}"));
         self.args.season = m.season_arg();
         self.args.weather = m.weather_arg();
+        if situation.is_none() && join.is_none() {
+            m.remember();
+        }
+        self.args.trip = None;
+        self.args.whole_tour = false;
         if m.route {
             if let Some((l, t)) = m.chosen_tour() {
                 self.args.line = Some(l.name.clone());
                 self.args.tour = Some(t.number.clone());
+                self.args.trip = m.trip_arg();
+                self.args.whole_tour = self.args.trip.is_some();
                 self.args.schedule = true;
                 self.args.auto_entry = true;
             }

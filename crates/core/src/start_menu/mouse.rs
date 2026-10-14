@@ -306,6 +306,8 @@ impl App {
                             m.route = !m.route;
                             m.zone = 0;
                             m.situation = 0;
+                            ::config::set_setting("start_menu", "free_drive", !m.route);
+                            let _ = ::config::save();
                         }
                     }
                     Act::Season(k) => {
@@ -396,7 +398,9 @@ impl App {
                     }
                     Act::Drop(k) => {
                         if let Some(m) = self.menu.as_mut() {
+                            let route = m.route;
                             m.drop_toggle(match sect {
+                                1 if k > 0 && route => 16,
                                 1 => 11 + k,
                                 3 => 13 + k,
                                 _ => 8 + k,
@@ -424,7 +428,7 @@ impl App {
                     Act::Tour(pos) => {
                         if let Some(m) = self.menu.as_mut() {
                             if let Some(i) = m.tour_rows().get(pos).map(|r| r.0) {
-                                m.tour = i;
+                                m.pick_tour(i);
                             }
                             m.zone = 3;
                         }
