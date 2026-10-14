@@ -532,6 +532,16 @@ impl ApplicationHandler for Launcher {
                 if event.state != ElementState::Pressed {
                     return;
                 }
+                if !event.repeat
+                    && self.modifiers.alt_key()
+                    && matches!(
+                        event.physical_key,
+                        PhysicalKey::Code(KeyCode::Enter)
+                    )
+                {
+                    self.toggle_fullscreen();
+                    return;
+                }
                 let cmd = self.modifiers.control_key() || self.modifiers.super_key();
                 // a phone's back key: out of the storage browser, else like Escape
                 if event.physical_key == PhysicalKey::Code(KeyCode::BrowserBack) {
@@ -643,6 +653,26 @@ impl ApplicationHandler for Launcher {
 }
 
 impl Launcher {
+    /// The conventional Alt+Enter shortcut switches the launcher and the game between a
+    /// normal window and exclusive fullscreen.
+    fn toggle_fullscreen(&self) {
+        let Some(window) = self.window.as_ref() else {
+            return;
+        };
+        let mode = if ::config::get_bool("graphics", "triple_screen").unwrap_or(false)
+            || window.fullscreen().is_some()
+        {
+            "windowed"
+        } else {
+            "fullscreen"
+        };
+        ::config::set_setting("graphics", "window_mode", mode);
+        let _ = ::config::save();
+        let fullscreen = (mode == "fullscreen")
+            .then(|| crate::game_lists::exclusive_fullscreen(window));
+        window.set_fullscreen(fullscreen);
+    }
+
     /// Physical pixels per interface pixel: the screen's scale, times a zoom that makes the
     /// interface (laid out for a 1440 x 880 window) grow with a bigger window and shrink a
     /// little with a smaller one, so that it fills the window the same way at any size.
