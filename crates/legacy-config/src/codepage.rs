@@ -99,7 +99,7 @@ fn central_european_upper(b: u8) -> bool {
 /// Bytes that are Czech, Slovak or Polish letters in Windows-1250 but
 /// other letters or signs in 1252
 fn czech_lower(b: u8) -> bool {
-    matches!(b, 0xEC | 0xF8 | 0xF9 | 0xF2 | 0x9D | 0xBE | 0xBF)
+    matches!(b, 0xEC | 0xF9 | 0xF2 | 0x9D | 0xBE | 0xBF)
 }
 
 fn czech_upper(b: u8) -> bool {
@@ -198,10 +198,6 @@ fn detect_on(bytes: &[u8], system: Option<CodePage>) -> CodePage {
         })
         .count();
     if czech >= 2 && czech > bytes.iter().filter(|b| nordic(**b)).count() {
-        return CodePage::Windows1250;
-    }
-
-    if system == Some(CodePage::Windows1250) {
         return CodePage::Windows1250;
     }
 
@@ -492,12 +488,24 @@ mod tests {
             detect_on(&cp1252("Première pièce, très"), None),
             CodePage::Windows1252
         );
-        // A single Czech character is not enough unless the system uses Windows-1250.
+        assert_eq!(
+            detect_on(&cp1252("Nørreport, Sønderborg"), None),
+            CodePage::Windows1252
+        );
+        assert_eq!(
+            detect_on(&cp1252("Feliz año"), None),
+            CodePage::Windows1252
+        );
+        assert_eq!(
+            detect_on(&cp1252("Niño, España"), None),
+            CodePage::Windows1252
+        );
+        // Ambiguous text must not be forced to Windows-1250 by the system ACP.
         let one = cp1250("Libiš\r\nLiběchov\r\n");
         assert_eq!(detect_on(&one, None), CodePage::Windows1252);
         assert_eq!(
             detect_on(&one, Some(CodePage::Windows1250)),
-            CodePage::Windows1250
+            CodePage::Windows1252
         );
         // Russian and UTF-8 must still be detected correctly on Czech Windows.
         assert_eq!(
