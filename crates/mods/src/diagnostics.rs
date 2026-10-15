@@ -247,8 +247,8 @@ impl Finding {
     }
 }
 
-/// Adds `more` to `findings`. Two findings with the same key may name the same files, so the
-/// merged one counts the larger number: at least that many are missing.
+/// Adds `more` to `findings`. Two findings with the same key may name the same files, so the merge
+/// keeps the larger count, since at least that many are missing.
 pub fn merge(findings: &mut Vec<Finding>, more: Vec<Finding>) {
     for finding in more {
         let Some(known) = findings.iter_mut().find(|known| known.key() == finding.key()) else {
@@ -326,8 +326,8 @@ fn pack_of(path: &str) -> Option<String> {
     Some(format!("{folder}/{pack}"))
 }
 
-/// Looks up where each pack is only once: a big map often misses hundreds of files from a
-/// handful of packs.
+/// Caches where each pack lives, because a big map often misses hundreds of files from a handful of
+/// packs.
 struct Places {
     roots: Vec<PathBuf>,
     /// The entries of `mods/uninstalled`, read the first time they are needed.

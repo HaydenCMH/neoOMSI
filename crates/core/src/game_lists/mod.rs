@@ -68,7 +68,7 @@ pub(crate) enum Move {
 
 pub(super) type Page = (String, Vec<(String, String)>);
 
-/// A value the lists ask for with every redraw: when it was made, and for which key.
+/// Caches a value the lists request on every redraw, along with its creation time and key.
 pub(crate) type Cache<K, V> = std::sync::Mutex<Option<(std::time::Instant, K, V)>>;
 
 /// The value kept in `slot`, rebuilt by `build` when `key` changed or it is older than `ttl`.

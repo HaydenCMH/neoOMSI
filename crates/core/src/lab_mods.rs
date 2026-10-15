@@ -35,15 +35,13 @@ fn heading(text: &str) -> (String, String) {
     (row(text, 'h', "", "", None), HEADING.to_string())
 }
 
-/// In the start menu, or with no game at all; a running game must not register the mods again.
 pub(crate) fn applies_now(app: Option<&App>) -> bool {
     app.is_none_or(|app| app.menu.is_some())
 }
 
-/// The key last asked for, and its result once its thread is done.
 type Slot<K, V> = Mutex<Option<(K, Option<Result<V, String>>)>>;
 
-/// `None` while `work` runs. One thread at a time: a new key waits for the old one's thread.
+/// Runs `work` on a background thread, returning `None` until it's done. One thread at a time.
 fn in_background<K, V>(
     slot: &'static Slot<K, V>,
     key: K,
@@ -69,28 +67,20 @@ where
     None
 }
 
-/// Slow: it lists every file of every mod.
 static CONFLICTS: Slot<u64, Vec<Conflict>> = Mutex::new(None);
 static PREFLIGHT: Slot<(String, u64), Vec<Finding>> = Mutex::new(None);
-/// Reading the mods stats and mounts every one. Keyed by [`applies_now`], the content generation
-/// and the number of finished installs.
 static MODS: Cache<(bool, u64, usize), Option<Arc<Mods>>> = Mutex::new(None);
 static MISSING: Cache<bool, Rows> = Mutex::new(None);
-/// The last in-game action's outcome and whether it failed, shown atop the page: the game's menu
-/// has no status line.
 static NOTICE: Mutex<Option<(Instant, String, bool)>> = Mutex::new(None);
 const NOTICE_SECS: f32 = 10.0;
 static PENDING_UNINSTALL: Mutex<Option<(Instant, String)>> = Mutex::new(None);
 const CONFIRM_SECS: f32 = 30.0;
 /// A running game saved a change that only takes effect at the next start.
 static NEXT_START: AtomicBool = AtomicBool::new(false);
-/// Where the current drive's misses are saved.
 static DRIVE_FILE: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 struct Mods {
-    /// Why the saved order could not be read.
     error: Option<String>,
-    /// `None` while no order is saved.
     saved: Option<NewMods>,
     list: Vec<Mod>,
 }
@@ -101,7 +91,6 @@ struct Mod {
 }
 
 enum State {
-    /// Not in the content folder.
     Missing,
     Unreadable(String),
     /// No OMSI 2 content folder in it.
@@ -174,7 +163,7 @@ pub(crate) fn rows(app: Option<&App>) -> Rows {
     out
 }
 
-/// Only worked out while the tab is shown: checking a map keeps every core busy.
+/// Only computed while the tab is visible, because checking a map pins every CPU core.
 pub(crate) fn missing(app: Option<&App>) -> Rows {
     let Some(app) = app else {
         return Rows::new();
@@ -419,7 +408,7 @@ fn preflight(map: &str) -> Result<Vec<Finding>, String> {
     Ok(::mods::diagnostics::check(&refs.map_dir, &wanted))
 }
 
-/// Looked for as `scene::upload` does, without loading the map.
+/// Found the same way `scene::upload` does, without loading the map.
 fn missing_textures(refs: &MapReferences) -> Vec<(PathBuf, Kind)> {
     use rayon::prelude::*;
     let mut paths: Vec<PathBuf> = refs
@@ -436,7 +425,7 @@ fn missing_textures(refs: &MapReferences) -> Vec<(PathBuf, Kind)> {
     paths.into_iter().map(|path| (path, Kind::Texture)).collect()
 }
 
-/// Slots showing generated text or a script's picture name a placeholder the game never loads.
+/// Skips slots for generated text and script images, whose names are placeholders.
 fn object_textures(root: &Path, rel: &str) -> Vec<PathBuf> {
     let path = ::mods::resolve_path(root, rel);
     let (Ok(sco), Some(sco_dir)) = (::scenery::SceneryObject::load(&path), path.parent()) else {
@@ -454,7 +443,7 @@ fn object_textures(root: &Path, rel: &str) -> Vec<PathBuf> {
     };
     let mut names = Vec::new();
     for mesh_def in &model.meshes {
-        // (the game reports a missing mesh; without it there are no textures to check)
+        // (the game reports missing meshes itself)
         let Ok(mesh) = ::legacy_o3d::load_mesh(&crate::scene::mesh_path(&model_dir, &mesh_def.file))
         else {
             continue;
@@ -494,7 +483,7 @@ fn spline_textures(root: &Path, rel: &str) -> Vec<PathBuf> {
     unfound(names, &crate::scene::texture_dirs(root, dir))
 }
 
-/// Each in the first folder searched, where the game reports it.
+/// Names missing from all `dirs`, joined to the first one, where the game reports them.
 fn unfound(names: Vec<String>, dirs: &[PathBuf]) -> Vec<PathBuf> {
     let searched: Vec<&Path> = dirs.iter().map(PathBuf::as_path).collect();
     names
@@ -506,7 +495,7 @@ fn unfound(names: Vec<String>, dirs: &[PathBuf]) -> Vec<PathBuf> {
         .collect()
 }
 
-/// This game's drive if it was of `map`, else what an earlier start saved; `None` if never driven.
+/// This session's findings if it drove `map`, else the ones saved last time `map` was driven.
 fn last_drive(map: &str) -> Option<Vec<Finding>> {
     let path = omsi_launcher_lib::instances::map_diagnostics_path(map);
     if DRIVE_FILE.lock().unwrap_or_else(|e| e.into_inner()).as_ref() == Some(&path) {
@@ -522,7 +511,7 @@ pub(crate) fn drive_starts(map: &str) {
         Some(omsi_launcher_lib::instances::map_diagnostics_path(map));
 }
 
-/// Saved for the start menu (by map) and the launcher (by game).
+/// Saves the drive's findings per map (for the start menu) and per instance (for the launcher).
 pub(crate) fn save_drive() -> Vec<Finding> {
     let found = ::mods::diagnostics::findings();
     let drive_file = DRIVE_FILE.lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -596,8 +585,8 @@ fn hidden_row() -> Option<(String, String)> {
     })
 }
 
-/// `None` for a row of another page. A confirmation puts the way back first. A running game
-/// offers no uninstall: it still reads the mod's files.
+/// `None` for a row of another page. Confirmation menus list Cancel first. A running game offers no
+/// uninstall, because it still reads the mod's files.
 pub(crate) fn dropdown(id: &str, applies_now: bool) -> Option<(Rows, Option<usize>)> {
     let item = |key: &str, action: String| (t(key), action);
     let (verb, arg) = id.split_once(' ').unwrap_or((id, ""));
@@ -670,7 +659,7 @@ pub(crate) fn dropdown(id: &str, applies_now: bool) -> Option<(Rows, Option<usiz
     })
 }
 
-/// Returns the error for the launcher's status line; the game's menu shows it atop the page.
+/// Returns the error for the launcher; the in-game menu shows it at the top of the page.
 pub(crate) fn apply(app: Option<&App>, verb: &str, arg: &str) -> Option<String> {
     *PENDING_UNINSTALL.lock().unwrap_or_else(|e| e.into_inner()) =
         (verb == "mod_uninstall_ask").then(|| (Instant::now(), arg.to_string()));
@@ -719,7 +708,7 @@ fn target(verb: &str, from: usize, len: usize) -> usize {
     }
 }
 
-/// `Ok(true)` when the mods the game loads changed.
+/// Returns `Ok(true)` if the action changed which mods the game loads.
 fn act(verb: &str, arg: &str) -> Result<bool, String> {
     let content = omsi_launcher_lib::content_dir().ok_or_else(|| t("no_content.desc"))?;
     let order = ::mods::load_order(&content);

@@ -57,7 +57,8 @@ pub(crate) fn place_on_duty(args: &mut Args) {
     let t0 = Instant::now();
     let clock = start_clock(args);
     let map_cfg = ::mods::resolve_path(&args.root, &args.map);
-    // (`open_world` takes this preopened world over, so the drive starts here)
+    // Start recording the drive here, because `open_world` reuses this pre-opened world instead of
+    // opening its own.
     crate::lab_mods::drive_starts(&args.map);
     let world = match World::open(&args.root, &map_cfg, clock.date_code()) {
         Ok(w) => w,

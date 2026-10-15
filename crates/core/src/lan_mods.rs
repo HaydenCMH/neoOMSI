@@ -1168,8 +1168,8 @@ mod tests {
         }
     }
 
-    /// A joining player gets the files the host's own game uses: when two mods have the same
-    /// object, the copy from the one higher in the load order.
+    /// A joining player gets the files the host's own game uses. If two mods ship the same object,
+    /// the joining player gets the copy from the mod higher in the load order.
     #[test]
     fn the_host_sends_the_files_its_own_game_uses() {
         use clap::Parser;

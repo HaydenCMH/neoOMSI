@@ -138,12 +138,12 @@ fn normalize(rel: &str) -> String {
 pub struct ZipSummary {
     pub files: u64,
     pub unpacked_bytes: u64,
-    /// Why the game can't read the archive in place, if it can't.
+    /// `Some(reason)` if the game can't read the archive in place.
     pub unreadable: Option<String>,
 }
 
-/// Reads only the central directory, never the entries' local headers: a seek per entry made
-/// inspecting a large archive take minutes while an install kept the disk busy.
+/// Reads only the central directory, never the entries' local headers. Seeking to each entry's
+/// local header took minutes on large archives while an install was busy with the disk.
 pub fn zip_summary(path: &Path) -> io::Result<ZipSummary> {
     let mut summary = ZipSummary::default();
     for (name, entry, is_dir) in ZipArchive::unindexed(path)?.central_directory()? {
@@ -329,7 +329,7 @@ impl ZipArchive {
             ));
         }
         // Fewer records than declared means a damaged directory. More are fine: some old tools
-        // write the count modulo 65 536.
+        // write the count modulo 65536.
         if (raw.len() as u64) < count {
             return Err(bad(format!(
                 "{}: damaged central directory ({} of {count} entries readable)",

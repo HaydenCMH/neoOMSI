@@ -41,7 +41,8 @@ pub struct SettingsView {
     /// The binding waiting for its key: section, entry, action.
     capture: Option<(usize, usize, String)>,
     pads: Option<crate::controllers::Controllers>,
-    /// A reset button clicked once and waiting for the second click: when, and on which row.
+    /// A reset button waiting for its confirming second click: when it was first clicked, and on
+    /// which row.
     reset_armed: Option<(Instant, String)>,
     profile_name: String,
     pax_was: Option<crate::pax_pack::Status>,

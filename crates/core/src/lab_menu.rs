@@ -155,8 +155,8 @@ impl App {
             return;
         };
         if let Some(u) = self.ui.as_mut() {
-            // (the list draws one row more than fits, half shown; a short list draws fewer, which
-            // only scrolls too far, and the drawing clamps that)
+            // The list draws one extra, half-visible row, so leave it out. A short list draws fewer
+            // rows, which over-scrolls, but drawing clamps it.
             let fit = u.world_rows_rc.len().saturating_sub(1).max(1);
             if row < u.world_scroll {
                 u.world_scroll = row;

@@ -554,15 +554,17 @@ pub fn mod_has_plugins(entry: &Path) -> bool {
             .is_some_and(|plugins| plugins.is_dir())
 }
 
-/// When the mod folder was created, which tells apart another mod put under the same name later.
+/// When the mod folder was created, used to tell this mod apart from a different one installed
+/// later under the same name.
 /// `None` if the filesystem doesn't record it; the plugins of such a mod can't be allowed.
 fn mod_folder_stamp(entry: &Path) -> Option<i64> {
     let made = std::fs::metadata(entry).ok()?.created().ok()?;
     i64::try_from(made.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos()).ok()
 }
 
-/// Maps each mod folder whose plugins are allowed to its [`mod_folder_stamp`]. It isn't kept in
-/// the settings, because a running game saves those as it loaded them and would undo changes.
+/// Maps each mod folder whose plugins are allowed to its [`mod_folder_stamp`]. Not stored in the
+/// settings, because a running game writes back the settings it loaded and would undo changes made
+/// in the meantime.
 const PLUGINS_ALLOWED: &str = ".plugins-allowed.json";
 
 fn plugin_consents(mods: &Path) -> std::collections::BTreeMap<String, i64> {
@@ -573,7 +575,7 @@ fn plugin_consents(mods: &Path) -> std::collections::BTreeMap<String, i64> {
 }
 
 /// Whether the player allowed the plugins of this mod folder (`<content>/mods/<name>`).
-/// Never for a reserved folder such as the shared library.
+/// Always false for reserved folders such as the shared library.
 pub fn mod_plugins_allowed(entry: &Path) -> bool {
     let (Some(name), Some(mods), Some(stamp)) =
         (entry.file_name(), entry.parent(), mod_folder_stamp(entry))
@@ -703,7 +705,7 @@ pub struct MapReferences {
     pub wanted: Vec<(PathBuf, ::mods::diagnostics::Kind)>,
 }
 
-/// What `map` (the path of its global.cfg) refers to.
+/// Collects the content that `map` (the path to its global.cfg) references.
 pub fn map_references(map: &str) -> Result<MapReferences> {
     use ::mods::diagnostics::Kind;
     use rayon::prelude::*;
