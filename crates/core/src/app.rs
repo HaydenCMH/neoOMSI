@@ -18,6 +18,8 @@ pub(crate) struct ProfileMark {
     pub(crate) stages: std::collections::BTreeMap<&'static str, f64>,
     pub(crate) render: std::collections::BTreeMap<&'static str, f64>,
     pub(crate) counts: std::collections::BTreeMap<&'static str, f64>,
+    /// The GPU passes' averages (ms) and frame counts so far.
+    pub(crate) gpu: Vec<(String, f64, u32)>,
 }
 
 pub(crate) struct Boot {

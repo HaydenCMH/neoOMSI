@@ -1061,6 +1061,7 @@ impl App {
                     stages: self.profile.clone(),
                     render: r.stats.borrow().clone(),
                     counts: r.counts.borrow().clone(),
+                    gpu: r.gpu_pass_times(),
                 });
             }
             if let (Some(limit), false) = (self.args.exit_after, self.exiting) {
@@ -1195,7 +1196,8 @@ impl App {
                 since(k, *v, counts0) / n
             );
         }
-        for (pass, ms, frames) in r.gpu_pass_times() {
+        let gpu0 = profile_mark.as_ref().map_or(&[][..], |m| &m.gpu[..]);
+        for (pass, ms, frames) in gpu_since(&r.gpu_pass_times(), gpu0) {
             log::info!("profile gpu pass {pass:12}: {ms:.2} ms ({frames} frames measured)");
         }
         if let (Some((c0, t0, f0)), Some(c1)) = (cpu_mark, process_cpu_seconds()) {
@@ -1274,5 +1276,40 @@ mod tests {
 
         ::legacy_script::Host::message(&mut host, "Destination set");
         assert_eq!(next_script_message(&host, &mut seen).as_deref(), Some("Destination set"));
+    }
+}
+
+/// The GPU passes' averages over the frames measured since `mark` (the timers add up from
+/// the start of the game: an earlier session and the loading stay out).
+fn gpu_since(now: &[(String, f64, u32)], mark: &[(String, f64, u32)]) -> Vec<(String, f64, u32)> {
+    now.iter()
+        .filter_map(|(pass, ms, frames)| {
+            let (ms0, frames0) = mark
+                .iter()
+                .find(|m| m.0 == *pass)
+                .map_or((0.0, 0), |m| (m.1, m.2));
+            let n = frames.checked_sub(frames0).filter(|n| *n > 0)?;
+            let total = ms * *frames as f64 - ms0 * frames0 as f64;
+            Some((pass.clone(), total / n as f64, n))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod gpu_since_tests {
+    use super::gpu_since;
+
+    #[test]
+    fn a_gpu_pass_is_averaged_over_the_frames_since_the_mark() {
+        let mark = vec![("main".to_string(), 10.0, 100)];
+        let now = vec![
+            ("main".to_string(), 6.0, 300),
+            ("ssao".to_string(), 0.5, 50),
+        ];
+        let got = gpu_since(&now, &mark);
+        // (300 frames at 6 ms, of which the 100 before the mark at 10 ms: 200 at 4 ms)
+        assert_eq!(got[0], ("main".to_string(), 4.0, 200));
+        assert_eq!(got[1], ("ssao".to_string(), 0.5, 50));
+        assert!(gpu_since(&mark, &mark).is_empty());
     }
 }
