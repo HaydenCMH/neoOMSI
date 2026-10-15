@@ -41,6 +41,11 @@ fn now_local() -> (i32, i32, i32, i32, i32) {
     (n.year(), n.month() as i32, n.day() as i32, n.hour() as i32, n.minute() as i32)
 }
 
+/// The dropdown row of the item `is` finds in `items`: row 0 is "Auto", the items follow.
+fn auto_row<T>(items: &[T], is: impl Fn(&T) -> bool) -> usize {
+    items.iter().position(is).map_or(0, |i| i + 1)
+}
+
 fn icao_code(text: &str) -> Option<String> {
     let code = text.trim().to_ascii_uppercase();
     (code.len() == 4 && code.chars().all(|c| c.is_ascii_alphanumeric())).then_some(code)
@@ -632,9 +637,9 @@ impl Menu {
         self.numbers = numbers;
         if self.want_bus.as_ref().is_some_and(|w| w.0.eq_ignore_ascii_case(&bus)) {
             let (_, livery, depot, number, plate) = self.want_bus.take().unwrap_or_default();
-            self.livery = self.liveries.iter().position(|l| *l == livery).unwrap_or(0);
-            self.depot = self.depots.iter().position(|d| d.1.eq_ignore_ascii_case(&depot)).unwrap_or(0);
-            self.number = self.numbers.iter().position(|n| *n == number).unwrap_or(0);
+            self.livery = auto_row(&self.liveries, |l| *l == livery);
+            self.depot = auto_row(&self.depots, |d| d.1.eq_ignore_ascii_case(&depot));
+            self.number = auto_row(&self.numbers, |n| *n == number);
             self.plate = plate;
         }
     }
@@ -1667,7 +1672,18 @@ impl Menu {
 
 #[cfg(test)]
 mod tests {
-    use super::icao_code;
+    use super::{auto_row, icao_code};
+
+    #[test]
+    fn a_remembered_choice_comes_back_on_its_own_row() {
+        let liveries = ["GPM STIF v1", "GPM STIF v2", "Keolis"].map(String::from);
+        // (what `remember` writes for the row picked: the item before it, "Auto" being row 0)
+        for row in 1..=liveries.len() {
+            let saved = &liveries[row - 1];
+            assert_eq!(auto_row(&liveries, |l| l == saved), row);
+        }
+        assert_eq!(auto_row(&liveries, |l| l.is_empty()), 0);
+    }
 
     #[test]
     fn accepts_four_character_icao_codes_with_digits() {
