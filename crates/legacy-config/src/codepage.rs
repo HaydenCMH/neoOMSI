@@ -103,7 +103,7 @@ fn czech_lower(b: u8) -> bool {
 }
 
 fn czech_upper(b: u8) -> bool {
-    matches!(b, 0xCC | 0xD8 | 0xD9 | 0xD2 | 0x8D | 0xBC)
+    matches!(b, 0xCC | 0xD9 | 0xD2 | 0x8D | 0xBC)
 }
 
 /// Nordic letters: Danish or Norwegian text may contain ø, which shares
@@ -490,6 +490,10 @@ mod tests {
         );
         assert_eq!(
             detect_on(&cp1252("Nørreport, Sønderborg"), None),
+            CodePage::Windows1252
+        );
+        assert_eq!(
+            detect_on(&cp1252("Østerbro, Øresund"), None),
             CodePage::Windows1252
         );
         assert_eq!(
