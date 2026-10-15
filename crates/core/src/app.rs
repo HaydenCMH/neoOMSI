@@ -922,9 +922,21 @@ impl App {
                             }
                             // The summary also covers the vehicle packs the bus is missing.
                             let found = omsi_launcher_lib::instances::undismissed(
-                                crate::write_diagnostics(),
+                                crate::lab_mods::save_drive(),
                             );
                             if let Some(msg) = ::mods::diagnostics::summary(&found) {
+                                let tr = |key: &str| ::i18n::translate(key, &[]);
+                                let menu_path = format!(
+                                    "{} > {} > {}",
+                                    tr("pause.entry.options"),
+                                    tr("pause.options.group.mods"),
+                                    tr(crate::lab_mods::MISSING_TAB)
+                                );
+                                let see = ::i18n::translate(
+                                    "pause.options.mods.missing.see",
+                                    &[("path", &menu_path)],
+                                );
+                                let msg = format!("{msg} · {see}");
                                 self.service_msg = Some(match self.service_msg.take() {
                                     Some((shown, _)) => (format!("{shown}   |   {msg}"), 12.0),
                                     None => (msg, 12.0),

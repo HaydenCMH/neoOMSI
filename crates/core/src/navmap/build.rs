@@ -12,7 +12,7 @@ use ::simulation::traffic::{Lane, LaneKind};
 use super::cache::Deps;
 use super::raster::{self, CELL, MARGIN, Raster};
 use super::*;
-use crate::scene::{World, texture_dirs, tile_companion};
+use crate::scene::{World, mesh_path, texture_dirs, tile_companion};
 
 /// A face of the map that faces up: corners in metres from its chunk's corner (heights as
 /// they are), its material and its level.
@@ -225,12 +225,7 @@ fn object_floors(
     let dirs = texture_dirs(&world.root, &model_dir);
     let mut faces = Vec::new();
     for md in model.lod_meshes(0) {
-        let mp = ::mods::resolve_path(&::mods::resolve_path(&model_dir, "model"), &md.file);
-        let mp = if ::legacy_config::vfs::is_file(&mp) {
-            mp
-        } else {
-            ::mods::resolve_path(&model_dir, &md.file)
-        };
+        let mp = mesh_path(&model_dir, &md.file);
         deps.add(&mp);
         let Ok(m) = ::legacy_o3d::load_mesh(&mp) else {
             continue;

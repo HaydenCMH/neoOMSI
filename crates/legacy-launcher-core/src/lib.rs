@@ -692,25 +692,23 @@ pub fn game_diagnostics(instance: &str) -> Result<Vec<::mods::diagnostics::Findi
     Ok(instances::undismissed(findings))
 }
 
-/// The content that `map` refers to but isn't installed. Results are cached per map until the
-/// content changes, because a big map has thousands of tiles.
-pub fn map_preflight(map: &str) -> Result<Vec<::mods::diagnostics::Finding>> {
-    use ::mods::diagnostics::{Finding, Kind};
+pub struct MapReferences {
+    /// The OMSI 2 folder.
+    pub root: PathBuf,
+    pub map_dir: PathBuf,
+    /// The objects, splines and vehicles its tiles and AI lists name, relative to `root`.
+    pub named: Vec<(String, ::mods::diagnostics::Kind)>,
+    /// The files to [`::mods::diagnostics::check`]: those of `named` that no content folder has,
+    /// and the tiles global.cfg lists.
+    pub wanted: Vec<(PathBuf, ::mods::diagnostics::Kind)>,
+}
+
+/// What `map` (the path of its global.cfg) refers to.
+pub fn map_references(map: &str) -> Result<MapReferences> {
+    use ::mods::diagnostics::Kind;
     use rayon::prelude::*;
-    type Cache = (u64, std::collections::HashMap<String, Vec<Finding>>);
-    static CACHE: std::sync::Mutex<Option<Cache>> = std::sync::Mutex::new(None);
     let root = root()?;
     bases();
-    let generation = ::legacy_config::content_generation();
-    {
-        let mut cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        if cache.as_ref().is_some_and(|(cached, _)| *cached != generation) {
-            *cache = None;
-        }
-        if let Some(found) = cache.as_ref().and_then(|(_, maps)| maps.get(map)) {
-            return Ok(instances::undismissed(found.clone()));
-        }
-    }
     let global_cfg = resolve_content(map)?;
     let map_dir = global_cfg
         .parent()
@@ -749,10 +747,11 @@ pub fn map_preflight(map: &str) -> Result<Vec<::mods::diagnostics::Finding>> {
                 .collect::<Vec<_>>()
         })
         .collect();
+    let named: Vec<(String, Kind)> = named.into_iter().collect();
     let mut wanted: Vec<(PathBuf, Kind)> = named
-        .into_iter()
+        .iter()
         .filter(|(rel, _)| ::mods::find_in_roots(rel).is_none())
-        .map(|(rel, kind)| (root.join(rel), kind))
+        .map(|(rel, kind)| (root.join(rel), *kind))
         .collect();
     // The tiles global.cfg lists, found as the game finds them; the scan above only sees the
     // tile files that exist.
@@ -763,7 +762,32 @@ pub fn map_preflight(map: &str) -> Result<Vec<::mods::diagnostics::Finding>> {
             .iter()
             .map(|tile| (::mods::resolve_path(&map_dir, &tile.file), Kind::Tile)),
     );
-    let found = ::mods::diagnostics::check(&map_dir, &wanted);
+    Ok(MapReferences {
+        root,
+        map_dir,
+        named,
+        wanted,
+    })
+}
+
+/// The content that `map` refers to but isn't installed. Results are cached per map until the
+/// content changes, because a big map has thousands of tiles.
+pub fn map_preflight(map: &str) -> Result<Vec<::mods::diagnostics::Finding>> {
+    use ::mods::diagnostics::Finding;
+    type Cache = (u64, std::collections::HashMap<String, Vec<Finding>>);
+    static CACHE: std::sync::Mutex<Option<Cache>> = std::sync::Mutex::new(None);
+    let generation = ::legacy_config::content_generation();
+    {
+        let mut cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if cache.as_ref().is_some_and(|(cached, _)| *cached != generation) {
+            *cache = None;
+        }
+        if let Some(found) = cache.as_ref().and_then(|(_, maps)| maps.get(map)) {
+            return Ok(instances::undismissed(found.clone()));
+        }
+    }
+    let refs = map_references(map)?;
+    let found = ::mods::diagnostics::check(&refs.map_dir, &refs.wanted);
     let mut cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let (cached, maps) = cache.get_or_insert_with(|| (generation, Default::default()));
     if *cached == generation {

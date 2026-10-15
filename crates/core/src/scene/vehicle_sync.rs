@@ -148,16 +148,18 @@ pub(super) fn find_vehicle_freetex(name: &str, dirs: &[&Path]) -> Option<PathBuf
     if let Some(path) = ::texture::find_texture(name, dirs) {
         return Some(path);
     }
+    ::texture::find_texture(&below_texture(name)?, dirs)
+}
+
+/// The part of `name` below its `Texture` component, if it has one.
+fn below_texture(name: &str) -> Option<String> {
     let normalized = name.trim().replace('\\', "/");
     let parts: Vec<&str> = normalized.split('/').filter(|p| !p.is_empty()).collect();
     let texture = parts
         .iter()
         .position(|p| p.eq_ignore_ascii_case("Texture"))?;
     let rel = parts.get(texture + 1..)?.join("/");
-    if rel.is_empty() {
-        return None;
-    }
-    ::texture::find_texture(&rel, dirs)
+    (!rel.is_empty()).then_some(rel)
 }
 
 /// Resolve one live `[matl_freetex]` name and retain its shared GPU texture for this vehicle.
@@ -178,6 +180,10 @@ fn resolve_freetex_texture(
             f.var,
             name
         );
+        if let Some(own) = f.dirs.first() {
+            let rel = below_texture(name).unwrap_or_else(|| name.replace('\\', "/"));
+            ::mods::diagnostics::missing(own, &own.join(rel), ::mods::diagnostics::Kind::Texture);
+        }
     }
     resolved.and_then(|path| {
         let mut shared = f.shared.lock();

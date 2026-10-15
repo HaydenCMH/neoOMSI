@@ -107,7 +107,13 @@ pub(crate) fn dropdown_for(app: &App, row: usize, id: &str) -> Option<Dropdown> 
                 .map(|(i, n)| (tr(*n), format!("precip {i}")))
                 .collect()
         }
-        _ => return settings_dropdown(&app.args.root, row, id),
+        _ => match crate::lab_mods::dropdown(id, crate::lab_mods::applies_now(Some(app))) {
+            Some((items, selected)) => {
+                current = selected;
+                items
+            }
+            None => return settings_dropdown(&app.args.root, row, id),
+        },
     };
     dropdown_of(row, items, current)
 }
@@ -117,6 +123,9 @@ pub(crate) fn settings_dropdown(root: &std::path::Path, row: usize, id: &str) ->
     let tr = |t: &str| ::user_interface::tr(t).into_owned();
     if id.starts_with("pad_") {
         return crate::lab_pads::dropdown(root, row, id);
+    }
+    if let Some((items, current)) = crate::lab_mods::dropdown(id, true) {
+        return dropdown_of(row, items, current);
     }
     let mut current: Option<usize> = None;
     let items: Vec<(String, String)> = match id {
@@ -193,6 +202,7 @@ pub(crate) fn dropdown_apply(app: &mut App, action: &str) {
         return;
     }
     match verb {
+        v if v.starts_with("mod_") => crate::lab_mods::apply_in_game(app, v, arg),
         "wx" => {
             if app
                 .lan

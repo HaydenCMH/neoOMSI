@@ -287,7 +287,7 @@ impl GpuCache {
     ) -> Option<(TextureId, PathBuf)> {
         let dirs_ref: Vec<&Path> = dirs.iter().map(|p| p.as_path()).collect();
         let Some(path) = ::texture::find_texture(name, &dirs_ref) else {
-            if !name.trim().is_empty() && self.misses.insert(name.to_string()) {
+            if names_texture(name) && self.misses.insert(name.to_string()) {
                 log::warn!("Did not find texture file \"{name}\"!");
                 // Report it against the model's own texture folder, which is searched first.
                 if let Some(own) = dirs.first() {

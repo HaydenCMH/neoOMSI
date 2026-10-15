@@ -535,34 +535,152 @@
         }
       },
       "mods": {
-        "folder": "Folder",
         "install": {
           "button": "Choose",
-          "desc": "Select an archive to install as a mod.\n\nSupported formats:\n- Zip\n- Rar\n- 7Zip",
+          "desc": "Unpacks a .zip, .7z or .rar archive into the Mods folder.\n\nAn installed mod of the same name is replaced, except while driving; the old version moves to mods/uninstalled.",
           "name": "Install a mod from an archive",
           "title": "Select a mod archive to install"
         },
         "list": {
-          "desc": "All loaded mods and whether data is missing",
-          "name": "Active mods"
+          "desc": "The load order of the installed mods, and what is wrong with them",
+          "name": "Mods"
         },
-        "none": "No mods active",
-        "none_desc": "No mods were found. Please note that OMSI 2 folder content is not counted as mods.\n\nYou can install mods in the Mods folder as archives or folders.",
+        "none": "No mods installed",
+        "none_desc": "No mods were found. Content in the OMSI 2 folder itself doesn't count as a mod.\n\nInstall a mod from an archive above, or put archives or folders into the Mods folder.",
         "open": {
           "button": "Open",
           "desc": "Opens the Mods folder",
           "name": "Mods folder"
         },
         "status": {
-          "empty": "Data missing",
-          "empty_desc": "No OMSI Content found (e.g. Vehicles or maps)",
-          "ok": "OK",
-          "unreadable": "Data missing",
-          "unreadable_desc": "The folder cannot be read",
-          "zip_error": "Data missing",
-          "zip_error_desc": "The ZIP archive cannot be read"
+          "empty_desc": "No OMSI 2 content found in it (e.g. Vehicles or maps)."
         },
-        "zip": "ZIP"
+        "no_content": {
+          "name": "No content folder",
+          "desc": "Choose the OMSI 2 folder under Game first."
+        },
+        "unreadable": "The game cannot read it: {error}",
+        "state": {
+          "empty": "No content",
+          "error": "Unreadable",
+          "missing": "Not found",
+          "hidden": "Hidden",
+          "plugins_blocked": "Plugins blocked"
+        },
+        "order": {
+          "heading": "Load order (top wins)",
+          "unavailable": "Not in the content folder. It keeps its place in case it comes back; Forget removes it from the list.",
+          "unreadable": "Saved load order unreadable",
+          "hidden": "Fully hidden by {mods}: none of its files are used",
+          "overridden": "{n} files hidden by {mods}",
+          "overrides": "Replaces {n} files of {mods}",
+          "replaces": "Replaces {n} original OMSI 2 files",
+          "clash": "{mod} uses the folder Vehicles/{folder} for another bus",
+          "problems": "Problems: {n}",
+          "next_start": "Changes apply at the next start",
+          "unreadable_desc": "The default order is in effect.\n\n{error}"
+        },
+        "action": {
+          "up": "Move up",
+          "down": "Move down",
+          "top": "Move to the top",
+          "bottom": "Move to the bottom",
+          "allow_plugins": "Allow plugins",
+          "block_plugins": "Block plugins",
+          "uninstall_ask": "Uninstall…",
+          "uninstall": "Uninstall",
+          "forget": "Forget",
+          "cancel": "Cancel"
+        },
+        "shared": {
+          "name": "Shared library",
+          "button": "Open",
+          "desc": "Always last: its files are used only where no mod has them. Plugins in it never load."
+        },
+        "new_mods": {
+          "name": "Newly installed mods",
+          "top": "At the top",
+          "bottom": "At the bottom",
+          "desc": "Where a new mod goes in the list. Mods already in the list never move by themselves."
+        },
+        "reset": {
+          "name": "Reset the load order",
+          "button": "Reset",
+          "confirm": "Reset the load order",
+          "desc": "Back to the default order: alphabetical. Entries that are not installed are dropped.",
+          "again": "Click again to reset"
+        },
+        "jobs": {
+          "heading": "Installs",
+          "cancel": "Cancel install",
+          "clear": "Finished installs",
+          "clear_button": "Clear",
+          "installed": "Installed {folder}",
+          "state": {
+            "queued": "Queued",
+            "planning": "Planning",
+            "checking": "Checking space",
+            "unpacking": "Unpacking",
+            "copying": "Copying",
+            "moving": "Moving into place",
+            "done": "Done",
+            "failed": "Failed",
+            "cancelled": "Cancelled"
+          },
+          "keep": "Keep installing",
+          "progress": "{state} {pct}%"
+        },
+        "missing": {
+          "tab": "Missing content",
+          "not_driven": {
+            "name": "Not driven yet",
+            "desc": "Vehicle textures, sounds and scripts show up here once the map has been driven."
+          },
+          "hidden": "{n} hidden",
+          "show_hidden": "Show again",
+          "map": "Missing content of {map}",
+          "game": "Missing content of this session",
+          "checking": "Checking the map…",
+          "failed": "The map could not be checked",
+          "none": "Nothing is missing",
+          "dismiss": "Hide",
+          "missing_dependency": "{requester} needs {pack}, which is not installed ({count} files)",
+          "inactive_dependency": "{requester} needs {pack}: it is in {provider}, which is uninstalled ({count} files)",
+          "incomplete_pack": "{requester} needs files that {provider} does not have in {pack}; perhaps another version ({count} files)",
+          "incomplete_mod": "{requester} lacks some of its own files in {pack} ({count} files)",
+          "missing_file": "{requester}: {count} files not found",
+          "see": "see {path}",
+          "severity": {
+            "required": "Required",
+            "degraded": "Looks wrong",
+            "optional": "Minor"
+          },
+          "name": {
+            "missing_dependency": "{pack} not installed",
+            "inactive_dependency": "{pack} uninstalled",
+            "incomplete_pack": "{pack} incomplete",
+            "incomplete_mod": "{requester} incomplete",
+            "missing_file": "{requester}: {count} files missing"
+          },
+          "advice": {
+            "missing_dependency": "Install {pack}.",
+            "inactive_dependency": "Install {provider} again: it is in mods/uninstalled.",
+            "incomplete_pack": "{requester} may need another version of {pack}.",
+            "incomplete_mod": "A new copy of {requester} usually helps.",
+            "missing_file": "Check the load order, or install a new copy of {requester}."
+          }
+        },
+        "msg": {
+          "next_start": "Saved. Takes effect at the next start."
+        },
+        "plugins": {
+          "blocked": "It has plugins: program code that runs in the game. They are blocked; allow them only if you trust this mod.",
+          "allowed": "Its plugins (program code that runs in the game) are allowed."
+        },
+        "uninstall": {
+          "ask": "Uninstall?",
+          "desc": "Uninstalling moves it to mods/uninstalled."
+        }
       },
       "game": {
         "root": {

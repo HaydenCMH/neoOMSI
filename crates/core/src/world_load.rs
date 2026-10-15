@@ -47,7 +47,10 @@ pub(crate) fn open_world(args: &Args) -> Result<(World, Camera, DVec3)> {
     let date = start_clock(args).date_code();
     let world = match crate::duty_start::take_preopened(&map_cfg, date) {
         Some(w) => w,
-        None => World::open(&args.root, &map_cfg, date)?,
+        None => {
+            crate::lab_mods::drive_starts(&args.map);
+            World::open(&args.root, &map_cfg, date)?
+        }
     };
     *world.start_clock.lock() = start_clock(args);
     {

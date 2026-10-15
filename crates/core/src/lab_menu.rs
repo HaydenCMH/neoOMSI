@@ -126,14 +126,54 @@ impl App {
     }
 
     pub(crate) fn lab_voice_shown(&self) -> bool {
+        self.lab_sub_shown(VOICE_SUB)
+    }
+
+    /// Whether the options show the sub-tab whose title key is `title`.
+    pub(crate) fn lab_sub_shown(&self, title: &str) -> bool {
         self.lab_group_page() == Some(OPTIONS_PAGE)
             && self.ui.as_ref().is_some_and(|u| {
             u.world_sub > 0
                 && u.world_view
                 .get(u.world_group)
                 .and_then(|g| g.subs.get(u.world_sub - 1))
-                .is_some_and(|s| s.title == VOICE_SUB)
+                .is_some_and(|s| s.title == title)
         })
+    }
+
+    /// Reopens the drop-down of the row whose action is `id` after an action rebuilt the page,
+    /// scrolled into view, with the first choice starting with `pick` selected.
+    pub(crate) fn lab_reopen_drop(&mut self, id: &str, pick: &str) {
+        let groups = self.lab_world_raw();
+        let Some((group, sub)) = self.ui.as_ref().map(|u| (u.world_group, u.world_sub)) else {
+            return;
+        };
+        let rows = groups.get(group).and_then(|(_, rows, subs)| {
+            if sub == 0 { Some(rows) } else { subs.get(sub - 1).map(|s| &s.1) }
+        });
+        let Some(row) = rows.and_then(|rows| rows.iter().position(|(_, action)| action == id)) else {
+            return;
+        };
+        if let Some(u) = self.ui.as_mut() {
+            // (the list draws one row more than fits, half shown; a short list draws fewer, which
+            // only scrolls too far, and the drawing clamps that)
+            let fit = u.world_rows_rc.len().saturating_sub(1).max(1);
+            if row < u.world_scroll {
+                u.world_scroll = row;
+            } else if row >= u.world_scroll + fit {
+                u.world_scroll = row + 1 - fit;
+            }
+        }
+        if !self.lab_open_drop(row, id) {
+            return;
+        }
+        let vis = self.ui.as_ref().map_or(8, |u| u.world_drop_vis).max(1);
+        if let Some(d) = self.ui.as_mut().and_then(|u| u.world_drop.as_mut())
+            && let Some(i) = d.actions.iter().position(|a| a.starts_with(pick))
+        {
+            d.sel = i;
+            d.top = i.saturating_sub(vis / 2);
+        }
     }
 
     fn lab_sync_due(&self) -> bool {

@@ -184,6 +184,7 @@ pub struct Menu {
     pub mini_want: Option<(String, std::time::Instant)>,
     pub mini_failed: Option<String>,
     pub update: crate::updater::Updater,
+    pub content_generation: u64,
 }
 
 fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
@@ -247,6 +248,7 @@ impl Menu {
     }
 
     pub fn new(root: &Path, default_map: &str) -> Menu {
+        let content_generation = ::legacy_config::content_generation();
         let merged = |rel: &str| {
             let mut dirs = ::mods::read_dir_merged(rel);
             if dirs.is_empty() {
@@ -498,9 +500,46 @@ impl Menu {
             mini_want: None,
             mini_failed: None,
             update: Default::default(),
+            content_generation,
         };
         m.veh_open = m.maker_key(m.vehicle);
         m
+    }
+
+    /// Reads the lists again if mods changed since, keeping each pick that is still there.
+    pub fn reload_content(&mut self, root: &Path) {
+        if self.content_generation == ::legacy_config::content_generation() {
+            return;
+        }
+        // (an install that finished outside the Mods page is not mounted yet)
+        let _ = omsi_launcher_lib::register_content();
+        let path_at = |list: &[(String, String)], index: usize| {
+            list.get(index).map(|(_, path)| path.clone()).unwrap_or_default()
+        };
+        let index_of = |list: &[(String, String)], wanted: &str, fallback: usize| {
+            list.iter().position(|(_, path)| path.eq_ignore_ascii_case(wanted)).unwrap_or(fallback)
+        };
+        let map_path = path_at(&self.maps, self.map);
+        let vehicle_path = path_at(&self.vehicles, self.vehicle);
+        let situation_path = path_at(&self.situations, self.situation);
+        let weather_path = path_at(&self.weathers, self.weather);
+        let fresh = Menu::new(root, &map_path);
+        self.map = fresh.map;
+        self.vehicle = index_of(&fresh.vehicles, &vehicle_path, fresh.vehicle);
+        self.situation = index_of(&fresh.situations, &situation_path, 0);
+        self.weather = index_of(&fresh.weathers, &weather_path, 0);
+        if fresh.vehicles.get(self.vehicle).is_none_or(|(_, path)| *path != vehicle_path) {
+            self.opts_for = None;
+        }
+        (self.map_top, self.veh_top) = (0, 0);
+        self.maps = fresh.maps;
+        self.map_entries = fresh.map_entries;
+        self.vehicles = fresh.vehicles;
+        self.vehicle_meta = fresh.vehicle_meta;
+        self.situations = fresh.situations;
+        self.weathers = fresh.weathers;
+        self.content_generation = fresh.content_generation;
+        log::info!("menu: content changed, lists read again");
     }
 
     fn maker_key(&self, i: usize) -> Option<String> {

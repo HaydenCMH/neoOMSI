@@ -82,6 +82,7 @@ mod evdev_axes;
 mod evdev_ff;
 mod game_menu;
 mod lab_menu;
+mod lab_mods;
 mod lab_options;
 mod lab_pads;
 mod input_keys;
@@ -218,22 +219,11 @@ pub fn run() -> Result<()> {
     });
     let mut app = app;
     let r = event_loop.run_app(&mut app);
-    // Write the diagnostics again, now including what was missed while driving.
-    write_diagnostics();
+    // Keep what was missed while driving, for the start menu.
+    lab_mods::save_drive();
     lan_mods::clean_up();
     r?;
     Ok(())
-}
-
-/// Writes what the game couldn't find so far, for the launcher to show, and returns it.
-pub(crate) fn write_diagnostics() -> Vec<::mods::diagnostics::Finding> {
-    let found = ::mods::diagnostics::findings();
-    if let Some(path) = lan::instance_file("diagnostics")
-        && let Err(error) = ::mods::diagnostics::write(&path, &found)
-    {
-        log::warn!("{}: {error}", path.display());
-    }
-    found
 }
 
 fn ask_for_root() -> Option<PathBuf> {

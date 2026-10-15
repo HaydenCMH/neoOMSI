@@ -41,7 +41,8 @@ pub struct SettingsView {
     /// The binding waiting for its key: section, entry, action.
     capture: Option<(usize, usize, String)>,
     pads: Option<crate::controllers::Controllers>,
-    reset_armed: Option<Instant>,
+    /// A reset button clicked once and waiting for the second click: when, and on which row.
+    reset_armed: Option<(Instant, String)>,
     profile_name: String,
     pax_was: Option<crate::pax_pack::Status>,
 }
@@ -527,6 +528,16 @@ fn draw_rows(
                     TEXT_DIM,
                     Align::Left,
                 );
+                if !value.is_empty() {
+                    ui.text_in(
+                        &value,
+                        Rect::new(r.x, y, r.w - 6.0, 22.0),
+                        11.5,
+                        Weight::Regular,
+                        TEXT_DIM,
+                        Align::Right,
+                    );
+                }
                 y += 28.0;
                 continue;
             }
@@ -588,27 +599,28 @@ fn draw_rows(
                         out = Some(Act::Slide(id.clone(), f));
                     }
                 }
-                'o' if id == "reset" => {
-                    let armed = v
-                        .reset_armed
-                        .is_some_and(|t| t.elapsed().as_secs_f32() < 4.0);
-                    let label = if armed {
-                        "Click again to reset"
-                    } else {
-                        "Reset all settings"
+                'o' if id == "reset" || id == "mod_reset_ask" => {
+                    let armed = v.reset_armed.as_ref().is_some_and(|(clicked, row)| {
+                        row == id && clicked.elapsed().as_secs_f32() < 4.0
+                    });
+                    let (label, action) = match (id.as_str(), armed) {
+                        ("reset", false) => ("Reset all settings".to_string(), "reset_all"),
+                        ("reset", true) => ("Click again to reset".to_string(), "reset_all"),
+                        (_, false) => (value.clone(), "mod_reset"),
+                        (_, true) => (tr("pause.options.mods.reset.again"), "mod_reset"),
                     };
                     if ui.button(
                         &name_id,
                         ctrl,
-                        label,
+                        &label,
                         Some("restart_alt"),
                         ButtonKind::Danger,
                     ) {
                         if armed {
                             v.reset_armed = None;
-                            out = Some(Act::Pick("reset_all".into()));
+                            out = Some(Act::Pick(action.into()));
                         } else {
-                            v.reset_armed = Some(Instant::now());
+                            v.reset_armed = Some((Instant::now(), id.clone()));
                         }
                     }
                 }
@@ -761,6 +773,7 @@ fn act(l: &mut Launcher, a: Act) {
     l.state.save_pending_settings();
     l.state.reload_changed_settings();
     let mut msg: Option<String> = None;
+    let mut failed: Option<String> = None;
     let mut tab: Option<usize> = None;
     match a {
         Act::Toggle(id) => {
@@ -779,6 +792,8 @@ fn act(l: &mut Launcher, a: Act) {
             let (verb, arg) = split(&action);
             if verb.starts_with("pad_") {
                 crate::lab_pads::apply(l.settings.pads.as_mut(), verb, arg);
+            } else if verb.starts_with("mod_") {
+                failed = crate::lab_mods::apply(None, verb, arg);
             } else if verb == "gfxprofile_delete" {
                 ::config::remove_sub("graphics_profiles", arg);
                 let _ = ::config::save();
@@ -810,7 +825,7 @@ fn act(l: &mut Launcher, a: Act) {
                         crate::pax_pack::PaxPack::start,
                     );
                 }
-                "mods_install" => crate::lab_options::mods_install(),
+                "mods_install" => crate::lab_mods::install(None),
                 "mods_open" => {
                     if let Some(d) = ::mods::mods_dir() {
                         let _ = std::fs::create_dir_all(&d);
@@ -838,6 +853,7 @@ fn act(l: &mut Launcher, a: Act) {
                 v if v.starts_with("pad_") => {
                     tab = crate::lab_pads::click(l.settings.pads.as_mut(), v, arg)
                 }
+                v if v.starts_with("mod_") => failed = crate::lab_mods::apply(None, v, arg),
                 _ => {}
             }
         }
@@ -871,6 +887,9 @@ fn act(l: &mut Launcher, a: Act) {
     }
     if let Some(m) = msg {
         l.state.set_status(m, false);
+    }
+    if let Some(e) = failed {
+        l.state.set_status(e, true);
     }
 }
 

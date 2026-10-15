@@ -266,27 +266,49 @@ pub(super) fn render_text(
     }
 }
 
-/// `text` broken into lines of at most `width` pixels, between words.
+/// `text` broken into lines of at most `width` pixels, between words. A word wider than a line,
+/// like a file path, is broken with [`break_at`].
 pub(super) fn wrap(tc: &TextCache, text: &str, px: f32, width: f32) -> Vec<String> {
     let mut out = Vec::new();
     let mut line = String::new();
     for word in text.split_whitespace() {
-        let try_line = if line.is_empty() {
-            word.to_string()
-        } else {
-            format!("{line} {word}")
-        };
-        if tc.width(&try_line, px) > width && !line.is_empty() {
+        if !line.is_empty() {
+            let try_line = format!("{line} {word}");
+            if tc.width(&try_line, px) <= width {
+                line = try_line;
+                continue;
+            }
             out.push(std::mem::take(&mut line));
-            line = word.to_string();
-        } else {
-            line = try_line;
         }
+        let mut rest = word;
+        while tc.width_raw(rest, px) > width {
+            let cut = break_at(tc, rest, px, width);
+            out.push(rest[..cut].to_string());
+            rest = &rest[cut..];
+        }
+        line = rest.to_string();
     }
     if !line.is_empty() {
         out.push(line);
     }
     out
+}
+
+/// Where to break `word`, which is wider than `width` pixels: after the last folder separator
+/// that fits, else after as many characters as fit (one at least).
+fn break_at(tc: &TextCache, word: &str, px: f32, width: f32) -> usize {
+    let char_ends: Vec<usize> = word.char_indices().map(|(i, c)| i + c.len_utf8()).collect();
+    let (mut lo, mut hi) = (0, char_ends.len() - 1);
+    while lo < hi {
+        let mid = (lo + hi + 1) / 2;
+        if tc.width_raw(&word[..char_ends[mid]], px) <= width {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    let fits = char_ends[lo];
+    word[..fits].rfind(['/', '\\']).map_or(fits, |at| at + 1)
 }
 
 /// `text` cut at the end to fit `width` pixels ("…").

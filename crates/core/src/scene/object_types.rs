@@ -68,15 +68,7 @@ impl World {
             if !model.lods.is_empty() {
                 let start = model.lods[0].first_mesh;
                 for (i, md) in model.lod_meshes(0).iter().enumerate() {
-                    let mesh_path = ::mods::resolve_path(
-                        &::mods::resolve_path(&model_dir, "model"),
-                        &md.file,
-                    );
-                    let mesh_path = if ::legacy_config::vfs::is_file(&mesh_path) {
-                        mesh_path
-                    } else {
-                        ::mods::resolve_path(&model_dir, &md.file)
-                    };
+                    let mesh_path = mesh_path(&model_dir, &md.file);
                     match ::legacy_o3d::load_mesh(&mesh_path) {
                         Ok(m) => {
                             meshes.push((
@@ -100,16 +92,7 @@ impl World {
             for l in 1..model.lods.len() {
                 let mut list = Vec::new();
                 for md in model.lod_meshes(l) {
-                    let mesh_path = ::mods::resolve_path(
-                        &::mods::resolve_path(&model_dir, "model"),
-                        &md.file,
-                    );
-                    let mesh_path = if ::legacy_config::vfs::is_file(&mesh_path) {
-                        mesh_path
-                    } else {
-                        ::mods::resolve_path(&model_dir, &md.file)
-                    };
-                    if let Ok(m) = ::legacy_o3d::load_mesh(&mesh_path) {
+                    if let Ok(m) = ::legacy_o3d::load_mesh(&mesh_path(&model_dir, &md.file)) {
                         list.push((mesh_from_o3d(&m), m.materials.clone(), md.materials.clone()));
                     }
                 }
@@ -293,13 +276,7 @@ impl World {
                 .as_ref()
                 .filter(|_| !sco.no_collision)
                 .and_then(|f| {
-                    let mp =
-                        ::mods::resolve_path(&::mods::resolve_path(&model_dir, "model"), f);
-                    let mp = if ::legacy_config::vfs::is_file(&mp) {
-                        mp
-                    } else {
-                        ::mods::resolve_path(&model_dir, f)
-                    };
+                    let mp = mesh_path(&model_dir, f);
                     let mp = if ::legacy_config::vfs::is_file(&mp) {
                         mp
                     } else {

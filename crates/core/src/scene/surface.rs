@@ -47,6 +47,16 @@ pub(super) fn seasonal_texture(name: &str, dirs: &[&Path]) -> bool {
     }
 }
 
+/// Where a model's mesh file is: in the `model` folder next to the model file, else beside it.
+pub fn mesh_path(model_dir: &Path, file: &str) -> PathBuf {
+    let in_model = ::mods::resolve_path(&::mods::resolve_path(model_dir, "model"), file);
+    if ::legacy_config::vfs::is_file(&in_model) {
+        in_model
+    } else {
+        ::mods::resolve_path(model_dir, file)
+    }
+}
+
 pub fn texture_dirs(root: &Path, content_dir: &Path) -> Vec<PathBuf> {
     // (found whatever its case: `Texture` of a parked car's folder on Linux, whose file
     // system tells `texture` from `Texture`, left the car white)

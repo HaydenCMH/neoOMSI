@@ -83,3 +83,14 @@ fn chat_filter_stars_out_swearing() {
         "next stop Rathaus Spandau"
     );
 }
+
+#[test]
+fn a_path_wider_than_the_line_is_broken_after_a_folder() {
+    let tc = TextCache::new().unwrap();
+    let path = "Vehicles/MAN_NL202/Texture/Repaints/Very_Long_Repaint_Name_Here/front.dds";
+    let width = tc.width_raw("Vehicles/MAN_NL202/Texture/", 15.0) + 4.0;
+    let lines = wrap(&tc, &format!("Missing: {path}"), 15.0, width);
+    assert!(lines.iter().all(|line| tc.width_raw(line, 15.0) <= width), "{lines:?}");
+    assert_eq!(lines.concat().replace("Missing:", ""), path, "nothing is lost");
+    assert!(lines.iter().any(|line| line.ends_with("Texture/")), "{lines:?}");
+}

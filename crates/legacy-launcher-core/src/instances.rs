@@ -88,6 +88,18 @@ pub fn undismissed(
         .collect()
 }
 
+/// Where the start menu keeps what the last drive of `map` couldn't find: one file however the
+/// map is written (`maps\X\global.cfg` or `maps/x/global.cfg`).
+pub fn map_diagnostics_path(map: &str) -> PathBuf {
+    let name: String = map
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '.' { c } else { '_' })
+        .collect();
+    crate::data_dir().join("diagnostics").join("maps").join(format!("{name}.json"))
+}
+
 pub fn diagnostics_path(id: &str) -> PathBuf {
     crate::data_dir().join("diagnostics").join(format!("{id}.json"))
 }

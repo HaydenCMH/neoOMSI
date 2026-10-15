@@ -11,6 +11,12 @@ pub(crate) fn is_null_texture(name: &str) -> bool {
         .is_some_and(|s| s.eq_ignore_ascii_case("null"))
 }
 
+/// Whether a texture slot names a real file: not a null texture, nor the number some model
+/// files put where a file belongs.
+pub(crate) fn names_texture(name: &str) -> bool {
+    !is_null_texture(name) && name.trim().parse::<f64>().is_err()
+}
+
 pub(super) fn scenery_texture_key(name: &str) -> String {
     name.trim().replace('\\', "/").to_ascii_lowercase()
 }

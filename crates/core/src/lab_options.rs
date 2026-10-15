@@ -172,7 +172,7 @@ fn rows_of(host: &Host, file: &std::sync::Arc<serde_json::Value>, rows: &[OptRow
             OptKind::Keybinds => key_rows(host.root, &host.keys).into_iter().map(retag).collect(),
             OptKind::Pads => crate::lab_pads::rows(host.pads),
             OptKind::VoicePlayers => voice_player_rows(host.app, r),
-            OptKind::Mods => mod_rows(),
+            OptKind::Mods => crate::lab_mods::rows(host.app),
             _ if r.id == "pax_models" => row_of(host, file, r).into_iter().chain([pax_pack_row()]).collect(),
             _ => row_of(host, file, r).into_iter().collect(),
         })
@@ -188,6 +188,13 @@ fn subs_of(host: &Host, file: &std::sync::Arc<serde_json::Value>, g: &OptGroup) 
         .map(|s| (s.title.to_string(), rows_of(host, file, s.rows)))
         .filter(|s| !s.1.is_empty())
         .collect();
+
+    if g.rows.iter().any(|r| r.kind == OptKind::Mods) {
+        let missing = crate::lab_mods::missing(host.app);
+        if !missing.is_empty() {
+            subs.push((crate::lab_mods::MISSING_TAB.to_string(), missing));
+        }
+    }
 
     if g.rows.iter().any(|r| r.kind == OptKind::Pads) {
         subs.extend(
@@ -206,108 +213,6 @@ pub(crate) fn options_groups(host: &Host) -> Vec<(String, Vec<(String, String)>,
         .map(|g| (g.title.to_string(), rows_of(host, &file, g.rows), subs_of(host, &file, g)))
         .filter(|g| !g.1.is_empty() || !g.2.is_empty())
         .collect()
-}
-static MOD_SCAN: ScanCache = std::sync::Mutex::new(None);
-
-fn mod_problem(m: &::mods::ModEntry) -> (Option<&'static str>, String) {
-    let root = match m.kind {
-        ::mods::ModKind::Folder => ::mods::folder_content_root(&m.path),
-        ::mods::ModKind::Zip => match ::legacy_config::vfs::mount_zip(&m.path) {
-            Ok(r) => r,
-            Err(_) => return (Some("zip_error"), String::new()),
-        },
-    };
-    let Some(entries) = ::legacy_config::vfs::list_dir(&root) else {
-        return (Some("unreadable"), String::new());
-    };
-    let found: Vec<String> = ::legacy_config::CONTENT_FOLDERS
-        .iter()
-        .filter(|f| entries.iter().any(|(n, d)| *d && n.to_string_lossy().eq_ignore_ascii_case(f)))
-        .map(|f| f.to_string())
-        .collect();
-    if found.is_empty() {
-        return (Some("empty"), String::new());
-    }
-    (None, found.join(", "))
-}
-
-fn mod_rows() -> Vec<(String, String)> {
-    let t = |k: &str| ::i18n::translate(&format!("pause.options.mods.{k}"), &[]);
-    let lines = scan_cached(&MOD_SCAN, || {
-        ::mods::mods_dir()
-            .and_then(|dir| Some(::mods::entries(dir.parent()?)))
-            .unwrap_or_default()
-            .iter()
-            .map(|m| {
-                let (problem, found) = mod_problem(m);
-                let kind = if m.kind == ::mods::ModKind::Zip { "zip" } else { "folder" };
-                format!("{}\u{1f}{kind}\u{1f}{}\u{1f}{found}", m.name, problem.unwrap_or(""))
-            })
-            .collect()
-    });
-    if lines.is_empty() {
-        return vec![(row(&t("none"), 'i', "", &t("none_desc"), None), "noop".to_string())];
-    }
-    lines
-        .iter()
-        .map(|l| {
-            let mut p = l.split('\u{1f}');
-            let (name, kind, problem, found) = (
-                p.next().unwrap_or(""),
-                p.next().unwrap_or(""),
-                p.next().unwrap_or(""),
-                p.next().unwrap_or(""),
-            );
-            let (value, desc) = if problem.is_empty() {
-                (t("status.ok"), format!("{} - {found}", t(kind)))
-            } else {
-                (t(&format!("status.{problem}")), format!("{} - {}", t(kind), t(&format!("status.{problem}_desc"))))
-            };
-            (row(name, 'i', &value, &desc, None), "noop".to_string())
-        })
-        .collect()
-}
-
-pub(crate) fn mods_install() {
-    let Some(dir) = ::mods::mods_dir() else { return };
-    let Some(files) = rfd::FileDialog::new()
-        .set_title(::i18n::translate("pause.options.mods.install.title", &[]))
-        .add_filter("Mod archive", &["zip", "7z", "rar"])
-        .pick_files()
-    else {
-        return;
-    };
-    let _ = std::fs::create_dir_all(&dir);
-    let (zips, packed): (Vec<_>, Vec<_>) = files.into_iter().partition(|f| {
-        f.extension()
-            .is_some_and(|x| x.eq_ignore_ascii_case("zip"))
-    });
-    for f in zips {
-        let Some(name) = f.file_name() else { continue };
-        let to = dir.join(name);
-        if to != f {
-            if let Err(e) = std::fs::copy(&f, &to) {
-                log::warn!("mod install {}: {e}", f.display());
-            }
-        }
-    }
-    let rescan = move || {
-        let _ = omsi_launcher_lib::register_content();
-        *MOD_SCAN.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    };
-    if packed.is_empty() {
-        rescan();
-        return;
-    }
-    std::thread::spawn(move || {
-        for f in packed {
-            if let Err(e) = omsi_launcher_lib::install_mod_blocking(&f, "extract", false, None) {
-                log::warn!("mod install {}: {e}", f.display());
-            }
-        }
-        rescan();
-    });
-    *MOD_SCAN.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
 static PENDING_ROOT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);

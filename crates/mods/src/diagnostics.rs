@@ -55,7 +55,7 @@ pub enum Class {
 }
 
 impl Class {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Class::MissingFile => "missing_file",
             Class::IncompleteMod => "incomplete_mod",
@@ -122,6 +122,13 @@ pub fn missing(requester: &Path, wanted: &Path, kind: Kind) {
     }
     log::warn!("{}: {} not found", found.requester, found.path);
     list.push(found);
+}
+
+/// Forgets the recorded misses, for a new drive.
+pub fn clear() {
+    *MISSES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = (Vec::new(), BTreeSet::new());
 }
 
 pub fn findings() -> Vec<Finding> {
@@ -223,12 +230,8 @@ pub fn summary(findings: &[Finding]) -> Option<String> {
     if files > 0 {
         parts.push(format!("files missing in {files} place(s)"));
     }
-    (!parts.is_empty()).then(|| {
-        format!(
-            "Content {} - see the session in the launcher",
-            parts.join("; ")
-        )
-    })
+    // (the game says where to look, in the player's language)
+    (!parts.is_empty()).then(|| format!("Content {}", parts.join("; ")))
 }
 
 impl Finding {
@@ -241,6 +244,26 @@ impl Finding {
             self.class.as_str(),
             self.pack.as_deref().unwrap_or_default()
         )
+    }
+}
+
+/// Adds `more` to `findings`. Two findings with the same key may name the same files, so the
+/// merged one counts the larger number: at least that many are missing.
+pub fn merge(findings: &mut Vec<Finding>, more: Vec<Finding>) {
+    for finding in more {
+        let Some(known) = findings.iter_mut().find(|known| known.key() == finding.key()) else {
+            findings.push(finding);
+            continue;
+        };
+        known.count = known.count.max(finding.count);
+        known.severity = known.severity.max(finding.severity);
+        for sample in finding.samples {
+            if known.samples.len() < SAMPLES
+                && !known.samples.iter().any(|kept| kept.eq_ignore_ascii_case(&sample))
+            {
+                known.samples.push(sample);
+            }
+        }
     }
 }
 
@@ -464,6 +487,24 @@ mod tests {
             finding("Texture/a.dds").key(),
             finding("Texture/b.dds").key()
         );
+    }
+
+    #[test]
+    fn merging_keeps_the_files_of_both() {
+        let finding = |count, samples: &[&str]| Finding {
+            class: Class::MissingFile,
+            requester: "Town".into(),
+            pack: None,
+            provider: None,
+            severity: Severity::Degraded,
+            count,
+            samples: samples.iter().map(|s| s.to_string()).collect(),
+        };
+        let mut found = vec![finding(2, &["Texture/a.dds", "Texture/b.dds"])];
+        merge(&mut found, vec![finding(3, &["texture/A.dds", "Texture/c.dds"])]);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].count, 3);
+        assert_eq!(found[0].samples, ["Texture/a.dds", "Texture/b.dds", "Texture/c.dds"]);
     }
 
     #[test]
