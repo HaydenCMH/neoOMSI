@@ -1,0 +1,35 @@
+name: Check i18n files
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  check-i18n:
+    runs-on: ubuntu-latest
+    env:
+      VIOLATIONS_FILE: ${{ runner.temp }}/violations.txt
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run check
+        id: check
+        continue-on-error: true
+        run: bash scripts/i18n/check-i18n.sh
+
+      - name: Update PR comment
+        env:
+          FAILED: ${{ steps.check.outcome == 'failure' }}
+        run: bash scripts/i18n/comment-i18n.sh
+
+      - name: Fail if invalid changes were found
+        if: steps.check.outcome == 'failure'
+        run: exit 1
