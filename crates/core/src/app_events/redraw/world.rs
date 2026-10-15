@@ -254,11 +254,7 @@ impl App {
                 8.0,
             ));
         }
-        if self.plugins.is_none() {
-            let map_dir = self.world.as_ref().map(|w| w.map_dir.as_path());
-            self.plugins = Some(plugins::load(map_dir));
-        }
-        let plugins = self.plugins.as_mut().unwrap();
+        let plugins = self.plugins.get_or_insert_with(plugins::load);
         if !plugins.is_empty() && !self.paused {
             let info = plugins::game_info(self);
             let keys = std::mem::take(&mut self.plugin_keys);
@@ -271,9 +267,7 @@ impl App {
                 commands: Vec::new(),
                 keys,
             };
-            let started = Instant::now();
             plugins.frame(&mut io);
-            *self.profile.entry("plugins").or_default() += started.elapsed().as_secs_f64();
             let commands = std::mem::take(&mut io.commands);
             if let Some(m) = io.message {
                 self.service_msg = Some(m);

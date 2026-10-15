@@ -424,16 +424,6 @@ impl Remote {
     /// Start `host` (with `runner`, e.g. `wine`, in front when given) on the library and
     /// have it call `PluginStart`.
     pub fn spawn(runner: Option<&Path>, host: &Path, dll: &Path) -> Result<Remote, String> {
-        Self::spawn_in(runner, host, dll, dll.parent())
-    }
-
-    /// As `spawn`, run from `cwd` (OMSI runs its plugins from the game's root).
-    pub fn spawn_in(
-        runner: Option<&Path>,
-        host: &Path,
-        dll: &Path,
-        cwd: Option<&Path>,
-    ) -> Result<Remote, String> {
         let mut cmd = match runner {
             Some(r) => {
                 let mut c = Command::new(r);
@@ -446,7 +436,7 @@ impl Remote {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
-        if let Some(dir) = cwd {
+        if let Some(dir) = dll.parent() {
             cmd.current_dir(dir);
         }
         let mut child = cmd
@@ -603,8 +593,7 @@ impl Plugin {
                         "{local}; a Windows plugin needs Wine here (or OMSI_WINE)"
                     ));
                 }
-                let root = plugins_dir.parent().or(dll.parent());
-                let r = Remote::spawn_in(hosts.runner.as_deref(), host, &dll, root)?;
+                let r = Remote::spawn(hosts.runner.as_deref(), host, &dll)?;
                 let p = r.procs();
                 (Backend::Remote(r), p)
             }
