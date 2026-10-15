@@ -1181,8 +1181,11 @@ impl Renderer {
         // Batches from `prepass_split` on are vehicles drawn in model order, kept out of the
         // main pass's depth: a wheel hidden by the shadow blob took the ground's place (#292).
         let mut prepass_split = 0;
-        // (but the camera's own vehicle: without it the world behind the cabin was shaded)
-        let camera_vehicle = lighting.inside.map(|(o, _, _)| o);
+        // (but the vehicle the camera is in: without it the world behind the cabin was shaded)
+        let camera_vehicle = lighting
+            .inside
+            .filter(|v| point_in_vehicle_box(camera.position, v))
+            .map(|(o, _, _)| o);
         let prepass_job = || -> (Vec<u32>, Vec<Batch>, usize) {
             let mut items: Vec<DrawItem> = Vec::new();
             let mut ordered_items: Vec<DrawItem> = Vec::new();
