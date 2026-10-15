@@ -1141,7 +1141,8 @@ impl App {
 /// message list so a script can deliberately repeat the same text and still have it shown.
 impl App {
     /// OMSI_PROFILE: the stage averages since the mark, once: at the end of an automated run,
-    /// or when the game closes (`marked`: only when the mark was taken, after the loading).
+    /// or when the game closes or goes back to the main menu (`marked`: only when the mark was
+    /// taken, after the loading).
     pub(crate) fn log_profile_summary(&mut self, marked: bool) {
         if ::legacy_config::env::var_os("OMSI_PROFILE").is_none()
             || (marked && self.profile_mark.is_none())

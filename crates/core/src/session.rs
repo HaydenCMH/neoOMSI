@@ -37,6 +37,9 @@ impl App {
     }
 
     pub(crate) fn back_to_main_menu(&mut self) {
+        // (the session that ends gets its own summary; the next one is measured from its own start)
+        self.log_profile_summary(true);
+        self.play_since = None;
         self.finish_session();
         self.exiting = false;
         self.present_splash(&::i18n::translate("splash.loading", &[]));

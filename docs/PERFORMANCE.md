@@ -111,7 +111,8 @@ summary records CPU stage times, draw counts, tile streaming spikes, incremental
 upload bytes/write counts, and GPU pass times where the adapter supports them
 (`OMSI_GPU_TIMERS=1`). With `--exit-after`, stage averages cover only the second half of
 the run, after loading. Without it, the same summary is written when the game closes
-(Escape, the window or SIGTERM), averaged from 15 s after the player's bus appears.
+(Escape, the window or SIGTERM) or goes back to the main menu, averaged from 15 s after
+the player's bus appears; each session played from the menu gets its own summary.
 `frame.*` entries time every phase of the frame without gaps. `profile thread` lines list
 each thread's CPU time per frame.
 
