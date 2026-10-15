@@ -267,7 +267,9 @@ impl App {
                 commands: Vec::new(),
                 keys,
             };
+            let started = Instant::now();
             plugins.frame(&mut io);
+            *self.profile.entry("plugins").or_default() += started.elapsed().as_secs_f64();
             let commands = std::mem::take(&mut io.commands);
             if let Some(m) = io.message {
                 self.service_msg = Some(m);
