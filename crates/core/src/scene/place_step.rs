@@ -207,18 +207,7 @@ impl World {
                         // the tile's water surface: one quad at the four corner heights, drawn over the
                         // riverbed. OMSI keeps it in `tile.map.water`, one height per corner.
                         if let Some(h) = p.water {
-                            let t = tile_size() as f32;
-                            let mut wm = MeshData::default();
-                            for (i, (x, y)) in [(0.0, 0.0), (t, 0.0), (0.0, t), (t, t)]
-                                .into_iter()
-                                .enumerate()
-                            {
-                                wm.positions.push(glam::Vec3::new(x, y, h[i]));
-                                wm.normals.push(glam::Vec3::Z);
-                                wm.uvs.push(glam::Vec2::new(x / 40.0, y / 40.0));
-                            }
-                            wm.indices.extend_from_slice(&[0, 1, 2, 2, 1, 3]);
-                            wm.ranges.push((0, 6, 0));
+                            let wm = ::geometry::build_water_mesh(h);
                             let wid = gpu.add_mesh(renderer, scene, &wm);
                             tg.meshes.push(wid);
                             if ::legacy_config::env::var_os("OMSI_DEBUG_SURFACES").is_some() {
@@ -465,12 +454,7 @@ impl World {
                             tg.trees.push(tkey.clone());
                         }
                         let mat = tr.material;
-                        let xf = Mat4::from_rotation_z((-heading).to_radians() as f32)
-                            * Mat4::from_scale(glam::Vec3::new(
-                            *width as f32,
-                            *width as f32,
-                            *height as f32,
-                        ));
+                        let xf = tree_transform(*heading, *width, *height);
                         let _ =
                             instance!(renderer.add_instance(scene, tree_mesh, *pos, xf, vec![mat]));
                         pl.trees += 1;
@@ -1079,6 +1063,23 @@ impl World {
                             scene.instances[*inst].presurface =
                                 ot.sco.render_type == ::scenery::sco::RenderType::PreSurface;
                             renderer.set_object_culling(scene, *inst, radius, detail, any_distance);
+                            let near_only = near_only.or_else(|| {
+                                let i = &scene.instances[*inst];
+                                let m = scene.meshes.get(i.mesh)?;
+                                if m.bounds_radius <= 0.0 {
+                                    return None;
+                                }
+                                let t = i.transform;
+                                let scale = t
+                                    .x_axis
+                                    .truncate()
+                                    .length()
+                                    .max(t.y_axis.truncate().length())
+                                    .max(t.z_axis.truncate().length());
+                                let centre =
+                                    i.origin + t.transform_point3(m.bounds_center).as_dvec3();
+                                beyond_loaded_area(centre, (m.bounds_radius * scale) as f64, (p.tx, p.ty))
+                            });
                             renderer.set_near_only(scene, *inst, near_only);
                         }
                     }

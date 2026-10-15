@@ -179,7 +179,17 @@ pub(super) fn material_extra(
             .filter(|o| o.tex_address == ::model::TexAddress::Border)
             .map(|o| o.border_color.map(|c| (c / 255.0).clamp(0.0, 1.0))),
         metal_ok: false,
+        normals_inward: false,
     }
+}
+
+/// What a `[matl_item]` variant keeps from its base slot: the depth flags, glass, and the
+/// mesh's normals (#117: the item does not change the geometry).
+pub(super) fn inherit_base_extra(item: &mut MaterialExtra, base: &MaterialExtra) {
+    item.no_z_write |= base.no_z_write;
+    item.no_z_check |= base.no_z_check;
+    item.glass |= base.glass;
+    item.normals_inward = base.normals_inward;
 }
 
 /// The addressing of a slot's textures: its last `[matl_texadress_*]` command decides (the

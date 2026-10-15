@@ -184,6 +184,7 @@ impl ApplicationHandler for App {
         if let Some(r) = self.renderer.as_ref() {
             r.wait_submitted();
         }
+        self.log_profile_summary(true);
         game_lists::flush_settings(true);
         self.finish_session();
         if let Some(lan) = self.lan.take() {

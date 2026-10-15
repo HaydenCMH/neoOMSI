@@ -101,9 +101,9 @@
           "name": "Kopfneigung zurücksetzen"
         },
         "headtrack": {
-          "desc": "Head-Tracking mit opentrack (UDP-Port 4242)",
+          "desc": "Head-Tracking mit TrackIR oder opentrack (UDP-Port 4242)",
           "name": "Head-Tracking",
-          "desc_port": "Head-Tracking mit opentrack (UDP-Port {port})"
+          "desc_port": "Head-Tracking mit TrackIR oder opentrack (UDP-Port {port})"
         },
         "look_sens": {
           "desc": "Wie schnell sich die Ansicht dreht, wenn du dich mit der Maus umsiehst (100% entspricht der Geschwindigkeit von OMSI)",
@@ -535,152 +535,34 @@
         }
       },
       "mods": {
+        "folder": "Ordner",
         "install": {
           "button": "Auswählen",
-          "desc": "Entpackt ein .zip-, .7z- oder .rar-Archiv in den Mods-Ordner.\n\nEin installierter Mod gleichen Namens wird ersetzt, außer während der Fahrt; die alte Version kommt nach mods/uninstalled.",
+          "desc": "Wählen ein Archiv zum Installieren als Mod.\n\nUnterstützte Formate:\n- Zip\n- Rar\n- 7Zip",
           "name": "Installiere einen Mod aus einem Archiv",
           "title": "Wähle ein Mod-Archiv zum Installieren aus"
         },
         "list": {
-          "desc": "Die Ladereihenfolge der installierten Mods und was mit ihnen nicht stimmt",
-          "name": "Mods"
+          "desc": "Alle geladenen Mods (Und ob Content fehlt)",
+          "name": "Aktive Mods"
         },
-        "none": "Keine Mods installiert",
-        "none_desc": "Es wurden keine Mods gefunden. Inhalte im OMSI-2-Ordner selbst zählen nicht als Mods.\n\nInstalliere oben einen Mod aus einem Archiv, oder lege Archive oder Ordner in den Mods-Ordner.",
+        "none": "Keine Mods aktiv",
+        "none_desc": "Es wurden keine Mods gefunden. Bitte beachte, dass OMSI 2 Ordnerinhalte nicht als Mods gezählt werden.\n\nDu kannst Mods im Mods Ordner als Archive oder Ordner installieren.",
         "open": {
           "button": "Öffnen",
           "desc": "Öffnet den Ordner, der die Mods enthält",
           "name": "Mods Ordner"
         },
         "status": {
-          "empty_desc": "Keine OMSI-2-Inhalte darin gefunden (z. B. Fahrzeuge oder Karten)."
+          "empty": "Fehlende Daten",
+          "empty_desc": "Keine OMSI-Inhalte gefunden (z.B. Fahrzeuge oder Karten)",
+          "ok": "OK",
+          "unreadable": "Fehlende Daten",
+          "unreadable_desc": "Der Ordner kann nicht gelesen werden",
+          "zip_error": "Fehlende Daten",
+          "zip_error_desc": "Das ZIP-Archiv kann nicht gelesen werden"
         },
-        "no_content": {
-          "name": "Kein Inhaltsordner",
-          "desc": "Wähle zuerst unter Spiel den OMSI-2-Ordner."
-        },
-        "unreadable": "Das Spiel kann ihn nicht lesen: {error}",
-        "state": {
-          "empty": "Kein Inhalt",
-          "error": "Nicht lesbar",
-          "missing": "Nicht gefunden",
-          "hidden": "Verdeckt",
-          "plugins_blocked": "Plugins gesperrt"
-        },
-        "order": {
-          "heading": "Ladereihenfolge (oben gewinnt)",
-          "unavailable": "Nicht im Inhaltsordner. Er behält seinen Platz, falls er zurückkommt; Vergessen entfernt ihn aus der Liste.",
-          "unreadable": "Gespeicherte Ladereihenfolge nicht lesbar",
-          "hidden": "Ganz verdeckt von {mods}: keine seiner Dateien wird genutzt",
-          "overridden": "{n} Dateien verdeckt von {mods}",
-          "overrides": "Ersetzt {n} Dateien von {mods}",
-          "replaces": "Ersetzt {n} Originaldateien von OMSI 2",
-          "clash": "{mod} nutzt den Ordner Vehicles/{folder} für einen anderen Bus",
-          "problems": "Probleme: {n}",
-          "next_start": "Änderungen gelten ab dem nächsten Start",
-          "unreadable_desc": "Es gilt die Standardreihenfolge.\n\n{error}"
-        },
-        "action": {
-          "up": "Nach oben",
-          "down": "Nach unten",
-          "top": "Ganz nach oben",
-          "bottom": "Ganz nach unten",
-          "allow_plugins": "Plugins erlauben",
-          "block_plugins": "Plugins sperren",
-          "uninstall_ask": "Deinstallieren…",
-          "uninstall": "Deinstallieren",
-          "forget": "Vergessen",
-          "cancel": "Abbrechen"
-        },
-        "shared": {
-          "name": "Gemeinsame Bibliothek",
-          "button": "Öffnen",
-          "desc": "Immer zuletzt: Dateien darin werden nur genutzt, wo kein Mod sie hat. Plugins darin werden nie geladen."
-        },
-        "new_mods": {
-          "name": "Neu installierte Mods",
-          "top": "Ganz oben",
-          "bottom": "Ganz unten",
-          "desc": "Wohin ein neuer Mod in der Liste kommt. Mods in der Liste verschieben sich nie von selbst."
-        },
-        "reset": {
-          "name": "Ladereihenfolge zurücksetzen",
-          "button": "Zurücksetzen",
-          "confirm": "Ladereihenfolge zurücksetzen",
-          "desc": "Zurück zur Standardreihenfolge: alphabetisch. Nicht installierte Einträge fallen weg.",
-          "again": "Zum Zurücksetzen erneut klicken"
-        },
-        "jobs": {
-          "heading": "Installationen",
-          "cancel": "Installation abbrechen",
-          "clear": "Fertige Installationen",
-          "clear_button": "Leeren",
-          "installed": "{folder} installiert",
-          "state": {
-            "queued": "Wartet",
-            "planning": "Plant",
-            "checking": "Prüft Platz",
-            "unpacking": "Entpackt",
-            "copying": "Kopiert",
-            "moving": "Verschiebt",
-            "done": "Fertig",
-            "failed": "Fehlgeschlagen",
-            "cancelled": "Abgebrochen"
-          },
-          "keep": "Weiter installieren",
-          "progress": "{state} {pct} %"
-        },
-        "missing": {
-          "tab": "Fehlende Inhalte",
-          "not_driven": {
-            "name": "Noch nicht gefahren",
-            "desc": "Fahrzeugtexturen, Sounds und Skripte erscheinen hier, sobald die Karte einmal gefahren wurde."
-          },
-          "hidden": "{n} ausgeblendet",
-          "show_hidden": "Wieder zeigen",
-          "map": "Fehlende Inhalte von {map}",
-          "game": "Fehlende Inhalte dieser Sitzung",
-          "checking": "Prüfe die Karte…",
-          "failed": "Die Karte konnte nicht geprüft werden",
-          "none": "Es fehlt nichts",
-          "dismiss": "Ausblenden",
-          "missing_dependency": "{requester} braucht {pack}, das nicht installiert ist ({count} Dateien)",
-          "inactive_dependency": "{requester} braucht {pack}: Es liegt in {provider}, das deinstalliert ist ({count} Dateien)",
-          "incomplete_pack": "{requester} braucht Dateien, die {provider} in {pack} nicht hat; vielleicht eine andere Version ({count} Dateien)",
-          "incomplete_mod": "{requester} fehlen eigene Dateien in {pack} ({count} Dateien)",
-          "missing_file": "{requester}: {count} Dateien nicht gefunden",
-          "see": "siehe {path}",
-          "severity": {
-            "required": "Erforderlich",
-            "degraded": "Optisch",
-            "optional": "Gering"
-          },
-          "name": {
-            "missing_dependency": "{pack} nicht installiert",
-            "inactive_dependency": "{pack} deinstalliert",
-            "incomplete_pack": "{pack} unvollständig",
-            "incomplete_mod": "{requester} unvollständig",
-            "missing_file": "{requester}: {count} Dateien fehlen"
-          },
-          "advice": {
-            "missing_dependency": "Installiere {pack}.",
-            "inactive_dependency": "Installiere {provider} erneut: Er liegt in mods/uninstalled.",
-            "incomplete_pack": "{requester} braucht vielleicht eine andere Version von {pack}.",
-            "incomplete_mod": "Meist hilft eine neue Kopie von {requester}.",
-            "missing_file": "Prüfe die Ladereihenfolge oder installiere eine neue Kopie von {requester}."
-          }
-        },
-        "msg": {
-          "next_start": "Gespeichert. Wirkt ab dem nächsten Start."
-        },
-        "plugins": {
-          "blocked": "Er hat Plugins: Programmcode, der im Spiel läuft. Sie sind gesperrt; erlaube sie nur, wenn du diesem Mod vertraust.",
-          "allowed": "Seine Plugins (Programmcode, der im Spiel läuft) sind erlaubt."
-        },
-        "uninstall": {
-          "ask": "Deinstallieren?",
-          "desc": "Deinstallieren verschiebt ihn nach mods/uninstalled."
-        }
+        "zip": "ZIP"
       },
       "game": {
         "root": {

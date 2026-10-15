@@ -1,4 +1,9 @@
 {
+  "splash": {
+    "compile-shaders": "Zkompilovat stíny..",
+    "loading": "Načítání..",
+    "load-map": "Načítám {map}.."
+  },
   "ingame": {
     "navigator": {
       "kmh": "km/h",
@@ -46,6 +51,7 @@
       "screenshot": "Režim snímku obrazovky",
       "tobus": "Zpět do mého autobusu",
       "options": "Nastavení",
+      "mainmenu": "Hlavní menu",
       "quit": "Ukončit",
       "resume": "Pokračovat",
       "save": "Uložit",
@@ -95,9 +101,7 @@
           "name": "Obnovit náklon hlavy"
         },
         "headtrack": {
-          "desc": "Sledování hlavy pomocí opentrack (UDP port 4242)",
           "name": "Sledování hlavy",
-          "desc_port": "Sledování hlavy pomocí opentrack (UDP port {port})"
         },
         "look_sens": {
           "desc": "Jak rychle se pohled otočí, když se rozhlédnete myší (100% je rychlost OMSI)",
@@ -486,7 +490,9 @@
         "interface": "Rozhraní",
         "keybinds": "Klávesové zkratky",
         "map": "Mapa",
+        "mods": "Módy",
         "sound": "Zvuk",
+        "game": "Hra & aktualizace",
         "vr": "VR",
         "head_tracking": "Sledování hlavy",
         "general": "Obecné",
@@ -524,6 +530,66 @@
         "delay": {
           "desc": "Zobrazí odchylku od jízdního řádu",
           "name": "Zpoždění"
+        }
+      },
+      "mods": {
+        "folder": "Složka",
+        "install": {
+          "button": "Vybrat",
+          "desc": "Vyberte archiv pro instalaci jako mod.\n\nPodporované formáty:\n- Zip\n- Rar\n- 7Zip",
+          "name": "Nainstalovat mod z archivu",
+          "title": "Vyberte mod z archivu pro instalaci"
+        },
+        "list": {
+          "desc": "Všechny nahrané mody a zda chybí data",
+          "name": "Aktivní modifikace"
+        },
+        "none": "Žádné mody nejsou aktivní",
+        "none_desc": "Nebyly nalezeny žádné mody. Vezměte prosím na vědomí, že obsah složky OMSI 2 se nepočítá jako mody.\n\nMody můžete nainstalovat ve složce Mody jako archivy nebo složky.",
+        "open": {
+          "button": "Otevřít",
+          "desc": "Otevře složku modifikací",
+          "name": "Složka s mody"
+        },
+        "status": {
+          "empty": "Chybějící data",
+          "empty_desc": "Nebyl nalezen žádný obsah OMSI (např. vozidla nebo mapy)",
+          "ok": "OK",
+          "unreadable": "Chybějící data",
+          "unreadable_desc": "Složku nelze přečíst",
+          "zip_error": "Chybějící data",
+          "zip_error_desc": "Nelze přečíst ZIP archiv"
+        },
+        "zip": "ZIP"
+      },
+      "game": {
+        "root": {
+          "button": "Změnit",
+          "desc": "Složka s Omsi.exe, mapami a vozidly v ní",
+          "name": "Instalace OMSI 2",
+          "title": "Složka OMSI 2 (s mapou a vozidly)",
+          "exe_title": "Vyberte Omsi.exe z vaší instalace OMSI 2",
+          "incomplete": "{path} není kompletní instalace OMSI 2.\n\nChybí: {missing}"
+        },
+        "root_none": "Zatím nevybráno",
+        "root_restart": "se projeví po restartu",
+        "update_auto": {
+          "desc": "Nainstaluje novou verzi, jakmile bude nalezena",
+          "name": "Instalovat aktualizace automaticky"
+        },
+        "update_available": "{version} je k dispozici",
+        "update_check": {
+          "desc": "Vyhledá novou verzi, když hra začne",
+          "name": "Automaticky kontrolovat aktualizace"
+        },
+        "update_checking": "Hledání aktualizace...",
+        "update_current": "Aktuální verze: {version}",
+        "update_failed": "Poslední kontrola selhala",
+        "update_latest": "{version} je nejnovější verze",
+        "update_now": {
+          "button": "Zkontrolovat nyní",
+          "desc": "Vyhledá novou verzi neoOMSI",
+          "name": "Zkontrolovat aktualizace"
         }
       },
       "interface": {
@@ -1126,6 +1192,13 @@
       },
       "axis": {
         "desc": "Co tato osa dělá.",
+        "shape": {
+          "linear": "Lineární",
+          "degressive": "Degresivní",
+          "progressive": "Progresivní",
+          "bi_degressive": "Bi-degresivní",
+          "bi_progressive": "Bi-progresivní"
+        },
         "invert": {
           "name": "Převrátit",
           "desc": "Vrátí tuto osu, ještě před přiřazením funkce."
@@ -1486,6 +1559,175 @@
       "mute": "Ztišit mikrofon hráče {name}",
       "unmute": "Povolit hráči {name} mluvit",
       "voice": "Hlasový chat: {state}"
+    }
+  },
+  "start": {
+    "maps": {
+      "nav": "Spustit",
+      "head": "Vybrat mapu",
+      "note": "Vyberte si mapu a jak začne jízda.",
+      "list": "MAPY",
+      "settings": "NASTAVENÍ",
+      "vehicle": "VOZIDLO",
+      "mode": "SPUSTIT",
+      "free": "Volná jízda",
+      "t1": "Mapa a trasa",
+      "t2": "Vozidla",
+      "t3": "Čas & počasí",
+      "h1": "Kam pojedete?",
+      "h2": "Vyberte své vozidlo",
+      "h3": "Kdy a za jakého počasí?",
+      "next": "Další:",
+      "drive": "Jet",
+      "cont": "Pokračovat tam, kde jste skončili",
+      "map": "MAPA",
+      "buses": "VŠECHNA VOZIDLA",
+      "sw": "Zima",
+      "sp": "Jaro",
+      "su": "Léto",
+      "sa": "Podzim",
+      "route": "Trasa",
+      "go": "Spustit",
+      "none": "Nebyly nalezeny žádné mapy",
+      "livery": "Livery",
+      "details": "Podrobnosti o vozidle",
+      "auto": "Automatická",
+      "depot": "Soubor depa",
+      "fleet": "Evidenční číslo",
+      "plate": "Poznávací značka",
+      "search": "Hledat vozidla...",
+      "nobuses": "Nebyla nalezena žádná vozidla",
+      "unknown": "Neznámý výrobce",
+      "loading": "Načítání náhledu...",
+      "nopreview": "Bez náhledu",
+      "line": "LINKA",
+      "tour": "KURZ",
+      "filter": "Filtrovat...",
+      "nolines": "Žádné linky na této mapě",
+      "notours": "Žádné trasy",
+      "trip": "PRVNÍ SPOJ",
+      "autotrip": "Podle času zahájení",
+      "mappreview": "Načítání mapy...",
+      "autoentry": "Automaticky (nejblíže první zastávce)",
+      "entry": "POČÁTEČNÍ BOD",
+      "noentries": "Na této mapě nejsou žádné počáteční body",
+      "linetour": "Linka {line}, kurz {tour}",
+      "linetourtrip": "Linka {line}, kurz {tour}, jízda {trip}",
+      "time": "ČAS",
+      "date": "DATUM",
+      "now": "Nyní",
+      "season": "OBDOBÍ",
+      "today": "Dnes",
+      "close": "Zavřít",
+      "sd": "Podle data",
+      "weather": "POČASÍ",
+      "presets": "PŘEDVOLBY",
+      "icao": "LETIŠTĚ (ICAO)",
+      "onfoot": "Začít pěšky (bez autobusu)",
+      "onfoot_short": "Pěšky",
+      "icao_ph": "ICAO kód, např. LKPR",
+      "icao_auto": "Prázdné: nejbližší letiště k mapě",
+      "noair": "Žádné odpovídající letiště",
+      "icao_checking": "Kontroluji stanici..."
+    },
+    "profile": {
+      "ago_d": "před {n} dny",
+      "ago_h": "před {n} hod",
+      "ago_m": "před {n} min",
+      "comfort": "Komfort",
+      "comfort_note": "Podíl cestujících, kteří nastoupili a neměli co si stěžovat.",
+      "default_name": "Řidič",
+      "delete_confirm": "Smazat?",
+      "distance": "Vzdálenost",
+      "driving": "Řízení",
+      "driving_note": "Rychlost, tvrdé brzdění a nehody jej snižují.",
+      "hm": "{h} h {m} min",
+      "hours": "Odjeté hodiny",
+      "level": "Úroveň {level} · {xp} XP pro úroveň {next}",
+      "min": "{m} min",
+      "new": "Nový řidič",
+      "new_hint": "Jméno nového řidiče",
+      "no_drives": "Zatím žádné jízdy.",
+      "ontime": "Na čas",
+      "ratings": "Hodnocení",
+      "recent": "Nedávné jízdy",
+      "stops": "Obsloužené zastávky",
+      "tickets": "Prodeje jízdenek",
+      "tickets_note": "Správná jízdenka, správné vrácení peněz, bez čekání cestujících."
+    },
+    "join": {
+      "nav": "Hra pro více hráčů",
+      "note": "Jezděte s přáteli pomocí kódu relace nebo se připojte na server.",
+      "tab_join": "Připojit se a hostovat",
+      "tab_servers": "Seznam serverů",
+      "label": "KÓD RELACE NEBO ADRESA SERVERU",
+      "placeholder": "Kód relace nebo adresa serveru",
+      "hint": "Vložte kód od přítele nebo IP / adresu s portem. Ponechte prázdné pro vyhledání místní sítě.",
+      "go": "Připojit se",
+      "checking": "Kontroluji...",
+      "online": "Server online -  {map}  -  {players}/{max} hráčů",
+      "offline": "Server není dostupný: {error}",
+      "offline_short": "Offline",
+      "game": "VAŠE HRA",
+      "host": "Hostovat moji další jízdu",
+      "host_note": "Přátelé se mohou připojit k vaší relaci, jakmile ji zahájíte.",
+      "servers_note": "Je možné se připojit pouze k serverům, které odpověděly.",
+      "no_servers": "Zatím žádné uložené servery."
+    },
+    "row": {
+      "vehicle": "Vozidlo",
+      "time": "Čas",
+      "traffic": "Provoz",
+      "passengers": "Cestující",
+      "timetable": "Jízdní řád",
+      "weather": "Počasí",
+      "date": "Datum",
+      "situation": "Situace",
+      "season": "Roční období"
+    },
+    "value": {
+      "on": "zapnuto",
+      "off": "vypnuto",
+      "default": "výchozí",
+      "vehicles": "{n} vozidel",
+      "hour": "{h}:00"
+    },
+    "season": {
+      "winter": "zima",
+      "spring": "jaro",
+      "summer": "léto",
+      "autumn": "podzim"
+    },
+    "cal": {
+      "m1": "Leden",
+      "m2": "Únor",
+      "m3": "Březen",
+      "m4": "Duben",
+      "m5": "Květen",
+      "m6": "Červen",
+      "m7": "Červenec",
+      "m8": "Srpen",
+      "m9": "Září",
+      "m10": "Říjen",
+      "m11": "Listopad",
+      "m12": "Prosinec",
+      "d1": "Po",
+      "d2": "Út",
+      "d3": "St",
+      "d4": "Čt",
+      "d5": "Pá",
+      "d6": "So",
+      "d7": "Ne"
+    },
+    "weather": {
+      "default": "Výchozí mapy",
+      "cycle": "Cyklus počasí",
+      "real": "Reálné počasí",
+      "custom": "Vlastní počasí",
+      "vis": "Dohlednost",
+      "clouds": "Mraky",
+      "precip": "Srážky",
+      "temp": "Teplota"
     }
   }
 }

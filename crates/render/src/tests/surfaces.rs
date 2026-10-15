@@ -1145,6 +1145,16 @@ fn declared_transmap_ignores_slot_alpha() {
     );
     let plain = blended(&mut scene, None, MaterialExtra::default());
     assert_eq!(scene.materials[metal].uniform.params2[3], 4.0);
+    let inward = blended(
+        &mut scene,
+        None,
+        MaterialExtra {
+            normals_inward: true,
+            ..Default::default()
+        },
+    );
+    assert_eq!(scene.materials[inward].uniform.params2[3], 8.0);
+    assert!(!scene.materials[inward].transmap_declared());
     let flags: Vec<bool> = [declared, bound, metal, plain]
         .iter()
         .map(|&m| scene.materials[m].transmap_declared())
@@ -1379,4 +1389,178 @@ fn no_fog_down_the_saloon_of_an_articulated_bus() {
         (low_boxes - clear).abs() <= 2,
         "no fog under the ceiling: {clear} -> {low_boxes}"
     );
+}
+
+#[test]
+#[ignore = "requires a graphics adapter; run with --ignored on a GPU host"]
+fn an_ordered_vehicle_leaves_the_ground_behind_its_hidden_parts() {
+    ordered_vehicle_over_the_ground(4);
+}
+
+#[test]
+#[ignore = "requires a graphics adapter; run with --ignored on a GPU host"]
+fn an_ordered_vehicle_leaves_the_ground_behind_its_hidden_parts_without_msaa() {
+    ordered_vehicle_over_the_ground(1);
+}
+
+/// One renderer per test: the pipeline cache belongs to the first device.
+fn ordered_vehicle_over_the_ground(msaa: u32) {
+    // A shadow blob (blended, writing depth) drawn before a wheel behind it: the ground
+    // must still show through the blob (#292).
+    fn quad(renderer: &Renderer, scene: &mut Scene, y: f32, half: f32) -> MeshId {
+        renderer.add_mesh(
+            scene,
+            &MeshData {
+                positions: vec![
+                    Vec3::new(-half, y, -half),
+                    Vec3::new(half, y, -half),
+                    Vec3::new(half, y, half),
+                    Vec3::new(-half, y, half),
+                ],
+                normals: vec![-Vec3::Y; 4],
+                uvs: vec![glam::Vec2::ZERO; 4],
+                ranges: vec![(0, 6, 0)],
+                indices: vec![0, 1, 2, 0, 2, 3],
+                one_sided: false,
+            },
+        )
+    }
+    let camera = Camera {
+        position: DVec3::ZERO,
+        yaw: 0.0,
+        pitch: 0.0,
+        roll: 0.0,
+        fov_deg: 90.0,
+        near: 0.1,
+        far: 100.0,
+    };
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let mut renderer = pollster::block_on(Renderer::new_with(
+        &instance,
+        None,
+        Some(wgpu::TextureFormat::Rgba8UnormSrgb),
+        RenderOptions {
+            msaa,
+            ssao: true,
+            shadow_size: 1024,
+            fxaa: false,
+            render_scale: 1.0,
+            ..Default::default()
+        },
+    ))
+    .expect("test renderer");
+    let mut scene = renderer.new_scene();
+    let green = renderer.add_material(
+        &mut scene,
+        None,
+        AlphaMode::Opaque,
+        [0.0, 1.0, 0.0, 1.0],
+        true,
+    );
+    let red = renderer.add_material(
+        &mut scene,
+        None,
+        AlphaMode::Opaque,
+        [1.0, 0.0, 0.0, 1.0],
+        true,
+    );
+    let texture = renderer.add_texture(
+        &mut scene,
+        &::texture::Image {
+            width: 1,
+            height: 1,
+            rgba: vec![255, 255, 255, 0],
+            has_alpha: true,
+        },
+        false,
+    );
+    let blob_material =
+        renderer.add_material(&mut scene, Some(texture), AlphaMode::Blend, [1.0; 4], true);
+    let ground = quad(&renderer, &mut scene, 6.0, 10.0);
+    renderer.add_instance(&mut scene, ground, DVec3::ZERO, Mat4::IDENTITY, vec![green]);
+    let blob = quad(&renderer, &mut scene, 3.0, 1.5);
+    let blob = renderer.add_instance(
+        &mut scene,
+        blob,
+        DVec3::ZERO,
+        Mat4::IDENTITY,
+        vec![blob_material],
+    );
+    renderer.set_ordered(&mut scene, blob, 0);
+    let wheel = quad(&renderer, &mut scene, 4.0, 0.5);
+    let wheel = renderer.add_instance(&mut scene, wheel, DVec3::ZERO, Mat4::IDENTITY, vec![red]);
+    renderer.set_ordered(&mut scene, wheel, 1);
+    let lighting = Lighting {
+        enhanced: true,
+        shadows: false,
+        fog_density: 0.0,
+        ..Default::default()
+    };
+    let rgba = renderer
+        .render_to_image(&mut scene, 64, 64, &camera, &lighting)
+        .unwrap();
+    let centre: [u8; 3] = rgba[(32 * 64 + 32) * 4..(32 * 64 + 32) * 4 + 3]
+        .try_into()
+        .unwrap();
+    assert!(
+        centre[1] > centre[0] + 40 && centre[1] > centre[2] + 40,
+        "the ground shows behind the blob: {centre:?}; msaa {msaa}"
+    );
+}
+
+#[test]
+fn only_wall_triangles_go_into_the_early_depth_pass() {
+    // one slot holding a road climbing 5 m, a kerb at each end of it and a 30 m facade
+    let data = MeshData {
+        positions: vec![
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(10.0, 0.0, 0.0),
+            Vec3::new(0.0, 50.0, 5.0),
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 0.15),
+            Vec3::new(10.0, 0.0, 0.0),
+            Vec3::new(0.0, 50.0, 5.0),
+            Vec3::new(0.0, 50.0, 5.15),
+            Vec3::new(10.0, 50.0, 5.0),
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 30.0),
+            Vec3::new(10.0, 0.0, 0.0),
+        ],
+        normals: vec![Vec3::Z; 12],
+        uvs: vec![glam::Vec2::ZERO; 12],
+        ranges: vec![(0, 12, 0)],
+        indices: (0..12).collect(),
+        one_sided: true,
+    };
+    let (indices, walls) = upload_indices(&data);
+    assert_eq!(&indices[..12], &data.indices[..]);
+    assert_eq!(walls.len(), 1);
+    let w = walls[0];
+    assert_eq!(&indices[w.first as usize..(w.first + w.count) as usize], &[9, 10, 11]);
+    assert_eq!(w.height, 30.0);
+    for t in [Mat4::IDENTITY, Mat4::from_rotation_z(1.0)] {
+        assert!(surface_wall(&walls, t, 0));
+    }
+    // a facade scaled down to 1.5 m, and a range the mesh does not have
+    assert!(!surface_wall(&walls, Mat4::from_scale(Vec3::splat(0.05)), 0));
+    assert!(!surface_wall(&walls, Mat4::IDENTITY, 1));
+
+    // the slot's own draw keeps all of it; the wall draw (ranges.len() + 0) only the facade
+    let renderer = super::instances::noop_renderer();
+    let mut scene = renderer.new_scene();
+    let id = renderer.add_mesh(&mut scene, &data);
+    let mesh = &scene.meshes[id];
+    assert_eq!(mesh.index_range(0), (0, 12));
+    assert_eq!(mesh.index_range(1), (12, 3));
+
+    // without walls: nothing extra
+    let road = MeshData {
+        ranges: vec![(0, 9, 0)],
+        indices: (0..9).collect(),
+        ..data
+    };
+    let (indices, walls) = upload_indices(&road);
+    assert_eq!(indices.len(), 9);
+    assert!(walls.is_empty());
+    assert!(!surface_wall(&walls, Mat4::IDENTITY, 0));
 }

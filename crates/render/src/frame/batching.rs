@@ -34,7 +34,7 @@ pub(crate) fn batch_items(
         if last.0 != d.look {
             last = (d.look, d.material);
         }
-        let (first, count, _) = scene.meshes[d.mesh as usize].ranges[d.range as usize];
+        let (first, count) = scene.meshes[d.mesh as usize].index_range(d.range);
         out.push(Batch {
             pipe: d.pipe,
             mesh: d.mesh,
@@ -185,6 +185,18 @@ pub(crate) fn world_surface_phase(phase: RenderPhase) -> bool {
             | RenderPhase::Spline
             | RenderPhase::OnSurface
     )
+}
+
+/// Height (m) of a steep face that makes a blended ground-phase slot a wall.
+pub(crate) const SURFACE_WALL_HEIGHT: f32 = 2.0;
+
+/// Whether a range has walls, such as a building carried by a `[rendertype] surface` object
+/// (#444): their depth is written right after its phase, so later ground phases (rails)
+/// stay behind them. `walls`: the mesh's `walls`.
+pub(crate) fn surface_wall(walls: &[WallRange], transform: Mat4, range: usize) -> bool {
+    walls
+        .get(range)
+        .is_some_and(|w| w.count > 0 && w.height * transform.z_axis.z.abs() > SURFACE_WALL_HEIGHT)
 }
 
 pub(crate) fn surface_depth_coverage(

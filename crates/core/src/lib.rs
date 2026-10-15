@@ -664,6 +664,7 @@ pub(crate) fn make_app(
         menu_edit: None,
         menu_edit_icao: false,
         menu_edit_date: false,
+        dest_sort: Default::default(),
         swap_pending: false,
         menu_drag: None,
         menu_kbd: true,
@@ -689,6 +690,7 @@ pub(crate) fn make_app(
         cpu_mark: None,
         thread_cpu_mark: Vec::new(),
         profile_mark: None,
+        play_since: None,
         touch: touch::Touch::new(),
     };
     app.lan = lan;

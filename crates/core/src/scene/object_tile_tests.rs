@@ -24,3 +24,55 @@ fn an_id_used_on_two_tiles_is_found_on_the_tile_named() {
     assert_eq!(x(1), Some(size + 20.0));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn a_tree_past_its_tiles_edge_is_left_out() {
+    let root = std::env::temp_dir().join(format!("neoomsi-tree-edge-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(
+        root.join("global.cfg"),
+        "[name]\nTree edge\n[map]\n0\n0\ntile_0_0.map\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("tree.sco"),
+        "[tree]\ntree.tga\n12\n18\n0.9\n1.1\n",
+    )
+    .unwrap();
+    let tree = |id: u32, x: f64, y: f64| {
+        format!("[object]\n0\ntree.sco\n{id}\n{x}\n{y}\n0\n0\n0\n0\n4\ntree.tga\n13\n1.2\n\n\n")
+    };
+    let size = tile_size();
+    let records: String = [
+        (1, 218.5, -0.85),
+        (2, 218.5, size + 0.85),
+        (3, -0.85, 100.0),
+        (4, size + 0.85, 100.0),
+        (5, 218.5, 0.85),
+    ]
+    .into_iter()
+    .map(|(id, x, y)| tree(id, x, y))
+    .collect();
+    std::fs::write(
+        root.join("tile_0_0.map"),
+        format!("[version]\n14\n{records}"),
+    )
+    .unwrap();
+    let world = World::open(&root, &root.join("global.cfg"), 20261015).unwrap();
+    let (prepared, _) = world.prepare_tiles(&[(0, 0, root.join("tile_0_0.map"))]);
+    let trees: Vec<(f64, f64)> = prepared[0].trees.iter().map(|t| (t.2.x, t.2.y)).collect();
+    assert_eq!(trees.len(), 1, "only the tree on its own tile: {trees:?}");
+    assert!((trees[0].0 - 218.5).abs() < 1e-6 && (trees[0].1 - 0.85).abs() < 1e-6);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_backdrop_modelled_beyond_its_tiles_neighbours_is_drawn_only_near_them() {
+    let ts = tile_size();
+    // London's Walworth Road backdrop: its object on tile (4, 1), the mesh 1.2 km north
+    let area = beyond_loaded_area(DVec3::new(700.0, 1850.0, 0.0), 300.0, (4, 1));
+    assert_eq!(area, Some([3.0 * ts, 0.0, 6.0 * ts, 3.0 * ts]));
+    // a mesh reaching into the tiles loaded with its own keeps the whole view distance
+    assert_eq!(beyond_loaded_area(DVec3::new(850.0, 1000.0, 0.0), 300.0, (4, 1)), None);
+    assert_eq!(beyond_loaded_area(DVec3::new(1350.0, 450.0, 0.0), 50.0, (4, 1)), None);
+}

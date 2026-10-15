@@ -405,6 +405,29 @@ const NEVER_VANISH_WITHIN: f64 = 150.0;
 /// Within this distance a vehicle appears or vanishes only behind something, wherever the
 /// player looks (see `Traffic::hidden`).
 const NEAR_HIDE: f64 = 350.0;
+/// How deep under the ground (m) a vehicle is out of sight, its roof included.
+const BURIED_DEPTH: f64 = 6.0;
+
+/// Is a vehicle (radius `r`) at `p` deep under the ground, with the viewer above ground?
+/// Then nobody sees it however near (#101: detector buses 10 m underground). `ground(x, y)`
+/// is the terrain's height, None where it is cut away (a tunnel portal) or not loaded.
+fn buried(ground: impl Fn(f64, f64) -> Option<f64>, viewer: DVec3, p: DVec3, r: f64) -> bool {
+    let above = |q: DVec3, depth: f64| ground(q.x, q.y).is_some_and(|g| g > q.z + depth);
+    // (not for a viewer in a tunnel)
+    if above(viewer, 0.5) {
+        return false;
+    }
+    let reach = r.max(2.0);
+    [
+        DVec3::ZERO,
+        DVec3::X * reach,
+        -DVec3::X * reach,
+        DVec3::Y * reach,
+        -DVec3::Y * reach,
+    ]
+    .into_iter()
+    .all(|o| above(p + o, BURIED_DEPTH))
+}
 
 /// Within this distance of the camera an AI vehicle is animated and drawn even out of the
 /// view (m): the mirrors look behind, and a car beside the view throws its shadow into it.
@@ -508,6 +531,26 @@ fn street_lane_weight(l: &::simulation::traffic::Lane) -> Option<f64> {
         .then(|| l.length() as f64 * l.density.clamp(0.05, 4.0) as f64)
 }
 
+/// A lane's spawn density: each group's density there (its own rule or the one it inherits,
+/// see `pool_density`) times its `uvg_share` (at most 1; 0 for a group not loaded).
+/// Unweighed, BRT Berlin's Kurfürstendamm bus lanes (Ambulance 3.0, factor 0.0002) spawned
+/// queues of ambulances (#411). Open lanes stay above 0.
+fn weigh_lane_density(
+    l: &mut ::simulation::traffic::Lane,
+    uvg_defaults: &[i32],
+    uvg_share: &[f32],
+) {
+    if uvg_share.is_empty() || l.group_density.is_empty() || l.density <= 0.0 {
+        return;
+    }
+    l.density = uvg_share
+        .iter()
+        .enumerate()
+        .map(|(u, share)| l.pool_density(uvg_defaults, u) * share.min(1.0))
+        .fold(0.0, f32::max)
+        .max(1e-4);
+}
+
 pub struct Traffic {
     pub net: Network,
     /// Sum of the spawn weights of every street lane, updated only as tiles add lanes.
@@ -540,6 +583,8 @@ pub struct Traffic {
     /// for the first entry its medium density, for any other that of the first entry, 2 of
     /// the second, and so on. It applies on the paths without a rule for the group.
     uvg_defaults: Arc<Vec<i32>>,
+    /// Per `unsched_vehgroups.txt` entry, its traffic factor over the first entry's.
+    uvg_share: Vec<f32>,
     pub cars: Vec<AiCar>,
     /// The random cars out of range (see `DormantCar`).
     pub dormant: Vec<DormantCar>,
@@ -562,8 +607,8 @@ pub struct Traffic {
     orphan_sounds: Vec<::audio::SoundSet>,
     lights: Vec<TrafficLightController>,
     controller_of_object: HashMap<i64, usize>,
-    /// Coupled vehicle types by file.
-    trailer_types: HashMap<std::path::PathBuf, Option<Arc<VehicleType>>>,
+    /// Coupled vehicle types (see [`coupled_type`]).
+    trailer_types: TrailerTypes,
     /// `[sound_ai]` configurations by file.
     sound_cfgs: HashMap<std::path::PathBuf, Option<Arc<::legacy_vehicle::SoundCfg>>>,
     root: std::path::PathBuf,
@@ -640,6 +685,10 @@ pub struct Traffic {
     /// OMSI: priority 1000 over the types' own): cars keep out of the way it is about
     /// to take for longer.
     pub player_priority: bool,
+    /// The indicators (1 left, 2 right) of the player's bus and of the `others` by id, set
+    /// before each `tick`: they pick the branch at the next fork when asking for lights.
+    pub player_blinker: u8,
+    pub blinkers: HashMap<u32, u8>,
     /// The LAN players' vehicles (their session ids and boxes as for the player), set
     /// before each `tick`: the cars stop behind them and go round them as round the
     /// player's bus.
@@ -1392,6 +1441,23 @@ impl Traffic {
         let light_log = ::legacy_config::env::var("OMSI_DEBUG_LIGHTS").ok();
         let light_prev = lights.iter().map(|c| vec![-100; c.lights.len()]).collect();
         let lanes = 0..net.lanes.len();
+        let uvg_factor = |u: usize| {
+            group_uvg
+                .iter()
+                .zip(&groups)
+                .find(|(g, _)| **g == Some(u))
+                .map(|(_, g)| g.factor)
+        };
+        let uvg_share: Vec<f32> = (0..uvg_defaults.len())
+            .map(|u| match (uvg_factor(u), uvg_factor(0)) {
+                (Some(f), Some(first)) if group_curves && first > 0.0 => f / first,
+                (Some(_), _) => 1.0,
+                (None, _) => 0.0,
+            })
+            .collect();
+        for l in &mut net.lanes {
+            weigh_lane_density(l, &uvg_defaults, &uvg_share);
+        }
         let street_weight = net.lanes.iter().filter_map(street_lane_weight).sum();
         let mut t = Traffic {
             net,
@@ -1405,6 +1471,7 @@ impl Traffic {
             group_curves,
             group_uvg,
             uvg_defaults: Arc::new(uvg_defaults),
+            uvg_share,
             cars: Vec::new(),
             dormant: Vec::new(),
             dormant_time: 0.0,
@@ -1456,6 +1523,8 @@ impl Traffic {
             framed_spawns: Vec::new(),
             player: None,
             player_priority: false,
+            player_blinker: 0,
+            blinkers: HashMap::new(),
             others: Vec::new(),
             rail_ahead: Vec::new(),
             train_cars: train_cars(root, &world.ailists),
@@ -1703,18 +1772,9 @@ impl Traffic {
             else {
                 break;
             };
-            let root = self.root.clone();
-            let t =
-                self.trailer_types.entry(path.clone()).or_insert_with(
-                    || match VehicleType::load_ai(&root, &path) {
-                        Ok(t) => Some(Arc::new(t)),
-                        Err(e) => {
-                            log::warn!("trailer {}: {e}", path.display());
-                            None
-                        }
-                    },
-                );
-            let Some(t) = t.clone() else { break };
+            let Some(t) = coupled_type(&mut self.trailer_types, &self.root, &path, &lead) else {
+                break;
+            };
             out.push((t.clone(), r));
             lead = t;
             lead_rev = r;
@@ -2097,7 +2157,14 @@ impl Traffic {
         let Some(v) = self.viewer else { return true };
         let d = (p - v.pos).length();
         if d < NEVER_VANISH_WITHIN {
-            return false;
+            let ground = |x, y| {
+                if world.ground_cut_away(x, y) {
+                    None
+                } else {
+                    terrain_height(world, x, y)
+                }
+            };
+            return buried(ground, v.pos, p, r);
         }
         if !v.draws(d, r) {
             return true;
@@ -5854,37 +5921,19 @@ impl Traffic {
         // the player's bus and the other players' vehicles ask too: a depot gate (Spandau's
         // `Omnibushof_S_1`, the exit arm on light 1) opens only for whoever asks, and the
         // player driving out of the depot at the start of a duty found it shut
-        let askers: Vec<(DVec3, f64)> = player
+        let askers: Vec<(DVec3, f64, u8)> = player
             .iter()
-            .map(|p| (p.0, p.1))
-            .chain(self.others.iter().map(|(_, b)| (b.0, b.1)))
+            .map(|p| (p.0, p.1, self.player_blinker))
+            .chain(
+                self.others
+                    .iter()
+                    .map(|(id, b)| (b.0, b.1, self.blinkers.get(id).copied().unwrap_or(0))),
+            )
             .collect();
-        for &(pos, heading) in &askers {
-            // (off the lanes - a depot yard, a car park - a gate's lane that starts just
-            // ahead, the way the bus is facing, is asked all the same: standing a few metres
-            // beside every lane there, the bus never opened the barrier in front of it)
-            for l in self.net.lanes_starting_near(pos, 35.0) {
-                let lane = &self.net.lanes[l];
-                let Some((ci, li)) = lane.traffic_light else {
-                    continue;
-                };
-                if gate_lane_ahead(lane, pos, heading) {
-                    if let Some(r) = self.lights.get_mut(ci).and_then(|c| c.request.get_mut(li)) {
-                        *r = true;
-                    }
-                }
-            }
-        }
-        for (pos, heading) in askers {
-            for (l, d) in self.lanes_ahead_of(pos, heading, 160.0) {
-                if let Some((ci, li)) = self.net.lanes[l].traffic_light {
-                    if let Some(ctl) = self.lights.get_mut(ci) {
-                        if d <= ctl.approach_dist(li) {
-                            if let Some(r) = ctl.request.get_mut(li) {
-                                *r = true;
-                            }
-                        }
-                    }
+        for (pos, heading, blinker) in askers {
+            for (ci, li) in lights_asked_by(&self.net, &self.lights, pos, heading, blinker) {
+                if let Some(r) = self.lights.get_mut(ci).and_then(|c| c.request.get_mut(li)) {
+                    *r = true;
                 }
             }
         }
@@ -7778,41 +7827,6 @@ impl Traffic {
         self.train_cars.contains(&car_key(path))
     }
 
-    /// The street lanes a vehicle standing at `pos` facing `heading` is on and will drive
-    /// onto within `reach` metres, each with the distance from the vehicle to its start
-    /// (0 for the lane it is on): the way straight on and the gentle turns (within 60° of
-    /// the lane before), not every branch of a junction.
-    fn lanes_ahead_of(&self, pos: DVec3, heading: f64, reach: f32) -> Vec<(usize, f32)> {
-        let Some((lane, s, _)) = self
-            .net
-            .lane_along(pos, heading, LaneKind::Street, 4.0, 45.0)
-        else {
-            return Vec::new();
-        };
-        let mut out = vec![(lane, 0.0f32)];
-        let mut open = vec![(lane, self.net.lanes[lane].length() - s)];
-        while let Some((l, to_end)) = open.pop() {
-            if to_end > reach || out.len() > 64 {
-                continue;
-            }
-            let end_heading = self.net.lanes[l].headings.last().copied().unwrap_or(0.0);
-            for &n in &self.net.lanes[l].next {
-                let nl = &self.net.lanes[n];
-                if nl.kind != LaneKind::Street || out.iter().any(|o| o.0 == n) {
-                    continue;
-                }
-                let start = nl.headings.first().copied().unwrap_or(end_heading);
-                let turn = ((start - end_heading) as f64 + 540.0).rem_euclid(360.0) - 180.0;
-                if turn.abs() > 60.0 {
-                    continue;
-                }
-                out.push((n, to_end));
-                open.push((n, to_end + nl.length()));
-            }
-        }
-        out
-    }
-
     /// The drivers of the timetable buses near the camera: made when a bus comes within
     /// `DRIVER_NEAR`, posed every sync, let go when it is twice that far or gone.
     fn sync_drivers(&mut self, world: &World, renderer: &Renderer, scene: &mut Scene) {
@@ -8259,6 +8273,9 @@ impl Traffic {
         let mut added = self.net.lanes.len()..self.net.lanes.len();
         if n > 0 {
             added = self.net.extend(new, 1.5);
+            for l in &mut self.net.lanes[added.clone()] {
+                weigh_lane_density(l, &self.uvg_defaults, &self.uvg_share);
+            }
             self.street_weight += self.net.lanes[added.clone()]
                 .iter()
                 .filter_map(street_lane_weight)
@@ -8331,6 +8348,91 @@ fn ask_light(
             }
         }
     }
+}
+
+/// The lights a bus (the player's, another player's) at `pos` facing `heading`, with its
+/// `blinker` set, asks for: those of the lanes it will drive onto, each within its
+/// `[approachdist]`.
+fn lights_asked_by(
+    net: &::simulation::traffic::Network,
+    lights: &[TrafficLightController],
+    pos: DVec3,
+    heading: f64,
+    blinker: u8,
+) -> Vec<(usize, usize)> {
+    let Some((lane, s, _)) = net.lane_along(pos, heading, LaneKind::Street, 4.0, 45.0) else {
+        // (off the lanes - a depot yard - a gate's lane just ahead is asked all the same;
+        // on a lane this asked for the bus lane's signal beside it, #394)
+        return net
+            .lanes_starting_near(pos, 35.0)
+            .into_iter()
+            .filter_map(|l| {
+                let lane = &net.lanes[l];
+                lane.traffic_light
+                    .filter(|_| gate_lane_ahead(lane, pos, heading))
+            })
+            .collect();
+    };
+    street_lanes_ahead(net, lane, s, 160.0, blinker)
+        .into_iter()
+        .filter_map(|(l, d)| {
+            net.lanes[l]
+                .traffic_light
+                .filter(|&(ci, li)| lights.get(ci).is_some_and(|c| d <= c.approach_dist(li)))
+        })
+        .collect()
+}
+
+/// The street lanes a vehicle `s` metres along `lane` will drive onto within `reach`
+/// metres, with the distance to their starts (0 for its own). At a fork it takes the
+/// branch the `blinker` points to (1 left, 2 right; the next fork only), else the
+/// straightest, judged over the branches' first 15 m: a branch it may not take is not
+/// asked for, nor is a turn of more than 60° (#394).
+fn street_lanes_ahead(
+    net: &::simulation::traffic::Network,
+    lane: usize,
+    s: f32,
+    reach: f32,
+    mut blinker: u8,
+) -> Vec<(usize, f32)> {
+    let turn = |to: f32, from: f32| ((to - from) as f64 + 540.0).rem_euclid(360.0) - 180.0;
+    let mut out = vec![(lane, 0.0f32)];
+    let (mut l, mut to_end) = (lane, net.lanes[lane].length() - s);
+    while to_end <= reach && out.len() <= 64 {
+        let end_heading = net.lanes[l].headings.last().copied().unwrap_or(0.0);
+        // (each branch by how it turns over its first 15 m, to the right positive)
+        let mut branches: Vec<(usize, f64)> = net.lanes[l]
+            .next
+            .iter()
+            .filter_map(|&n| {
+                let nl = &net.lanes[n];
+                let start = nl.headings.first().copied().unwrap_or(end_heading);
+                let open = nl.kind == LaneKind::Street
+                    && turn(start, end_heading).abs() <= 60.0
+                    && !out.iter().any(|o| o.0 == n);
+                open.then(|| (n, turn(nl.at(nl.length().min(15.0)).1, end_heading)))
+            })
+            .collect();
+        branches.sort_by(|a, b| a.1.total_cmp(&b.1));
+        let chosen = match blinker {
+            _ if branches.len() < 2 => branches.first(),
+            1 => branches.first(),
+            2 => branches.last(),
+            _ => branches
+                .iter()
+                .min_by(|a, b| a.1.abs().total_cmp(&b.1.abs())),
+        };
+        let Some(&(n, _)) = chosen else {
+            break;
+        };
+        if branches.len() > 1 {
+            blinker = 0;
+        }
+        out.push((n, to_end));
+        l = n;
+        to_end += net.lanes[n].length();
+    }
+    out
 }
 
 /// Whether a street lane (a depot gate's) starts just ahead of a bus; never a rail lane.
@@ -8685,6 +8787,71 @@ fn unsched_share(factor: f32) -> f32 {
     }
 }
 
+/// Coupled parts by file and by the winding votes the vehicle they hang on passes on.
+type TrailerTypes = HashMap<(std::path::PathBuf, Option<(usize, usize)>), Option<Arc<VehicleType>>>;
+
+/// The part at `path` coupled to `lead`, loaded once per file and the votes `lead` passes
+/// on to it (`VehicleType::winding_votes_for`): one rear section behind two fronts that
+/// decide differently is two types (#117).
+fn coupled_type(
+    cache: &mut TrailerTypes,
+    root: &Path,
+    path: &Path,
+    lead: &VehicleType,
+) -> Option<Arc<VehicleType>> {
+    cache
+        .entry((path.to_path_buf(), lead.winding_votes_for(path)))
+        .or_insert_with(|| match VehicleType::load_ai(root, path) {
+            Ok(mut t) => {
+                t.follow_winding_of(lead);
+                Some(Arc::new(t))
+            }
+            Err(e) => {
+                log::warn!("trailer {}: {e}", path.display());
+                None
+            }
+        })
+        .clone()
+}
+
+#[cfg(test)]
+mod coupled_type_tests {
+    use super::{TrailerTypes, coupled_type};
+    use ::simulation::VehicleType;
+    use std::sync::Arc;
+
+    #[test]
+    fn a_rear_section_behind_differently_wound_fronts_is_loaded_for_each() {
+        let dir = std::env::temp_dir().join(format!("omsi-coupled-type-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("part.bus"), "[model]\nmodel.cfg\n").unwrap();
+        std::fs::write(dir.join("model.cfg"), "").unwrap();
+        let mut keep = VehicleType::load_ai(&dir, &dir.join("part.bus")).unwrap();
+        keep.winding_votes = (2, 0);
+        let mut turn = VehicleType::load_ai(&dir, &dir.join("part.bus")).unwrap();
+        turn.winding_votes = (0, 2);
+        // the same votes from another folder (another pack) pass nothing on
+        let other = dir.join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(other.join("part.bus"), "[model]\nmodel.cfg\n").unwrap();
+        std::fs::write(other.join("model.cfg"), "").unwrap();
+        let mut foreign = VehicleType::load_ai(&other, &other.join("part.bus")).unwrap();
+        foreign.winding_votes = (2, 0);
+        let rear = dir.join("part.bus");
+        let mut cache = TrailerTypes::new();
+        let behind_keep = coupled_type(&mut cache, &dir, &rear, &keep).unwrap();
+        let behind_turn = coupled_type(&mut cache, &dir, &rear, &turn).unwrap();
+        let again = coupled_type(&mut cache, &dir, &rear, &keep).unwrap();
+        let behind_foreign = coupled_type(&mut cache, &dir, &rear, &foreign).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(behind_keep.keep_winding);
+        assert!(!behind_turn.keep_winding);
+        assert!(Arc::ptr_eq(&behind_keep, &again));
+        assert!(!behind_foreign.keep_winding);
+        assert!(!Arc::ptr_eq(&behind_keep, &behind_foreign));
+    }
+}
+
 #[cfg(test)]
 mod consist_rear_tests {
     use super::consist_rear;
@@ -8939,8 +9106,8 @@ mod bodies_moved_tests {
 
 #[cfg(test)]
 mod gate_lane_tests {
-    use super::gate_lane_ahead;
-    use ::simulation::traffic::{LaneBuilder, LaneKind};
+    use super::{gate_lane_ahead, lights_asked_by, street_lanes_ahead};
+    use ::simulation::traffic::{LaneBuilder, LaneKind, Network, TrafficLightController};
     use glam::DVec3;
 
     /// A bus asks for the street lane starting ahead of it, not for a rail lane there.
@@ -8950,6 +9117,79 @@ mod gate_lane_tests {
             |kind| LaneBuilder::arc(DVec3::new(3.0, 10.0, 0.0), 0.0, 20.0, 0.0, 0.0, kind, 3.0);
         assert!(gate_lane_ahead(&lane(LaneKind::Street), DVec3::ZERO, 0.0));
         assert!(!gate_lane_ahead(&lane(LaneKind::Rail), DVec3::ZERO, 0.0));
+    }
+
+    /// A road forking at y = 20 into a straight lane and a branch bending off to the right
+    /// into a bus lane, both with a light of `[approachdist]` 40 (1 on the branch, 3 on the
+    /// bus lane), as at Menzinger Höhe (#394), and a gate (2) off the road. The branch
+    /// leaves the fork as straight as the straight lane does, and comes first.
+    fn split() -> (Network, Vec<TrafficLightController>) {
+        let street = |a: [f64; 2], heading: f64, length: f64, radius: f64| {
+            let start = DVec3::new(a[0], a[1], 0.0);
+            LaneBuilder::arc(start, heading, length, radius, 0.0, LaneKind::Street, 3.0)
+        };
+        let mut branch = street([0.0, 20.0], 0.0, 30.0, 150.0);
+        branch.traffic_light = Some((0, 1));
+        let (end, end_heading) = branch.at(branch.length());
+        let mut bus = street([end.x, end.y], end_heading as f64, 40.0, 0.0);
+        bus.traffic_light = Some((0, 3));
+        let mut gate = street([100.0, 10.0], 0.0, 20.0, 0.0);
+        gate.traffic_light = Some((0, 2));
+        let mut net = Network {
+            lanes: vec![
+                street([0.0, 0.0], 0.0, 20.0, 0.0),
+                branch,
+                street([0.0, 20.0], 0.0, 70.0, 0.0),
+                bus,
+                gate,
+            ],
+            ..Default::default()
+        };
+        net.link(1.5);
+        let mut ctl = TrafficLightController::new(vec![vec![(0, 10.0)]; 4], 0.0);
+        ctl.approach = vec![None, Some(40.0), None, Some(40.0)];
+        (net, vec![ctl])
+    }
+
+    /// A bus staying in the straight lane asks for neither bus lane light: not beside it,
+    /// not from before the fork (#394).
+    #[test]
+    fn a_bus_in_the_straight_lane_asks_for_no_bus_lane_light() {
+        let (net, lights) = split();
+        for y in [15.0, 35.0, 45.0] {
+            let asked = lights_asked_by(&net, &lights, DVec3::new(0.0, y, 0.0), 0.0, 0);
+            assert!(asked.is_empty(), "asked from y = {y}: {asked:?}");
+        }
+        let ahead: Vec<usize> = street_lanes_ahead(&net, 0, 15.0, 160.0, 0)
+            .into_iter()
+            .map(|a| a.0)
+            .collect();
+        assert_eq!(ahead, vec![0, 2]);
+    }
+
+    /// The blinker picks the branch at the fork: right into the bus lane, left (the way
+    /// on that turns least to the right) straight on.
+    #[test]
+    fn the_blinker_picks_the_branch() {
+        let (net, lights) = split();
+        let at = DVec3::new(0.0, 15.0, 0.0);
+        assert_eq!(
+            lights_asked_by(&net, &lights, at, 0.0, 2),
+            vec![(0, 1), (0, 3)]
+        );
+        assert!(lights_asked_by(&net, &lights, at, 0.0, 1).is_empty());
+    }
+
+    /// A bus that has turned into the bus lane asks for its lights, and one off the lanes
+    /// still asks for the gate in front of it.
+    #[test]
+    fn a_bus_in_the_bus_lane_or_off_the_lanes_asks() {
+        let (net, lights) = split();
+        let (on_branch, h) = net.lanes[1].at(18.0);
+        let asked = lights_asked_by(&net, &lights, on_branch, h as f64, 0);
+        assert_eq!(asked, vec![(0, 1), (0, 3)]);
+        let in_yard = lights_asked_by(&net, &lights, DVec3::new(100.0, 0.0, 0.0), 0.0, 0);
+        assert_eq!(in_yard, vec![(0, 2)]);
     }
 }
 
@@ -9074,6 +9314,42 @@ mod rail_trail_tests {
         }
         let span = trail.back().unwrap().0 - trail.front().unwrap().0;
         assert!((span - 600.0).abs() <= 1.0, "{span}");
+    }
+}
+
+#[cfg(test)]
+mod buried_tests {
+    use super::buried;
+    use glam::DVec3;
+
+    /// Flat ground at 0 with the ground cut away from x = `hole` on (a tunnel portal).
+    fn ground(hole: f64) -> impl Fn(f64, f64) -> Option<f64> {
+        move |x, _| (x < hole).then_some(0.0)
+    }
+
+    const VIEWER: DVec3 = DVec3::new(0.0, -50.0, 1.7);
+    const DEEP: DVec3 = DVec3::new(0.0, 0.0, -10.0);
+
+    #[test]
+    fn a_vehicle_deep_under_the_ground_is_out_of_sight() {
+        assert!(buried(ground(f64::MAX), VIEWER, DEEP, 8.0));
+    }
+
+    /// Everything else keeps the usual rules (#101 review): near the player it may not
+    /// appear, behind a building or not.
+    #[test]
+    fn a_vehicle_not_wholly_under_the_ground_is_not() {
+        let flat = ground(f64::MAX);
+        // on the street, behind a building or not
+        assert!(!buried(&flat, VIEWER, DVec3::ZERO, 8.0));
+        // in a shallow underpass: its roof shows
+        assert!(!buried(&flat, VIEWER, DVec3::new(0.0, 0.0, -4.0), 8.0));
+        // in a tunnel whose portal is within its length
+        assert!(!buried(ground(5.0), VIEWER, DEEP, 8.0));
+        // seen from a tunnel
+        assert!(!buried(&flat, DVec3::new(0.0, -50.0, -10.0), DEEP, 8.0));
+        // where no terrain is loaded
+        assert!(!buried(|_, _| None, VIEWER, DEEP, 8.0));
     }
 }
 
@@ -9214,5 +9490,70 @@ mod departure_tests {
             };
             assert!(!d.remove(|| true), "rail {rail}");
         }
+    }
+}
+
+#[cfg(test)]
+mod lane_density_tests {
+    use super::{LaneKind, weigh_lane_density};
+    use ::simulation::traffic::LaneBuilder;
+    use glam::DVec3;
+
+    fn weighed(
+        density: f32,
+        group_density: Vec<(u16, f32)>,
+        defaults: &[i32],
+        share: &[f32],
+    ) -> f32 {
+        let mut l = LaneBuilder::polyline(
+            vec![DVec3::ZERO, DVec3::new(0.0, 50.0, 0.0)],
+            LaneKind::Street,
+            3.0,
+        );
+        l.density = density;
+        l.group_density = group_density;
+        weigh_lane_density(&mut l, defaults, share);
+        l.density
+    }
+
+    /// BRT Berlin's Kurfürstendamm bus lanes (#411) make next to no traffic, but stay open.
+    #[test]
+    fn a_rare_group_brings_its_rarity_to_the_lane() {
+        let defaults = [1, 0, 1, 1, 0, 0, 1];
+        let share = [1.0, 0.05, 0.1, 0.0001, 1.0, 1.0, 0.05];
+        let d = weighed(3.0, vec![(0, 0.0), (3, 3.0)], &defaults, &share);
+        assert!(d > 0.0 && d < 0.001, "{d}");
+        // as busy as the first group: unchanged; busier: not raised
+        assert_eq!(
+            weighed(2.0, vec![(0, 0.0), (4, 2.0)], &defaults, &share),
+            2.0
+        );
+        assert_eq!(
+            weighed(1.0, vec![(0, 0.0), (1, 1.0)], &[1, 0], &[1.0, 4.2]),
+            1.0
+        );
+        assert_eq!(
+            weighed(1.0, vec![(0, 1.0), (3, 1.0)], &defaults, &share),
+            1.0
+        );
+        // no rule for the first group: its medium density
+        assert_eq!(weighed(3.0, vec![(3, 3.0)], &defaults, &share), 1.0);
+        // closed and rule-less lanes, and maps without groups, unchanged
+        assert_eq!(weighed(0.0, vec![(0, 0.0)], &defaults, &share), 0.0);
+        assert_eq!(weighed(0.5, Vec::new(), &defaults, &share), 0.5);
+        assert_eq!(weighed(3.0, vec![(0, 0.0), (3, 3.0)], &[], &[]), 3.0);
+    }
+
+    /// A busy group inheriting a rare group's rule keeps the lane busy, unless it is not
+    /// loaded.
+    #[test]
+    fn an_inherited_density_counts_with_its_own_group() {
+        let rules = vec![(0, 0.0), (1, 3.0)];
+        assert_eq!(
+            weighed(3.0, rules.clone(), &[1, 0, 2], &[1.0, 0.001, 1.0]),
+            3.0
+        );
+        let d = weighed(3.0, rules, &[1, 0, 2], &[1.0, 0.001, 0.0]);
+        assert!((d - 0.003).abs() < 1e-6, "{d}");
     }
 }

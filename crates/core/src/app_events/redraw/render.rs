@@ -588,6 +588,7 @@ impl App {
             let (w, h) = (s.config.width, s.config.height);
             self.touch_prepare(w, h);
         }
+        let mut summarize = false;
         if let (Some(s), Some(r), Some(scene), Some(cam), Some(win)) = (
             self.surface.as_ref(),
             self.renderer.as_mut(),
@@ -1038,12 +1039,20 @@ impl App {
             }
             self.frames += 1;
             let profiling = ::legacy_config::env::var_os("OMSI_PROFILE").is_some();
-            // (from 15 s, or half of an automated run: its loading is not the steady frame)
-            let mark_at = self.args.exit_after.map_or(15.0, |l| (l * 0.5).max(15.0));
-            if profiling
-                && self.cpu_mark.is_none()
-                && self.started.elapsed().as_secs_f32() > mark_at
-            {
+            // (half of an automated run, or 15 s after the bus is there: not the menu or loading)
+            let mark_due = match self.args.exit_after {
+                Some(l) => self.started.elapsed().as_secs_f32() > (l * 0.5).max(15.0),
+                None => {
+                    self.player.is_some()
+                        && self
+                            .play_since
+                            .get_or_insert_with(Instant::now)
+                            .elapsed()
+                            .as_secs_f32()
+                            > 15.0
+                }
+            };
+            if profiling && self.cpu_mark.is_none() && self.profile_mark.is_none() && mark_due {
                 self.cpu_mark =
                     process_cpu_seconds().map(|c| (c, Instant::now(), self.total_frames));
                 self.thread_cpu_mark = thread_cpu_seconds();
@@ -1052,6 +1061,7 @@ impl App {
                     stages: self.profile.clone(),
                     render: r.stats.borrow().clone(),
                     counts: r.counts.borrow().clone(),
+                    gpu: r.gpu_pass_times(),
                 });
             }
             if let (Some(limit), false) = (self.args.exit_after, self.exiting) {
@@ -1089,105 +1099,7 @@ impl App {
                         );
                         st.stats.log_ground();
                     }
-                    if ::legacy_config::env::var_os("OMSI_PROFILE").is_some() {
-                        // (over the frames after the mark when there is one: the loading
-                        // frames' work would be spread over the steady ones)
-                        type Totals = std::collections::BTreeMap<&'static str, f64>;
-                        let empty = Totals::new();
-                        let (n, stages0, render0, counts0) = match &self.profile_mark {
-                            Some(m) => {
-                                log::info!(
-                                    "profile: stages over the {} frames since the mark",
-                                    self.total_frames.saturating_sub(m.frames)
-                                );
-                                (
-                                    self.total_frames.saturating_sub(m.frames).max(1) as f64,
-                                    &m.stages,
-                                    &m.render,
-                                    &m.counts,
-                                )
-                            }
-                            None => (self.total_frames.max(1) as f64, &empty, &empty, &empty),
-                        };
-                        let since = |k: &&'static str, v: f64, at: &Totals| {
-                            v - at.get(k).copied().unwrap_or(0.0)
-                        };
-                        for (k, v) in &self.profile {
-                            log::info!(
-                                "profile {k:10}: {:.2} ms/frame",
-                                since(k, *v, stages0) / n * 1000.0
-                            );
-                        }
-                        if let Some(h) = self.humans.as_ref() {
-                            log::info!("profile people: {} ({})", h.people.len(), h.summary());
-                        }
-                        for (k, v) in r.stats.borrow().iter() {
-                            log::info!(
-                                "profile render.{k:10}: {:.2} ms/frame",
-                                since(k, *v, render0) / n * 1000.0
-                            );
-                        }
-                        for (k, v) in r.counts.borrow().iter() {
-                            log::info!(
-                                "profile count {k}: {:.0} a frame",
-                                since(k, *v, counts0) / n
-                            );
-                        }
-                        for (pass, ms, frames) in r.gpu_pass_times() {
-                            log::info!(
-                                "profile gpu pass {pass:12}: {ms:.2} ms ({frames} frames measured)"
-                            );
-                        }
-                        if let (Some((c0, t0, f0)), Some(c1)) =
-                            (self.cpu_mark, process_cpu_seconds())
-                        {
-                            let frames = self.total_frames.saturating_sub(f0).max(1) as f64;
-                            log::info!(
-                                "profile: since the mark {:.1} ms wall and {:.1} ms CPU (all threads) per frame, {:.1} cores busy",
-                                t0.elapsed().as_secs_f64() / frames * 1000.0,
-                                (c1 - c0) / frames * 1000.0,
-                                (c1 - c0) / t0.elapsed().as_secs_f64().max(1e-3)
-                            );
-                            let mut busy: Vec<(String, f64)> = thread_cpu_seconds()
-                                .into_iter()
-                                .map(|(id, name, secs)| {
-                                    let before = self
-                                        .thread_cpu_mark
-                                        .iter()
-                                        .find(|m| m.0 == id)
-                                        .map_or(0.0, |m| m.2);
-                                    let name = if name.is_empty() {
-                                        format!("#{id}")
-                                    } else {
-                                        name
-                                    };
-                                    (name, secs - before)
-                                })
-                                .filter(|(_, secs)| *secs / frames > 0.05e-3)
-                                .collect();
-                            busy.sort_by(|a, b| b.1.total_cmp(&a.1));
-                            for (name, secs) in busy.iter().take(16) {
-                                log::info!(
-                                    "profile thread {name}: {:.2} ms CPU per frame",
-                                    secs / frames * 1000.0
-                                );
-                            }
-                            if busy.len() > 16 {
-                                log::info!(
-                                    "profile thread ({} more): {:.2} ms CPU per frame",
-                                    busy.len() - 16,
-                                    busy[16..].iter().map(|b| b.1).sum::<f64>() / frames * 1000.0
-                                );
-                            }
-                        }
-                        let (sw, sh) = r.scene_size(s.config.width, s.config.height);
-                        log::info!(
-                            "profile: window {}x{}, scene drawn at {sw}x{sh}, {}x MSAA",
-                            s.config.width,
-                            s.config.height,
-                            r.options.msaa
-                        );
-                    }
+                    summarize = true;
                     finish = true;
                     platform::exit(event_loop);
                 }
@@ -1207,6 +1119,9 @@ impl App {
             }
             win.request_redraw();
         }
+        if summarize {
+            self.log_profile_summary(false);
+        }
         if reconfigure {
             if let (Some(s), Some(r), Some(win)) = (
                 self.surface.as_mut(),
@@ -1225,6 +1140,116 @@ impl App {
 
 /// The newest `$msg` the player has not yet seen. The serial is independent of the retained
 /// message list so a script can deliberately repeat the same text and still have it shown.
+impl App {
+    /// OMSI_PROFILE: the stage averages since the mark, once: at the end of an automated run,
+    /// or when the game closes or goes back to the main menu (`marked`: only when the mark was
+    /// taken, after the loading).
+    pub(crate) fn log_profile_summary(&mut self, marked: bool) {
+        if ::legacy_config::env::var_os("OMSI_PROFILE").is_none()
+            || (marked && self.profile_mark.is_none())
+        {
+            return;
+        }
+        let profile_mark = self.profile_mark.take();
+        let cpu_mark = self.cpu_mark.take();
+        let (Some(r), Some(s)) = (self.renderer.as_ref(), self.surface.as_ref()) else {
+            return;
+        };
+        // (over the frames after the mark when there is one: the loading
+        // frames' work would be spread over the steady ones)
+        type Totals = std::collections::BTreeMap<&'static str, f64>;
+        let empty = Totals::new();
+        let (n, stages0, render0, counts0) = match &profile_mark {
+            Some(m) => {
+                log::info!(
+                    "profile: stages over the {} frames since the mark",
+                    self.total_frames.saturating_sub(m.frames)
+                );
+                (
+                    self.total_frames.saturating_sub(m.frames).max(1) as f64,
+                    &m.stages,
+                    &m.render,
+                    &m.counts,
+                )
+            }
+            None => (self.total_frames.max(1) as f64, &empty, &empty, &empty),
+        };
+        let since = |k: &&'static str, v: f64, at: &Totals| v - at.get(k).copied().unwrap_or(0.0);
+        for (k, v) in &self.profile {
+            log::info!(
+                "profile {k:10}: {:.2} ms/frame",
+                since(k, *v, stages0) / n * 1000.0
+            );
+        }
+        if let Some(h) = self.humans.as_ref() {
+            log::info!("profile people: {} ({})", h.people.len(), h.summary());
+        }
+        for (k, v) in r.stats.borrow().iter() {
+            log::info!(
+                "profile render.{k:10}: {:.2} ms/frame",
+                since(k, *v, render0) / n * 1000.0
+            );
+        }
+        for (k, v) in r.counts.borrow().iter() {
+            log::info!(
+                "profile count {k}: {:.0} a frame",
+                since(k, *v, counts0) / n
+            );
+        }
+        let gpu0 = profile_mark.as_ref().map_or(&[][..], |m| &m.gpu[..]);
+        for (pass, ms, frames) in gpu_since(&r.gpu_pass_times(), gpu0) {
+            log::info!("profile gpu pass {pass:12}: {ms:.2} ms ({frames} frames measured)");
+        }
+        if let (Some((c0, t0, f0)), Some(c1)) = (cpu_mark, process_cpu_seconds()) {
+            let frames = self.total_frames.saturating_sub(f0).max(1) as f64;
+            log::info!(
+                "profile: since the mark {:.1} ms wall and {:.1} ms CPU (all threads) per frame, {:.1} cores busy",
+                t0.elapsed().as_secs_f64() / frames * 1000.0,
+                (c1 - c0) / frames * 1000.0,
+                (c1 - c0) / t0.elapsed().as_secs_f64().max(1e-3)
+            );
+            let mut busy: Vec<(String, f64)> = thread_cpu_seconds()
+                .into_iter()
+                .map(|(id, name, secs)| {
+                    let before = self
+                        .thread_cpu_mark
+                        .iter()
+                        .find(|m| m.0 == id)
+                        .map_or(0.0, |m| m.2);
+                    let name = if name.is_empty() {
+                        format!("#{id}")
+                    } else {
+                        name
+                    };
+                    (name, secs - before)
+                })
+                .filter(|(_, secs)| *secs / frames > 0.05e-3)
+                .collect();
+            busy.sort_by(|a, b| b.1.total_cmp(&a.1));
+            for (name, secs) in busy.iter().take(16) {
+                log::info!(
+                    "profile thread {name}: {:.2} ms CPU per frame",
+                    secs / frames * 1000.0
+                );
+            }
+            if busy.len() > 16 {
+                log::info!(
+                    "profile thread ({} more): {:.2} ms CPU per frame",
+                    busy.len() - 16,
+                    busy[16..].iter().map(|b| b.1).sum::<f64>() / frames * 1000.0
+                );
+            }
+        }
+        let (sw, sh) = r.scene_size(s.config.width, s.config.height);
+        log::info!(
+            "profile: window {}x{}, scene drawn at {sw}x{sh}, {}x MSAA",
+            s.config.width,
+            s.config.height,
+            r.options.msaa
+        );
+    }
+}
+
 fn next_script_message(
     host: &::simulation::VehicleHost,
     seen: &mut u64,
@@ -1251,5 +1276,40 @@ mod tests {
 
         ::legacy_script::Host::message(&mut host, "Destination set");
         assert_eq!(next_script_message(&host, &mut seen).as_deref(), Some("Destination set"));
+    }
+}
+
+/// The GPU passes' averages over the frames measured since `mark` (the timers add up from
+/// the start of the game: an earlier session and the loading stay out).
+fn gpu_since(now: &[(String, f64, u32)], mark: &[(String, f64, u32)]) -> Vec<(String, f64, u32)> {
+    now.iter()
+        .filter_map(|(pass, ms, frames)| {
+            let (ms0, frames0) = mark
+                .iter()
+                .find(|m| m.0 == *pass)
+                .map_or((0.0, 0), |m| (m.1, m.2));
+            let n = frames.checked_sub(frames0).filter(|n| *n > 0)?;
+            let total = ms * *frames as f64 - ms0 * frames0 as f64;
+            Some((pass.clone(), total / n as f64, n))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod gpu_since_tests {
+    use super::gpu_since;
+
+    #[test]
+    fn a_gpu_pass_is_averaged_over_the_frames_since_the_mark() {
+        let mark = vec![("main".to_string(), 10.0, 100)];
+        let now = vec![
+            ("main".to_string(), 6.0, 300),
+            ("ssao".to_string(), 0.5, 50),
+        ];
+        let got = gpu_since(&now, &mark);
+        // (300 frames at 6 ms, of which the 100 before the mark at 10 ms: 200 at 4 ms)
+        assert_eq!(got[0], ("main".to_string(), 4.0, 200));
+        assert_eq!(got[1], ("ssao".to_string(), 0.5, 50));
+        assert!(gpu_since(&mark, &mark).is_empty());
     }
 }

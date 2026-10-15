@@ -63,12 +63,28 @@ pub(super) fn stand_in_area(ot: &ObjectType, xf: &Mat4, pos: DVec3, tile: (i32, 
         "{} on tile {tile:?} stands in for far tiles: drawn only from the tiles around it",
         ot.sco.path.display()
     );
-    Some([
+    Some(omsi_loaded_area(tile))
+}
+
+/// The ground of the tiles OMSI loads with `tile`: (min x, min y, max x, max y).
+fn omsi_loaded_area(tile: (i32, i32)) -> [f64; 4] {
+    let ts = tile_size();
+    [
         (tile.0 - OMSI_TILE_DIST) as f64 * ts,
         (tile.1 - OMSI_TILE_DIST) as f64 * ts,
         (tile.0 + OMSI_TILE_DIST + 1) as f64 * ts,
         (tile.1 + OMSI_TILE_DIST + 1) as f64 * ts,
-    ])
+    ]
+}
+
+/// Like [`stand_in_area`], for a mesh whose bounding sphere lies wholly outside the tiles OMSI
+/// loads with `tile`: a backdrop modelled far from its object (London's Walworth Road copy of
+/// Elephant & Castle stood across London Road, #418).
+pub(super) fn beyond_loaded_area(centre: DVec3, radius: f64, tile: (i32, i32)) -> Option<[f64; 4]> {
+    let area = omsi_loaded_area(tile);
+    let dx = (area[0] - centre.x).max(centre.x - area[2]).max(0.0);
+    let dy = (area[1] - centre.y).max(centre.y - area[3]).max(0.0);
+    (dx.hypot(dy) > radius).then_some(area)
 }
 
 /// World bounds (min x, min y, max x, max y) of a mesh placed with `xf` at `origin`.
@@ -82,6 +98,11 @@ pub(super) fn mesh_bounds(m: &MeshData, xf: &Mat4, origin: DVec3) -> [f64; 4] {
         b[3] = b[3].max(w.y);
     }
     b
+}
+
+fn on_own_tile(pos: DVec3, origin: DVec3) -> bool {
+    let (x, y) = (pos.x - origin.x, pos.y - origin.y);
+    (0.0..=tile_size()).contains(&x) && (0.0..=tile_size()).contains(&y)
 }
 
 impl World {
@@ -198,6 +219,10 @@ impl World {
                 }
             }
             if let Some((tex, min_h, max_h, min_r, max_r)) = &ot.sco.tree {
+                // OMSI does not draw a tree record past its tile's edge (#421)
+                if o.map_object && !on_own_tile(pos, st.origin) {
+                    continue;
+                }
                 // Trees are billboards: the map stores texture, height and the ratio of the
                 // width to the height chosen by the editor; a row of trees along a spline
                 // takes the middle of the type's ranges. OMSI scales its tree by (height x

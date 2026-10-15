@@ -18,6 +18,8 @@ pub(crate) struct ProfileMark {
     pub(crate) stages: std::collections::BTreeMap<&'static str, f64>,
     pub(crate) render: std::collections::BTreeMap<&'static str, f64>,
     pub(crate) counts: std::collections::BTreeMap<&'static str, f64>,
+    /// The GPU passes' averages (ms) and frame counts so far.
+    pub(crate) gpu: Vec<(String, f64, u32)>,
 }
 
 pub(crate) struct Boot {
@@ -155,6 +157,8 @@ pub(crate) struct App {
     pub(crate) menu_edit: Option<String>,
     pub(crate) menu_edit_icao: bool,
     pub(crate) menu_edit_date: bool,
+    /// Destination list order (#447).
+    pub(crate) dest_sort: game_lists::DestSort,
     pub(crate) swap_pending: bool,
     pub(crate) menu_drag: Option<usize>,
     pub(crate) menu_kbd: bool,
@@ -256,6 +260,8 @@ pub(crate) struct App {
     /// The stage, renderer stage and count totals when `cpu_mark` was taken: the summary
     /// averages over the steady frames after it, not over the loading.
     pub(crate) profile_mark: Option<ProfileMark>,
+    /// When the player's bus first stood in the world (OMSI_PROFILE's mark without --exit-after).
+    pub(crate) play_since: Option<Instant>,
     pub(crate) plugins: Option<legacy_plugin::Plugins>,
     pub(crate) touch: touch::Touch,
 }

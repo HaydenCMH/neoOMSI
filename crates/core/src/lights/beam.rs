@@ -231,6 +231,13 @@ impl Profile {
         }
     }
 
+    pub(super) fn companions(self, entry: usize) -> &'static [usize] {
+        match (self, entry) {
+            (Self::LedHalo, 1 | 2 | 3 | 7 | 8 | 9) => &[4, 10],
+            _ => &[],
+        }
+    }
+
     pub(super) fn visual_only(self, entry: usize) -> bool {
         self == Self::Enviro400Mmc && entry == 3
     }
@@ -357,10 +364,16 @@ pub(super) fn headlamps(
     };
     let main_lit = lit.is_some_and(|i| i < spots.len() && kinds[i] == BeamKind::Main);
     let visual_only = matches!((profile, lit), (Some(p), Some(i)) if p.visual_only(i));
+    let companion = profile.zip(lit).and_then(|(p, i)| {
+        p.companions(i).iter().copied().find(|&c| {
+            c < spots.len() && p.lamp_variables(c).iter().any(|n| v.var(n).unwrap_or(0.0) > 0.01)
+        })
+    });
 
     let owner = super::owner_key(v);
     for (i, vals) in spots.iter().enumerate() {
-        let on = !visual_only && (lit == Some(i) || (main_lit && partner == Some(i)));
+        let on = !visual_only
+            && (lit == Some(i) || (main_lit && partner == Some(i)) || companion == Some(i));
         let level = faders.level(
             owner,
             i as u32,
@@ -626,6 +639,14 @@ mod tests {
         assert_eq!(p.role(2), LampRole::Cornering);
         assert_eq!(p.side(3), Some(-1.0));
         assert_eq!(p.partner(6), Some(10));
+
+        assert_eq!(p.companions(1), [4, 10]);
+        assert_eq!(p.companions(2), [4, 10]);
+        assert_eq!(p.companions(3), [4, 10]);
+        assert_eq!(p.companions(9), [4, 10]);
+        assert!(p.companions(4).is_empty());
+        assert!(p.companions(5).is_empty());
+        assert!(Profile::Renown.companions(1).is_empty());
     }
 
     #[test]
