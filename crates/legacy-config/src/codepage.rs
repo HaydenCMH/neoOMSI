@@ -189,15 +189,22 @@ fn detect_on(bytes: &[u8], system: Option<CodePage>) -> CodePage {
     // Czech and Slovak stop names, e.g. "Třebenická", "Štětí".
     // Italian accents usually occur at the end of a word, while
     // Danish and Norwegian text may contain æ and å.
-    let czech = bytes
-        .iter()
-        .enumerate()
-        .filter(|(i, b)| {
-            let (before, after) = (letter(i.checked_sub(1)), letter(Some(i + 1)));
-            (czech_lower(**b) && before && after) || (czech_upper(**b) && after)
-        })
-        .count();
-    if czech >= 2 && czech > bytes.iter().filter(|b| nordic(**b)).count() {
+    let (mut czech, mut ambiguous_upper) = (0usize, 0usize);
+    for (i, &b) in bytes.iter().enumerate() {
+        let (before, after) = (letter(i.checked_sub(1)), letter(Some(i + 1)));
+        
+        if (czech_lower(b) && before && after) || (czech_upper(b) && after) {
+            czech += 1;
+        } else if b == 0xD8 && after {
+            ambiguous_upper += 1;
+        }
+    }
+
+    let nordic_count = bytes.iter().filter(|b| nordic(**b)).count();
+
+    if (czech >= 2 || (czech >= 1 && ambiguous_upper >= 1))
+        && czech + ambiguous_upper > nordic_count
+    {
         return CodePage::Windows1250;
     }
 
