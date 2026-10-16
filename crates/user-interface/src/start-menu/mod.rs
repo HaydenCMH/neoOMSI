@@ -380,7 +380,7 @@ impl Ui {
             StartPage::Options => {
                 self.text.rounded(r, scene, [0.0, 0.0, m.w, m.h], 0.0, [10, 12, 16, 255]);
                 self.draw_pause(r, scene, f, PauseState { page: Some(OPTIONS_PAGE), sel: 0 });
-                self.hand |= at(&self.start.tabs) || at(&[self.start.quit, self.start.profile_btn]);
+                self.hand |= at(&self.start.tabs) || at(&[self.start.quit, self.start.update_btn, self.start.profile_btn]);
             }
             StartPage::Profile => {
                 self.draw_start_profile(r, scene, f, m, v);

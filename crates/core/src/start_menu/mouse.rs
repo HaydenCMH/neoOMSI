@@ -109,6 +109,10 @@ impl App {
                 crate::platform::exit(event_loop);
                 return;
             }
+            if self.ui.as_ref().is_some_and(|u| hit(&[u.start.update_btn], cursor).is_some()) {
+                self.start_update_click();
+                return;
+            }
             let tab = self.ui.as_ref().and_then(|u| hit(&u.start.tabs, cursor));
             if let Some(k) = tab {
                 self.start_set_page([StartPage::Start, StartPage::Multiplayer, StartPage::Options][k]);

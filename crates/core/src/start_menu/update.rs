@@ -13,7 +13,8 @@ fn update_view(u: &updater::Updater) -> ui::StartUpdate {
             (3, "Installing...".to_string(), 1.0)
         }
         Status::Failed(m) if !u.dismissed && !m.starts_with("Could not check") => {
-            (4, "Update failed - retry".to_string(), 0.0)
+            let short: String = m.chars().take(70).collect();
+            (4, format!("{short}{} - retry", if m.chars().count() > 70 { "..." } else { "" }), 0.0)
         }
         _ => (0, String::new(), 0.0),
     };
