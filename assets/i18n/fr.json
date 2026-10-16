@@ -515,6 +515,10 @@
           "desc": "Affiche la ligne et sa destination",
           "name": "Ligne et destination"
         },
+        "tour": {
+          "desc": "Affiche le numéro du service effectué",
+          "name": "Service"
+        },
         "next": {
           "desc": "Affiche le nom du prochain arrêt",
           "name": "Prochain arrêt"

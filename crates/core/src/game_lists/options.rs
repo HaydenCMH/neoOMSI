@@ -584,6 +584,7 @@ pub(crate) fn toggle_now(app: Option<&App>, id: &str) -> Option<bool> {
         "info_fuel" => ::config::get_bool("ui", "info_fuel").unwrap_or(true),
         "info_pax" => ::config::get_bool("ui", "info_pax").unwrap_or(true),
         "info_line" => ::config::get_bool("ui", "info_line").unwrap_or(true),
+        "info_tour" => ::config::get_bool("ui", "info_tour").unwrap_or(true),
         "info_next" => ::config::get_bool("ui", "info_next").unwrap_or(true),
         "info_delay" => ::config::get_bool("ui", "info_delay").unwrap_or(true),
         "auto_ibis" => ::config::get_bool("gameplay", "auto_ibis").unwrap_or(false),
@@ -889,7 +890,7 @@ fn toggle_set_inner(mut app: Option<&mut App>, id: &str, on: bool) -> Option<(&'
             let _ = ::config::save();
             None
         }
-        id @ ("info_time" | "info_speed" | "info_temp" | "info_fuel" | "info_pax" | "info_line" | "info_next" | "info_delay") => {
+        id @ ("info_time" | "info_speed" | "info_temp" | "info_fuel" | "info_pax" | "info_line" | "info_tour" | "info_next" | "info_delay") => {
             ::config::set_setting("ui", id, on);
             let _ = ::config::save();
             None

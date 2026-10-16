@@ -525,6 +525,10 @@
           "desc": "Zeigt die Linie und das Fahrtziel",
           "name": "Linie und Ziel"
         },
+        "tour": {
+          "desc": "Zeigt die Nummer der gefahrenen Tour",
+          "name": "Tour"
+        },
         "next": {
           "desc": "Zeigt den Namen der nächsten Haltestelle",
           "name": "Nächste Haltestelle"

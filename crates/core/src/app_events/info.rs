@@ -144,6 +144,12 @@ pub(super) fn info_line(
                     };
                     parts.push(format!("{line} › {}", trip.terminus.trim()));
                 }
+                if on("info_tour") && !d.tour.trim().is_empty() {
+                    parts.push(::i18n::translate(
+                        "pause.list.tour",
+                        &[("number", &d.tour.trim())],
+                    ));
+                }
                 if on("info_next") {
                     if let Some(s) = trip.stops.get(d.next_stop) {
                         parts.push(format!(

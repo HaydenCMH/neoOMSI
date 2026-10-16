@@ -912,6 +912,11 @@ pub const OPTION_GROUPS: &[OptGroup] = &[
                     "pause.options.info.line.desc",
                 ),
                 sw(
+                    "info_tour",
+                    "pause.options.info.tour.name",
+                    "pause.options.info.tour.desc",
+                ),
+                sw(
                     "info_next",
                     "pause.options.info.next.name",
                     "pause.options.info.next.desc",

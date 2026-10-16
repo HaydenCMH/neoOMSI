@@ -525,6 +525,10 @@
           "desc": "Shows the line and its destination",
           "name": "Line and destination"
         },
+        "tour": {
+          "desc": "Shows the number of the tour being driven",
+          "name": "Tour"
+        },
         "next": {
           "desc": "Shows the name of the next stop",
           "name": "Next stop"

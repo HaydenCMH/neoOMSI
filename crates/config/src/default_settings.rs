@@ -75,6 +75,7 @@ pub const DEFAULTS: &[(&str, &str, Def)] = &[
     ("ui", "info_fuel", Def::Bool(true)),
     ("ui", "info_pax", Def::Bool(true)),
     ("ui", "info_line", Def::Bool(true)),
+    ("ui", "info_tour", Def::Bool(true)),
     ("ui", "info_next", Def::Bool(true)),
     ("ui", "info_delay", Def::Bool(true)),
     ("ui", "chat", Def::Bool(true)),

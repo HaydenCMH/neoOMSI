@@ -523,6 +523,10 @@
           "desc": "Zobrazí linku a její cíl",
           "name": "Linka a cíl"
         },
+        "tour": {
+          "desc": "Zobrazí číslo projížděné trasy",
+          "name": "Trasa"
+        },
         "next": {
           "desc": "Zobrazí název příští zastávky",
           "name": "Příští zastávka"
