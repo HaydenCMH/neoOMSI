@@ -423,6 +423,7 @@ impl World {
                     extra.display = text_is_display(d.lightmap.is_some(), d.night.is_some());
                     // (the bus's own screen: no glow halo, no FXAA over its letters)
                     extra.screen = true;
+                    extra.text = true;
                     // ([matl_alpha] 1 stays alpha tested: blended, GPM's INEO minutes were a box)
                     let alpha = if d.alpha == AlphaMode::Test {
                         AlphaMode::Test
@@ -439,7 +440,7 @@ impl World {
                         d.night,
                         d.lightmap,
                         None,
-                        [0.0; 3],
+                        d.emissive,
                         extra,
                     );
                     *x = gpu.material(renderer, scene, m);

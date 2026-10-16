@@ -374,6 +374,7 @@ impl Look {
             let mut extra = l.extra;
             extra.display = text_is_display(l.lightmap.is_some(), l.night.is_some());
             extra.screen = true;
+            extra.text = true;
             return Look {
                 diffuse: Some(t),
                 alpha: if l.alpha == AlphaMode::Test {
@@ -382,7 +383,7 @@ impl Look {
                     AlphaMode::Blend
                 },
                 color: [1.0; 4],
-                emissive: [0.0; 3],
+                emissive: l.emissive,
                 unlit: false,
                 transmap: None,
                 envmap: None,

@@ -165,6 +165,7 @@ pub(super) fn material_extra(
         water: false,
         display: false,
         screen: false,
+        text: false,
         led: false,
         html: false,
         no_map_lights: false,

@@ -166,6 +166,7 @@ pub struct MaterialExtra {
     /// and FXAA leave it alone (see `MASK_FORMAT`): FXAA took half the contrast out of
     /// their letters and they read as blurred.
     pub screen: bool,
+    pub text: bool,
     /// An LED matrix - a display whose lit dots are the `\S:n` script texture's
     /// (`[matl_transmap]`), the Krueger and K++ destination panels: the dots are the
     /// panel's own light, so the enhanced picture lets them burn in HDR and blooms them
@@ -799,7 +800,7 @@ impl Renderer {
                     .unwrap_or([0.0; 4])
                     .map(|c| (c.clamp(0.0, 1.0) * 255.0).round());
                 [
-                    if extra.screen { 1.0 } else { 0.0 },
+                    if extra.text { 2.0 } else if extra.screen { 1.0 } else { 0.0 },
                     if extra.border.is_some() {
                         1.0
                     } else if address == TexAddressing::MirrorOnce {
