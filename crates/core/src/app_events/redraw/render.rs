@@ -517,6 +517,14 @@ impl App {
             }
             None => lights::lighting_from(&daylight, 50000.0),
         };
+        {
+            let h = (self.clock.date_code() as u32).wrapping_mul(2654435761);
+            let h2 = h.rotate_left(13).wrapping_mul(2246822519);
+            lighting.puddle_seed = [
+                ((h >> 8) & 0xffff) as f32 / 65535.0 * 997.0,
+                ((h2 >> 8) & 0xffff) as f32 / 65535.0 * 997.0,
+            ];
+        }
         lighting.wetness = ::legacy_config::env::var("OMSI_WETNESS")
             .ok()
             .and_then(|v| v.parse().ok())

@@ -2498,6 +2498,7 @@ impl Renderer {
                 cube_recapture: false,
                 cloud_sig: [0.0; 12],
                 cloud_age: 0,
+                cloud_offset: [0.0; 2],
             }
         };
         let overlay_pipeline_1x = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {

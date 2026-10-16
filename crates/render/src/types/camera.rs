@@ -105,6 +105,7 @@ pub struct Lighting {
     pub led_mips: f32,
     pub glass_wind: Vec3,
     pub animation_time: Option<f32>,
+    pub puddle_seed: [f32; 2],
 }
 
 impl Lighting {
@@ -162,6 +163,7 @@ impl Default for Lighting {
             led_mips: 1.3,
             glass_wind: Vec3::ZERO,
             animation_time: None,
+            puddle_seed: [0.0; 2],
         }
     }
 }

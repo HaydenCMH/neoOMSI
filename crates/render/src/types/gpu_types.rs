@@ -127,6 +127,7 @@ pub(crate) struct Probe {
     pub(crate) cube_recapture: bool,
     pub(crate) cloud_sig: [f32; 12],
     pub(crate) cloud_age: u32,
+    pub(crate) cloud_offset: [f32; 2],
 }
 
 pub(crate) const SKY_CUBE_SIZE: u32 = 1024;

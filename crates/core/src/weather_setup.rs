@@ -750,8 +750,7 @@ fn cloud_seed() -> [f32; 2] {
             .map(|d| d.subsec_nanos() ^ (d.as_secs() as u32))
             .unwrap_or(1)
     });
-    let day = CLOUD_DAY.load(std::sync::atomic::Ordering::Relaxed);
-    let mut h = session ^ day.wrapping_mul(0x9e37_79b9);
+    let mut h = session;
     h ^= h >> 16;
     h = h.wrapping_mul(0x85eb_ca6b);
     h ^= h >> 13;

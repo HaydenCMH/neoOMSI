@@ -614,7 +614,12 @@ impl Renderer {
             ],
             spot_vp,
             spot_info,
-            tune: [lighting.nightmap_gain, lighting.lightmap_gain, 0.0, 0.0],
+            tune: [
+                lighting.nightmap_gain,
+                lighting.lightmap_gain,
+                lighting.puddle_seed[0],
+                lighting.puddle_seed[1],
+            ],
             trailers: trailer_fog_boxes(lighting.inside, &lighting.puddle_parts, ro),
         };
         self.write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&cu));

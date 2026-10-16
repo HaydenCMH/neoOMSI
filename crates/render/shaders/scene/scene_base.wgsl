@@ -28,7 +28,7 @@ struct Camera {
     trailers: array<vec4<f32>, 9>, // the player vehicle's trailer boxes, laid out as inside_a..c
 };
 
-const PUDDLE_SPREAD: f32 = 0.45;
+const PUDDLE_SPREAD: f32 = 0.55;
 
 // 1 when the point lies inside the player's vehicle (its [boundingbox], shrunk a little so
 // that the outer skin, the glass and the roof stay outside): weather stays out of the cab.
@@ -2027,18 +2027,18 @@ fn shade_vanilla(in: FsIn, puddle_weight: ptr<function, f32>, capture: bool) -> 
         let facing = clamp(-dot(vdir, n), 0.0, 1.0);
         let fresnel = pow(1.0 - facing, 4.0);
         let puddle_wet = wet * (1.0 - clamp(camera.ambient.w, 0.0, 1.0));
-        let pattern_xy = world_pattern_xy(in.world);
+        let pattern_xy = world_pattern_xy(in.world) + camera.tune.zw;
         let pn = vnoise_f(pattern_xy, 0.22, vec2<f32>(17.3, -9.1)) * 0.65
             + vnoise_f(pattern_xy, 0.9, vec2<f32>(-4.0, 8.0)) * 0.35;
-        let puddle_t = 1.0 - puddle_wet * PUDDLE_SPREAD;
+        let puddle_t = 1.0 - pow(puddle_wet, 0.6) * PUDDLE_SPREAD;
         let puddle = smoothstep(puddle_t - 0.06, puddle_t + 0.06, pn)
             * smoothstep(0.75, 0.95, n.z);
         let water = 0.02 + 0.98 * pow(1.0 - facing, 5.0);
-        let weight = clamp(mix(fresnel * puddle_wet * 0.85, water * puddle_wet, puddle), 0.0, 0.9);
+        let weight = clamp(mix(fresnel * puddle_wet * 0.03, water * puddle_wet, puddle), 0.0, 0.9);
         let lamp_part = albedo * material.color.rgb * lamp_light;
         lit = lit * mix(1.0, 0.55, wet) + lamp_part * (0.45 * wet);
         let sheen = camera.sky_color.rgb * 0.5 + camera.sun_color.rgb * camera.sun_dir.w * 0.35 + lamp_light * (0.6 + 0.8 * fresnel);
-        lit = mix(lit, sheen, clamp(fresnel * wet * 0.85, 0.0, 0.8));
+        lit = mix(lit, sheen, clamp(fresnel * wet * 0.05, 0.0, 0.05));
         *puddle_weight = weight * puddle;
     }
     // snow: the ground, the roads and every upward-facing surface whiten under it

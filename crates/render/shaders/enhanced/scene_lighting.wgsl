@@ -588,11 +588,11 @@ fn shade_enhanced(in: FsIn, puddle_weight: ptr<function, vec2<f32>>, capture: bo
     var puddle = 0.0;
     if (wet_road > 0.0) {
         albedo = albedo * mix(1.0, 0.5, wet_road);
-        rough = mix(rough, 0.12, wet_road);
-        f0 = mix(f0, vec3<f32>(0.02), wet_road);
-        let pattern_xy = world_pattern_xy(in.world);
+        rough = mix(rough, max(rough, 0.7), wet_road);
+        f0 = mix(f0, vec3<f32>(0.03), wet_road);
+        let pattern_xy = world_pattern_xy(in.world) + camera.tune.zw;
         let pn = vnoise_f(pattern_xy, 0.22, vec2<f32>(17.3, -9.1)) * 0.65 + vnoise_f(pattern_xy, 0.9, vec2<f32>(-4.0, 8.0)) * 0.35;
-        let puddle_t = 1.0 - wet_road * PUDDLE_SPREAD;
+        let puddle_t = 1.0 - pow(wet_road, 0.6) * PUDDLE_SPREAD;
         puddle = smoothstep(puddle_t - 0.06, puddle_t + 0.06, pn) * smoothstep(0.75, 0.95, n.z);
         if (puddle > 0.001) {
             let raining = enh.weather.z * (1.0 - enh.weather.y);
@@ -604,7 +604,7 @@ fn shade_enhanced(in: FsIn, puddle_weight: ptr<function, vec2<f32>>, capture: bo
                     camera.inside_c.xy, camera.inside_b.yz, fwd, camera.post.y);
             }
             albedo = albedo * (1.0 - 0.68 * puddle) / mix(1.0, detail_factor, puddle * 0.8);
-            rough = clamp(mix(rough, 0.03, puddle) - ripple.z * 0.12, 0.02, 1.0);
+            rough = clamp(mix(rough, 0.06, puddle) - ripple.z * 0.12, 0.02, 1.0);
             f0 = mix(f0, vec3<f32>(enh.debug.y), puddle);
             n = normalize(mix(n, geo_n, puddle) + vec3<f32>(ripple.xy + wake * puddle, 0.0));
         }
@@ -701,7 +701,7 @@ fn shade_enhanced(in: FsIn, puddle_weight: ptr<function, vec2<f32>>, capture: bo
     let spec_occ = clamp(pow(nv + ao, exp2(-16.0 * rough - 1.0)) - 1.0 + ao, 0.0, 1.0);
     let pbr_reflects = material.pbr.z > 0.5 || material.pbr.w > 0.5;
     let reflects = reflective_env || pbr_reflects || is_water || wet_road > 0.0;
-    var reflection = select(vec3<f32>(0.0), env * env_brdf(f0, rough, nv) * spec_occ * select(1.0, wet_road, !(reflective_env || glass || pbr_reflects || is_water)), reflects);
+    var reflection = select(vec3<f32>(0.0), env * env_brdf(f0, rough, nv) * spec_occ * select(1.0, wet_road * (0.02 + 0.98 * puddle * puddle), !(reflective_env || glass || pbr_reflects || is_water)), reflects);
     if (!reflects) {
         ambient = e_amb * sf.albedo / PI;
     }
@@ -740,8 +740,8 @@ fn shade_enhanced(in: FsIn, puddle_weight: ptr<function, vec2<f32>>, capture: bo
         let lm_gate = select(1.0, clamp(in.params2.x, 0.0, 1.0), material.params2.x > 0.5);
         emit = emit + tex.rgb * enh.led.x * alpha * lm_gate * max(enh.exposure.z * 2.0, 0.8);
     } else if (material.emissive.w < -0.5) {
-        emit = emit + tex.rgb * 0.2 * enh.led.w * max(enh.exposure.z * 2.0, 0.8);
-    } else if (material.flags.x > 0.5 && material.emissive.w > -0.5 && material.emissive.w < 0.5) {
+        emit = emit + tex.rgb * 0.8 * max(enh.exposure.z * 2.0, 0.8);
+    } else if (material.flags.x > 0.5 && material.flags.x < 1.5 && material.emissive.w > -0.5 && material.emissive.w < 0.5) {
         emit = emit + tex.rgb * 0.2 * max(enh.led.w - 1.0, 0.0) * max(enh.exposure.z * 2.0, 0.8);
     }
     rgb = rgb + emit;
